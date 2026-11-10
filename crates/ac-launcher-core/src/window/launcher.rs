@@ -42,11 +42,11 @@ use crate::orchestration::{
     MINIMUM_RELAUNCH_DELAY_SECONDS, MonotonicClock, OrchestratorError, RelaunchAttempt,
 };
 use crate::plugins::{
-    ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo, InstalledPluginSource,
-    PermissionDeclaration, PluginInstallResult, PluginManifest, PluginReleaseCandidates,
-    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolution,
-    PluginReleaseResolveResult, PluginReleaseResolver, PluginRepositoryResolution, describe,
-    github, is_built_for_csharp, is_well_formed_id,
+    CLIENT_NEEDED_REFUSAL, ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo,
+    InstalledPluginSource, PermissionDeclaration, PluginInstallResult, PluginManifest,
+    PluginReleaseCandidates, PluginReleaseChannel, PluginReleaseFetchResult,
+    PluginReleaseResolution, PluginReleaseResolveResult, PluginReleaseResolver,
+    PluginRepositoryResolution, describe, github, is_built_for_csharp, is_well_formed_id,
 };
 use crate::profiles::{
     LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherConsoleSettings,
@@ -418,6 +418,10 @@ pub struct LauncherWindow {
     /// What they listed when a change started the check now running: seen
     /// once that check has read the plugin list.
     plugin_feeds_pending: Option<BTreeMap<String, Vec<String>>>,
+    /// The installed client changed since the installed plugins were last
+    /// checked: which updates it can run (its versions and plugin API) may
+    /// have changed too, so they are checked again once no plugin work runs.
+    plugin_check_after_client_change: bool,
 }
 
 impl std::fmt::Debug for LauncherWindow {
@@ -703,6 +707,7 @@ impl LauncherWindow {
             plugin_watch_backoff: false,
             plugin_feeds_seen: None,
             plugin_feeds_pending: None,
+            plugin_check_after_client_change: false,
         }
     }
 
@@ -853,6 +858,10 @@ impl LauncherWindow {
             self.follow_closing();
             return;
         }
+        if self.plugin_check_after_client_change && !self.plugins.is_busy {
+            self.plugin_check_after_client_change = false;
+            self.check_installed_plugin_updates();
+        }
         if !self.relaunch_attempt_running {
             self.run_automatic_relaunch();
         }
@@ -975,6 +984,7 @@ impl LauncherWindow {
                         self.operation_status = "Versioned client activation changed.".into();
                         self.last_error = None;
                         self.refresh_from_core();
+                        self.plugin_check_after_client_change = true;
                     }
                     Err(error) if error == crate::updates::UpdateError::Cancelled.to_string() => {
                         self.update_prompt.status = "Update cancelled.".into();
@@ -3837,6 +3847,14 @@ impl LauncherWindow {
             self.plugins.error = row.channel_unavailable_text().map(str::to_owned);
             return;
         };
+        // The install would be refused: say so now, before the review.
+        if (self.client_version)()
+            .and_then(|client| client.version)
+            .is_none()
+        {
+            self.plugins.error = Some(CLIENT_NEEDED_REFUSAL.to_owned());
+            return;
+        }
         let request = InstallDialogRequest {
             repo: row.entry.repo.clone(),
             plugin_id: row.entry.id.clone(),
@@ -4717,10 +4735,7 @@ fn channel_option(
     client: Option<&ClientVersionResolution>,
 ) -> Option<DiscoverChannelOption> {
     let resolution = result.resolution()?;
-    let compatibility = describe(
-        &resolution.manifest,
-        client.and_then(|client| client.version.as_ref()),
-    );
+    let compatibility = describe(&resolution.manifest, client);
     Some(DiscoverChannelOption {
         tag: resolution.tag.clone(),
         version: resolution.manifest.version.clone(),

@@ -63,6 +63,9 @@ mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 # Contents/MacOS holds only code: codesign refuses a bundle with a plain file there.
 install -m 0755 "$bin/openac-launcher" "$bin/openac" "$bundle/Contents/MacOS/"
 cp LICENSE NOTICE.md "$bundle/Contents/Resources/"
+# The plugin API versions the bundled client loads, as it prints them: the launcher judges
+# plugins by this file (a data file, so in Resources, beside the bundle's other data).
+"$bin/openac" plugin-api > "$bundle/Contents/Resources/plugin-api.json"
 
 # The same license files as the other release zips: every crate compiled in, the bundled
 # Noto Sans font, and the launcher's fonts (their texts ship in the font crate).

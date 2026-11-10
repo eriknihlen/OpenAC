@@ -236,7 +236,7 @@ fn add_install_rules(manifest: &PluginManifest, checks: &mut Vec<CheckItem>) {
     match manifest.validate_for_install() {
         Ok(()) => checks.push(CheckItem::pass(
             "manifest satisfies install rules",
-            "id, version, minHostVersion, apiVersion and permissions are all valid.",
+            "id, version, minHostVersion and permissionsVersion are all valid.",
         )),
         Err(error) => checks.push(CheckItem::fail(
             "manifest satisfies install rules",

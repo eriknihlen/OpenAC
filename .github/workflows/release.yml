@@ -10,7 +10,10 @@ name: Release
 # (the `fingerprint` job says what counts), and the release publishes it as
 # openac-launcher-fingerprint.json beside the manifest. A launcher whose
 # fingerprint matches the release's does not update itself; it only
-# installs the new client. The release version alone changes nothing.
+# installs the new client. The release version alone changes nothing, and
+# neither does a new plugin API version: which plugin API versions run is the
+# client's (`ac-plugin-abi`, which the launcher does not link), and the
+# launcher reads it from the installed client's plugin-api.json.
 #
 # The feed's names are this client's own: eriknihlen/OpenAC also holds the
 # C# client's releases, whose launchers read `manifest.json` and
@@ -22,6 +25,10 @@ name: Release
 #   openac-<rid>.zip    both programs, for players to download and unzip
 #   client-<rid>.zip    `openac` at the root (the launcher's client payload)
 #   launcher-<rid>.zip  `openac-launcher` at the root (its self-update payload)
+# The two zips holding `openac` also hold plugin-api.json beside it (in
+# OpenAC.app, under Contents/Resources): the plugin API versions that client
+# loads, as `openac plugin-api` prints them, so the file is the built
+# program's own answer. The launcher judges every plugin by it.
 # On macOS (osx-arm64 for Apple silicon, osx-x64 for Intel) the players'
 # download is OpenAC-<version>-<rid>.zip, the ad-hoc signed OpenAC.app built by
 # scripts/bundle-macos.sh, and launcher-<rid>.zip is the same file: the
@@ -237,6 +244,20 @@ jobs:
           # The launcher carries the release's fingerprint.
           grep -a -q -F "$OPENAC_LAUNCHER_FINGERPRINT" "$bin/openac-launcher${{ matrix.exe }}"
 
+      # What the launcher reads to know which plugins this client runs.
+      - name: Write the client's plugin-api.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release"
+          mkdir -p staging/client-only
+          "$bin/openac${{ matrix.exe }}" plugin-api > staging/client-only/plugin-api.json
+          cat staging/client-only/plugin-api.json
+          jq -e '.schemaVersion == 1
+            and (.minimum | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))
+            and (.current | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))' \
+            staging/client-only/plugin-api.json > /dev/null
+
       - name: Install cargo-about
         shell: bash
         env:
@@ -287,6 +308,9 @@ jobs:
             $dir = "staging/$name"
             Copy-Item -Recurse staging/common $dir
             foreach ($exe in $packages[$name]) { Copy-Item "$bin/$exe" $dir }
+            if ($packages[$name] -contains 'openac.exe') {
+              Copy-Item staging/client-only/plugin-api.json $dir
+            }
             $zip = (Join-Path (Get-Location) "dist/$name.zip")
             [System.IO.Compression.ZipFile]::CreateFromDirectory(
               (Resolve-Path $dir).Path, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
@@ -306,6 +330,9 @@ jobs:
             cp -r staging/common "staging/$name"
             for exe in "$@"; do
               install -m 0755 "$bin/$exe" "staging/$name/$exe"
+              if [ "$exe" = openac ]; then
+                install -m 0644 staging/client-only/plugin-api.json "staging/$name/plugin-api.json"
+              fi
             done
             # Info-ZIP keeps the Unix modes, so the executables extract with
             # their execute bit, as the launcher's extractor requires.
@@ -386,6 +413,7 @@ jobs:
           mkdir -p "$staging"
           resources="$bundle/Contents/Resources"
           cp "$resources/LICENSE" "$resources/NOTICE.md" "$resources/THIRD-PARTY-LICENSES.html" "$staging/"
+          cp "$resources/plugin-api.json" "$staging/"
           cp -R "$resources/licenses" "$staging/"
           install -m 0755 "$bundle/Contents/MacOS/openac" "$staging/openac"
           codesign --verify --strict "$staging/openac"
@@ -417,6 +445,10 @@ jobs:
           test -s "$check/client/THIRD-PARTY-LICENSES.html"
           codesign --verify --strict "$check/client/openac"
           "$check/client/openac" --help > /dev/null
+          # The plugin API file is the packaged program's own answer, in the
+          # client payload and in the bundle.
+          "$check/client/openac" plugin-api | cmp - "$check/client/plugin-api.json"
+          "$app/Contents/MacOS/openac" plugin-api | cmp - "$app/Contents/Resources/plugin-api.json"
 
       - uses: actions/upload-artifact@v4
         with:

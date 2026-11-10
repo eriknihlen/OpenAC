@@ -11,7 +11,7 @@ it only what its `plugin.json` declares. The same plugin runs in a session
 with a game window and in one without.
 
 The SDK (`crates/openac-plugin`) and the calling convention under it
-(`crates/ac-plugin-abi`, with its version rules in `crates/ac-plugin-version`)
+(`crates/ac-plugin-abi`, with its version type in `crates/ac-plugin-version`)
 are MIT-licensed, so a plugin may use any license.
 
 Plugins written for the retired C# client are .NET assemblies and do not
@@ -585,7 +585,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.11"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.11"`), which must match the version the SDK writes into the module. The launcher installs a plugin only when the installed client loads this version (each client release says which versions it loads; see [Plugin API versions](rust-client.md#plugin-api-versions)), and refuses an install while no client is installed. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |
@@ -648,7 +648,9 @@ through storage.
 `plugincheck` tells you whether the launcher would install your plugin, using
 the launcher's own code: the same manifest parser, install rules, zip safety
 checks, content policy and icon rules. It also loads the module (never runs
-it) and checks it as a session would: the API version it was built for, the
+it) and checks it as a session would: the API version it was built for
+(against the client it was built with, so build `plugincheck` from the
+release your players run), the
 record layouts it was compiled against (a plugin built against a different
 SDK layout must be rebuilt), and that every client function it imports is
 allowed by its declared permissions. It lists permissions declared but never

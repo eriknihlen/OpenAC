@@ -24,6 +24,7 @@ use crate::fsutil;
 use crate::ids;
 use crate::integrity;
 use crate::json::{self, ObjectBuilder, Out};
+use crate::plugins::{ApiRange, client_plugin_api};
 
 /// The first client release that uses the install's current folder layout
 /// (`ac_host_core::layout`): the lowest version of the release after 0.1.9, a
@@ -114,6 +115,10 @@ pub struct ClientVersionResolution {
     pub previous_version: Option<String>,
     /// Its record, when verified.
     pub record: Option<ClientVersionRecord>,
+    /// The plugin API versions it loads, when verified and known: its
+    /// `plugin-api.json`, else the table of clients released without one
+    /// (`plugins::client_plugin_api`).
+    pub plugin_api: Option<ApiRange>,
 }
 
 impl ClientVersionResolution {
@@ -130,6 +135,7 @@ impl ClientVersionResolution {
             directory: None,
             previous_version: None,
             record: None,
+            plugin_api: None,
         }
     }
 
@@ -141,6 +147,7 @@ impl ClientVersionResolution {
             directory: None,
             previous_version: None,
             record: None,
+            plugin_api: None,
         }
     }
 }
@@ -1047,6 +1054,7 @@ impl ClientVersionStore {
             directory: Some(directory.to_path_buf()),
             previous_version: None,
             record: Some(record),
+            plugin_api: client_plugin_api(Some(directory), Some(version)),
         })
     }
 

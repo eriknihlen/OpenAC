@@ -110,6 +110,21 @@ pub fn client_zip(rid: &str, marker: &str) -> Vec<u8> {
     )
 }
 
+/// A client payload that also carries `plugin-api.json` holding `text` at
+/// its root, as every release from the file's introduction on does.
+pub fn client_zip_with_plugin_api(rid: &str, marker: &str, text: &str) -> Vec<u8> {
+    let program = format!("openac{}", suffix(rid));
+    let content = format!("{marker}-gui");
+    create_zip(
+        &[
+            (&program, content.as_bytes(), Some(0x81ED)),
+            ("assets/readme.txt", marker.as_bytes(), Some(0x81A4)),
+            ("plugin-api.json", text.as_bytes(), Some(0x81A4)),
+        ],
+        Compression::Stored,
+    )
+}
+
 /// A launcher payload.
 pub fn launcher_zip(rid: &str, marker: &str) -> Vec<u8> {
     let program = format!("openac-launcher{}", suffix(rid));

@@ -23,6 +23,21 @@ mod png;
 const ID: &str = "acme.hello";
 const ENTRY: &str = "acme.hello.wasm";
 
+/// A verified client of this build, loading the plugin API versions it was
+/// built with: the launcher installs plugins only for an installed client.
+fn this_client() -> ac_launcher_core::updates::ClientVersionResolution {
+    use ac_launcher_core::updates::{ClientVersionResolution, ClientVersionState, LauncherVersion};
+    ClientVersionResolution {
+        state: ClientVersionState::Verified,
+        status: String::new(),
+        version: LauncherVersion::try_parse(env!("CARGO_PKG_VERSION")),
+        directory: None,
+        previous_version: None,
+        record: None,
+        plugin_api: Some(ac_plugin::abi::API_RANGE),
+    }
+}
+
 struct Root(PathBuf);
 
 impl Root {
@@ -890,7 +905,7 @@ fn a_packed_release_installs_through_the_launcher_installer() {
             repo,
             &packed.tag,
             None,
-            None,
+            Some(&this_client()),
             None,
             None,
             &CancelToken::none(),
@@ -956,7 +971,15 @@ fn a_release_packed_into_an_index_resolves_and_installs() {
     let records = Arc::new(Mutex::new(InstalledPluginRecordStore::for_paths(&paths)));
     let installer = PluginInstaller::new(&paths, transport, records);
     let result = installer
-        .install_or_update(repo, &tag, None, None, None, None, &CancelToken::none())
+        .install_or_update(
+            repo,
+            &tag,
+            None,
+            Some(&this_client()),
+            None,
+            None,
+            &CancelToken::none(),
+        )
         .unwrap();
     assert_eq!(result.id, ID);
 }

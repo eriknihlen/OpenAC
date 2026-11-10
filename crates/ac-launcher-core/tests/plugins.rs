@@ -17,17 +17,18 @@ use std::time::SystemTime;
 use ac_launcher_core::cancel::CancelToken;
 use ac_launcher_core::integrity::sha256_hex;
 use ac_launcher_core::plugins::{
-    ApiVersion, CLIENT_NOT_INSTALLED, HostVersion, IndexReleaseUpdate, InstallRules,
-    InstalledPluginInfo, InstalledPluginRecord, InstalledPluginRecordStore, InstalledPluginSource,
-    PERMISSION_VOCABULARY_REFUSAL, PERMISSIONS_CHANGED_REFUSAL, PLUGIN_INDEX_ASSET,
-    PLUGIN_INDEX_TAG, PendingPluginInstall, Permission, PermissionDeclaration, PluginCatalog,
-    PluginIndex, PluginInstallSource, PluginInstaller, PluginInventory, PluginManifest,
-    PluginReleaseCandidates, PluginReleaseChannel, PluginReleaseClient, PluginReleaseFetchResult,
-    PluginReleaseResolution, PluginReleaseResolveResult, PluginReleaseResolver, PluginSha256File,
-    SESSION_LEASE_REFUSAL, THIS_CLIENT, describe, direct_install_refusal,
-    evaluate_version_compatibility, find_block_reason, github, highest_prerelease, highest_stable,
-    is_built_for_csharp, plugin_release_tag, release_tag, validate_icon, validate_plugin_content,
-    version_only_reason, without_client_version,
+    ApiRange, ApiVersion, CLIENT_NEEDED_REFUSAL, CLIENT_NOT_INSTALLED, HostVersion,
+    IndexReleaseUpdate, InstallRules, InstalledPluginInfo, InstalledPluginRecord,
+    InstalledPluginRecordStore, InstalledPluginSource, PERMISSION_VOCABULARY_REFUSAL,
+    PERMISSIONS_CHANGED_REFUSAL, PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG, PendingPluginInstall,
+    Permission, PermissionDeclaration, PluginCatalog, PluginIndex, PluginInstallSource,
+    PluginInstaller, PluginInventory, PluginManifest, PluginReleaseCandidates,
+    PluginReleaseChannel, PluginReleaseClient, PluginReleaseFetchResult, PluginReleaseResolution,
+    PluginReleaseResolveResult, PluginReleaseResolver, PluginSha256File, SESSION_LEASE_REFUSAL,
+    THIS_CLIENT, describe, direct_install_refusal, evaluate_version_compatibility,
+    find_block_reason, github, highest_prerelease, highest_stable, is_built_for_csharp,
+    plugin_release_tag, release_tag, released_client_plugin_api, validate_icon,
+    validate_plugin_content, version_only_reason, without_client_version,
 };
 use ac_launcher_core::updates::{
     ClientVersionResolution, ClientVersionState, ExtractedFileRecord, LauncherVersion, UpdateError,
@@ -39,6 +40,36 @@ use common::{TempDir, png};
 
 fn version(text: &str) -> LauncherVersion {
     LauncherVersion::try_parse(text).unwrap()
+}
+
+/// A verified client at `text` with no folder, whose plugin API range is
+/// the one a released client of that version has.
+fn client_at(text: &str) -> ClientVersionResolution {
+    let version = version(text);
+    ClientVersionResolution {
+        state: ClientVersionState::Verified,
+        status: "ok".into(),
+        plugin_api: released_client_plugin_api(&version),
+        version: Some(version),
+        directory: None,
+        previous_version: None,
+        record: None,
+    }
+}
+
+/// A verified client at `text` loading plugin API `minimum` to `current`.
+fn client_with_api(
+    text: &str,
+    minimum: (u16, u16),
+    current: (u16, u16),
+) -> ClientVersionResolution {
+    ClientVersionResolution {
+        plugin_api: Some(ApiRange::new(
+            ApiVersion::new(minimum.0, minimum.1),
+            ApiVersion::new(current.0, current.1),
+        )),
+        ..client_at(text)
+    }
 }
 
 fn none() -> CancelToken {
@@ -154,14 +185,76 @@ fn validate_for_install_needs_no_hosts_list() {
         .unwrap();
 }
 
-// OpenAC LauncherPluginManifestTests.ValidateForInstallRejectsAnUnsupportedApiVersion.
+// OpenAC LauncherPluginManifestTests.ValidateForInstallRejectsAnUnsupportedApiVersion,
+// moved: which plugin API versions load is the installed client's to say, so the
+// manifest rules alone accept any well-formed `apiVersion` and the client
+// compatibility check judges it.
 #[test]
-fn validate_for_install_rejects_an_unsupported_api_version() {
-    let manifest = parse(&VALID_JSON.replace("\"apiVersion\": \"1.0\"", "\"apiVersion\": \"2.0\""));
+fn the_api_version_is_judged_by_the_installed_clients_range() {
+    let manifest = |api: &str| {
+        parse(&VALID_JSON.replace(
+            "\"apiVersion\": \"1.0\"",
+            &format!("\"apiVersion\": \"{api}\""),
+        ))
+    };
+    manifest("2.0").validate_for_install().unwrap();
+    let client = client_with_api("0.2.4", (1, 0), (1, 12));
+    assert_eq!(version_only_reason(&manifest("1.12"), Some(&client)), None);
+    assert_eq!(version_only_reason(&manifest("1.0"), Some(&client)), None);
     assert_eq!(
-        manifest.validate_for_install().unwrap_err().0,
-        "apiVersion 2.0 is not supported by this launcher (1.0 to 1.11)"
+        version_only_reason(&manifest("1.13"), Some(&client)).as_deref(),
+        Some("needs plugin API 1.13; the installed client 0.2.4 supports plugin API 1.0 to 1.12")
     );
+    let newer_minimum = client_with_api("0.3.0", (2, 0), (2, 1));
+    assert_eq!(
+        version_only_reason(&manifest("1.11"), Some(&newer_minimum)).as_deref(),
+        Some("needs plugin API 1.11; the installed client 0.3.0 supports plugin API 2.0 to 2.1")
+    );
+    let line = describe(&manifest("1.13"), Some(&client));
+    assert!(line.is_warning);
+    assert_eq!(
+        line.text,
+        "needs plugin API 1.13; the installed client 0.2.4 supports plugin API 1.0 to 1.12"
+    );
+}
+
+// A client released before `plugin-api.json` is judged by the frozen table of
+// released clients.
+#[test]
+fn an_old_client_without_the_file_is_judged_by_the_released_table() {
+    let manifest = |api: &str| {
+        parse(&VALID_JSON.replace(
+            "\"apiVersion\": \"1.0\"",
+            &format!("\"apiVersion\": \"{api}\""),
+        ))
+    };
+    let old = client_at("0.2.2");
+    assert_eq!(version_only_reason(&manifest("1.9"), Some(&old)), None);
+    assert_eq!(
+        version_only_reason(&manifest("1.11"), Some(&old)).as_deref(),
+        Some("needs plugin API 1.11; the installed client 0.2.2 supports plugin API 1.0 to 1.9")
+    );
+    assert_eq!(
+        version_only_reason(&manifest("1.11"), Some(&client_at("0.2.3"))),
+        None
+    );
+}
+
+// A client whose range nothing says (no file, not a released version) is never
+// a silent yes.
+#[test]
+fn a_client_with_an_unknown_range_is_a_reason() {
+    let manifest = parse(VALID_JSON);
+    let unknown = client_at("0.2.4-dev.1");
+    assert_eq!(unknown.plugin_api, None);
+    assert_eq!(
+        version_only_reason(&manifest, Some(&unknown)).as_deref(),
+        Some(
+            "needs plugin API 1.0; the installed client 0.2.4 does not say which plugin API \
+             versions it supports (update the client)"
+        )
+    );
+    assert!(describe(&manifest, Some(&unknown)).is_warning);
 }
 
 // OpenAC LauncherPluginManifestTests.RejectsMinHostVersionAboveMaxHostVersion.
@@ -337,7 +430,7 @@ fn compat_manifest(min: &str, max: Option<&str>, skip: &[&str]) -> PluginManifes
 // reasons went with `hosts`).
 #[test]
 fn compatibility_reasons() {
-    let client = version("0.1.7");
+    let client = client_at("0.1.7");
     assert_eq!(
         version_only_reason(&compat_manifest("0.1.0", None, &[]), Some(&client)),
         None
@@ -363,7 +456,7 @@ fn compatibility_reasons() {
     assert_eq!(
         version_only_reason(
             &compat_manifest("0.1.0", None, &["0.1.7"]),
-            Some(&version("0.1.7+3a71d75"))
+            Some(&client_at("0.1.7+3a71d75"))
         )
         .as_deref(),
         Some("is marked broken on OpenAC 0.1.7")
@@ -373,7 +466,7 @@ fn compatibility_reasons() {
 // OpenAC LauncherPluginCompatibilityTests (descriptions).
 #[test]
 fn compatibility_descriptions() {
-    let client = version("0.1.7");
+    let client = client_at("0.1.7");
     let compatible = describe(&compat_manifest("0.1.0", None, &[]), Some(&client));
     assert_eq!(compatible.text, "Compatible with OpenAC 0.1.7");
     assert!(!compatible.is_warning);
@@ -1238,12 +1331,8 @@ fn an_openac_csharp_plugin_folder_is_listed_as_refused_and_never_loaded() {
 
 fn verified_client(directory: &Path) -> ClientVersionResolution {
     ClientVersionResolution {
-        state: ClientVersionState::Verified,
-        status: "ok".into(),
-        version: Some(version("0.1.7")),
         directory: Some(directory.to_path_buf()),
-        previous_version: None,
-        record: None,
+        ..client_at("0.1.7")
     }
 }
 
@@ -1401,11 +1490,11 @@ fn inventory_find_and_version_rules() {
         Some("client not installed")
     );
     assert_eq!(
-        evaluate_version_compatibility(&manifest, Some(&version("0.0.9"))).as_deref(),
+        evaluate_version_compatibility(&manifest, Some(&client_at("0.0.9"))).as_deref(),
         Some("requires OpenAC 0.1.0 or newer (this is 0.0.9)")
     );
     assert_eq!(
-        evaluate_version_compatibility(&manifest, Some(&version("0.1.0"))),
+        evaluate_version_compatibility(&manifest, Some(&client_at("0.1.0"))),
         None
     );
 
@@ -2948,8 +3037,15 @@ impl InstallerFixture {
         repo: &str,
         release: &Release,
     ) -> Result<ac_launcher_core::plugins::PluginInstallResult, UpdateError> {
-        self.installer
-            .install_or_update(repo, &release.tag(), None, None, None, None, &none())
+        self.installer.install_or_update(
+            repo,
+            &release.tag(),
+            None,
+            Some(&client_at("0.1.7")),
+            None,
+            None,
+            &none(),
+        )
     }
 
     fn find(&self, id: &str) -> Option<InstalledPluginRecord> {
@@ -2977,6 +3073,150 @@ fn install_rejects_a_zip_entry_over_the_shared_contract_cap() {
     );
     fixture.register(HELLO_REPO, &release, None, None);
     assert!(fixture.install(HELLO_REPO, &release).is_err());
+}
+
+/// A release of `hello` built for plugin API `api`.
+fn release_for_api(fixture: &InstallerFixture, version: &str, api: &str) -> Release {
+    let manifest = installer_manifest(HELLO, version, None, None)
+        .replace(
+            "\"apiVersion\": \"1.0\"",
+            &format!("\"apiVersion\": \"{api}\""),
+        )
+        .into_bytes();
+    fixture.release_from(
+        version,
+        manifest.clone(),
+        vec![
+            ("plugin.json".to_owned(), manifest),
+            (format!("{HELLO}.wasm"), b"binary".to_vec()),
+        ],
+    )
+}
+
+fn install_for(
+    fixture: &InstallerFixture,
+    release: &Release,
+    client: Option<&ClientVersionResolution>,
+) -> Result<ac_launcher_core::plugins::PluginInstallResult, UpdateError> {
+    fixture.installer.install_or_update(
+        HELLO_REPO,
+        &release.tag(),
+        None,
+        client,
+        None,
+        None,
+        &none(),
+    )
+}
+
+// The plugin API a plugin needs is checked against the installed client's own
+// range, whatever this launcher was built with.
+#[test]
+fn an_install_follows_the_installed_clients_plugin_api_range() {
+    let fixture = InstallerFixture::new();
+    let release = release_for_api(&fixture, "0.1.0", "1.12");
+    fixture.register(HELLO_REPO, &release, None, None);
+    let error = install_for(
+        &fixture,
+        &release,
+        Some(&client_with_api("0.2.4", (1, 0), (1, 11))),
+    )
+    .unwrap_err()
+    .to_string();
+    assert_eq!(
+        error,
+        "'edwards.hello' needs plugin API 1.12; the installed client 0.2.4 supports plugin API \
+         1.0 to 1.11."
+    );
+    assert!(!fixture.plugin_dir().join(HELLO).exists());
+
+    // A client newer than this launcher's own API knowledge takes it.
+    let result = install_for(
+        &fixture,
+        &release,
+        Some(&client_with_api("0.2.5", (1, 0), (1, 12))),
+    )
+    .unwrap();
+    assert_eq!(result.id, HELLO);
+}
+
+// A client released before `plugin-api.json` is judged by the frozen table.
+#[test]
+fn an_install_for_an_old_client_follows_the_released_table() {
+    let fixture = InstallerFixture::new();
+    let release = release_for_api(&fixture, "0.1.0", "1.11");
+    fixture.register(HELLO_REPO, &release, None, None);
+    let error = install_for(&fixture, &release, Some(&client_at("0.2.2")))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        error,
+        "'edwards.hello' needs plugin API 1.11; the installed client 0.2.2 supports plugin API \
+         1.0 to 1.9."
+    );
+    install_for(&fixture, &release, Some(&client_at("0.2.3"))).unwrap();
+}
+
+// Without a client nothing says what would run: the install says so instead of
+// taking the plugin unchecked.
+#[test]
+fn an_install_without_a_client_is_refused_clearly() {
+    let fixture = InstallerFixture::new();
+    let release = fixture.release("0.1.0");
+    fixture.register(HELLO_REPO, &release, None, None);
+    for client in [
+        None,
+        Some(ClientVersionResolution {
+            state: ClientVersionState::Missing,
+            status: String::new(),
+            version: None,
+            directory: None,
+            previous_version: None,
+            record: None,
+            plugin_api: None,
+        }),
+    ] {
+        let error = install_for(&fixture, &release, client.as_ref())
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, CLIENT_NEEDED_REFUSAL);
+    }
+    assert!(!fixture.plugin_dir().join(HELLO).exists());
+    assert!(fixture.find(HELLO).is_none());
+
+    let zip = fixture.root.join("plugin.zip");
+    std::fs::write(&zip, release.zip_bytes.clone()).unwrap();
+    let preview = fixture.installer.inspect_local_zip(&zip, &none()).unwrap();
+    let error = fixture
+        .installer
+        .install_local_zip(
+            &zip,
+            &preview.sha256,
+            None,
+            None,
+            &preview.manifest.permissions,
+            &none(),
+        )
+        .unwrap_err()
+        .to_string();
+    assert_eq!(error, CLIENT_NEEDED_REFUSAL);
+    assert!(!fixture.plugin_dir().join(HELLO).exists());
+}
+
+// A client whose range nothing says is refused too, with the reason.
+#[test]
+fn an_install_for_a_client_with_an_unknown_range_is_refused() {
+    let fixture = InstallerFixture::new();
+    let release = fixture.release("0.1.0");
+    fixture.register(HELLO_REPO, &release, None, None);
+    let error = install_for(&fixture, &release, Some(&client_at("0.2.4")))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        error,
+        "'edwards.hello' needs plugin API 1.0; the installed client 0.2.4 does not say which \
+         plugin API versions it supports (update the client)."
+    );
 }
 
 #[test]
@@ -3214,7 +3454,7 @@ fn permission_refusals_during_install() {
             HELLO_REPO,
             &release.tag(),
             None,
-            None,
+            Some(&client_at("0.1.7")),
             Some(&displayed),
             None,
             &none(),
@@ -3240,7 +3480,7 @@ fn permission_refusals_during_install() {
             HELLO_REPO,
             &release.tag(),
             None,
-            None,
+            Some(&client_at("0.1.7")),
             Some(&displayed),
             None,
             &none(),
@@ -3456,7 +3696,7 @@ fn channels_follow_the_version_unless_chosen() {
             HELLO_REPO,
             &stable.tag(),
             None,
-            None,
+            Some(&client_at("0.1.7")),
             None,
             Some(PluginReleaseChannel::Beta),
             &none(),
@@ -4425,7 +4665,7 @@ fn install_local(
         zip,
         &preview.sha256,
         catalog,
-        None,
+        Some(&client_at("0.1.7")),
         &preview.manifest.permissions,
         &none(),
     )

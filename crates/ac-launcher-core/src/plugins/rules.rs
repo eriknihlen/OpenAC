@@ -3,7 +3,7 @@
 //! the icon.
 
 use super::manifest::{HostVersion, PluginManifest};
-use crate::updates::{ExtractedFileRecord, LauncherVersion, UpdateError, is_sha256};
+use crate::updates::{ClientVersionResolution, ExtractedFileRecord, UpdateError, is_sha256};
 use crate::url::{WebUrl, escape_data_string};
 
 // --- Compatibility ------------------------------------------------------------
@@ -23,15 +23,18 @@ pub struct CompatibilityDescription {
     pub is_warning: bool,
 }
 
-/// Why a plugin cannot run with the installed client (min, max, skip), or
-/// `None`. Every plugin runs in every session, windowed or not, so there is
-/// no per-launch host gate.
+/// Why a plugin cannot run with the installed client (min, max, skip, and
+/// the plugin API versions that client loads), or `None`. Every plugin runs
+/// in every session, windowed or not, so there is no per-launch host gate.
+/// The plugin API range is the client's own ([`ClientVersionResolution::plugin_api`]):
+/// a client whose range is unknown is a reason too, never a silent yes.
 pub fn version_only_reason(
     manifest: &PluginManifest,
-    client_version: Option<&LauncherVersion>,
+    client: Option<&ClientVersionResolution>,
 ) -> Option<String> {
-    let Some(installed) =
-        client_version.and_then(|version| HostVersion::from_informational(version.value()))
+    let Some(installed) = client
+        .and_then(|client| client.version.as_ref())
+        .and_then(|version| HostVersion::from_informational(version.value()))
     else {
         return Some(CLIENT_NOT_INSTALLED.to_owned());
     };
@@ -50,29 +53,40 @@ pub fn version_only_reason(
     if manifest.skip_host_versions.contains(&installed) {
         return Some(format!("is marked broken on OpenAC {installed}"));
     }
-    None
+    let wanted = manifest.api_version;
+    match client.and_then(|client| client.plugin_api) {
+        Some(range) if range.contains(wanted) => None,
+        Some(range) => Some(format!(
+            "needs plugin API {wanted}; the installed client {installed} supports plugin API \
+             {range}"
+        )),
+        None => Some(format!(
+            "needs plugin API {wanted}; the installed client {installed} does not say which \
+             plugin API versions it supports (update the client)"
+        )),
+    }
 }
 
 /// The Discover/Installed row's line: never blank; a version failure is a
 /// warning, a missing client is not.
 pub fn describe(
     manifest: &PluginManifest,
-    client_version: Option<&LauncherVersion>,
+    client: Option<&ClientVersionResolution>,
 ) -> CompatibilityDescription {
-    let Some(client) = client_version else {
+    let Some(version) = client.and_then(|client| client.version.as_ref()) else {
         return CompatibilityDescription {
             text: "Client not installed".into(),
             is_warning: false,
         };
     };
-    if let Some(reason) = version_only_reason(manifest, Some(client)) {
+    if let Some(reason) = version_only_reason(manifest, client) {
         return CompatibilityDescription {
             text: reason,
             is_warning: true,
         };
     }
     CompatibilityDescription {
-        text: format!("{COMPATIBLE_PREFIX}{client}"),
+        text: format!("{COMPATIBLE_PREFIX}{version}"),
         is_warning: false,
     }
 }

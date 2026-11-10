@@ -7,6 +7,7 @@
 //! install.
 
 mod catalog;
+mod client_api;
 mod index;
 mod installer;
 mod inventory;
@@ -19,12 +20,17 @@ pub use catalog::{
     CURRENT_CATALOG_SCHEMA_VERSION, OPENAC_CLIENT, PLUGIN_LIST_ASSET, PLUGIN_LIST_REPO,
     PluginBlock, PluginCatalog, PluginCatalogEntry, THIS_CLIENT,
 };
+pub use client_api::{
+    ApiRange, CLIENTS_RELEASED_WITHOUT_THE_FILE, PLUGIN_API_FILE, PLUGIN_API_FILE_MAXIMUM_BYTES,
+    PLUGIN_API_SCHEMA_VERSION, beside_launcher_plugin_api, client_plugin_api,
+    parse_plugin_api_file, read_plugin_api_file, released_client_plugin_api,
+};
 pub use index::{
     CURRENT_INDEX_SCHEMA_VERSION, IndexReleaseUpdate, PLUGIN_INDEX_ASSET, PLUGIN_INDEX_TAG,
     PluginIndex, PluginIndexEntry,
 };
 pub use installer::{
-    AfterOldCodeSetAside, LocalPluginZipPreview, PACKAGED_FILES_REFUSAL,
+    AfterOldCodeSetAside, CLIENT_NEEDED_REFUSAL, LocalPluginZipPreview, PACKAGED_FILES_REFUSAL,
     PERMISSION_VOCABULARY_REFUSAL, PERMISSIONS_CHANGED_REFUSAL, PLUGIN_WRITE_BUSY_REFUSAL,
     PLUGIN_WRITE_LOCK_FILE_NAME, PluginInstallResult, PluginInstaller, SESSION_LEASE_REFUSAL,
     UPDATE_IN_PROGRESS_REFUSAL, contract_limits, permissions_match,
@@ -34,10 +40,10 @@ pub use inventory::{
     evaluate_version_compatibility, find_block_reason,
 };
 pub use manifest::{
-    API_CURRENT, API_MINIMUM, ApiVersion, HostVersion, InstallRules, ManifestError,
-    PERMISSIONS_VERSION, Permission, PermissionDeclaration, PluginManifest, WASM_TAG_PREFIX,
-    has_valid_install_id, is_built_for_csharp, is_newer_permission_vocabulary, is_well_formed_id,
-    plugin_release_tag, plugin_tag_prefix, release_tag,
+    ApiVersion, HostVersion, InstallRules, ManifestError, PERMISSIONS_VERSION, Permission,
+    PermissionDeclaration, PluginManifest, WASM_TAG_PREFIX, has_valid_install_id,
+    is_built_for_csharp, is_newer_permission_vocabulary, is_well_formed_id, plugin_release_tag,
+    plugin_tag_prefix, release_tag,
 };
 pub use record_store::{
     InstalledPluginRecord, InstalledPluginRecordStore, PendingPluginInstall, PluginInstallSource,

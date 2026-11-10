@@ -26,7 +26,8 @@ use ac_launcher_core::updates::{
 use ac_launcher_core::url::WebUrl;
 use common::TempDir;
 use common::fixtures::{
-    self, Compression, FakeServer, Route, client_zip, create_zip, launcher_zip,
+    self, Compression, FakeServer, Route, client_zip, client_zip_with_plugin_api, create_zip,
+    launcher_zip,
 };
 
 fn none() -> CancelToken {
@@ -1194,9 +1195,18 @@ impl StoreFixture {
         version: &str,
         marker: &str,
     ) -> Result<ClientVersionResolution, UpdateError> {
-        let archive = client_zip(&self.rid, marker);
+        self.promote_archive(store, version, marker, &client_zip(&self.rid, marker))
+    }
+
+    fn promote_archive(
+        &self,
+        store: &ClientVersionStore,
+        version: &str,
+        marker: &str,
+        archive: &[u8],
+    ) -> Result<ClientVersionResolution, UpdateError> {
         let zip = self.root.join(format!("{version}-{marker}.zip"));
-        std::fs::write(&zip, &archive).unwrap();
+        std::fs::write(&zip, archive).unwrap();
         let staging = store.create_client_staging_directory().unwrap();
         let files = SafeZipExtractor::default()
             .extract(&zip, &staging, &[], &none())
@@ -1208,7 +1218,7 @@ impl StoreFixture {
             &self.rid,
             &artifact(
                 &format!("https://example.test/{version}.zip"),
-                &sha256_hex(&archive),
+                &sha256_hex(archive),
                 archive.len() as u64,
             ),
             &files,
@@ -2213,4 +2223,70 @@ mod fingerprint {
         assert!(check.is_launcher_update_available);
         assert!(!check.is_launcher_minimum_satisfied);
     }
+}
+
+// --- The installed client's plugin API range ----------------------------------
+
+fn api_range(minimum: (u16, u16), current: (u16, u16)) -> ac_launcher_core::plugins::ApiRange {
+    use ac_launcher_core::plugins::{ApiRange, ApiVersion};
+    ApiRange::new(
+        ApiVersion::new(minimum.0, minimum.1),
+        ApiVersion::new(current.0, current.1),
+    )
+}
+
+// A client archive's `plugin-api.json` is installed, recorded and verified like
+// every other file, and the resolution carries the range it says.
+#[test]
+fn an_installed_client_says_its_plugin_api_range_in_its_own_file() {
+    let fixture = StoreFixture::new();
+    let store = fixture.store();
+    let text = api_range((1, 0), (1, 12)).to_file_text();
+    let archive = client_zip_with_plugin_api(&fixture.rid, "new", &text);
+    let installed = fixture
+        .promote_archive(&store, "0.2.4", "new", &archive)
+        .unwrap();
+    assert!(installed.is_verified(), "{}", installed.status);
+    assert_eq!(installed.plugin_api, Some(api_range((1, 0), (1, 12))));
+    assert!(
+        installed
+            .record
+            .as_ref()
+            .unwrap()
+            .files
+            .iter()
+            .any(|file| file.path == "plugin-api.json")
+    );
+
+    // The next start reads it again from the verified folder.
+    let restarted = fixture
+        .store()
+        .load_and_recover(&fixture.rid, &none())
+        .unwrap();
+    assert_eq!(restarted.plugin_api, Some(api_range((1, 0), (1, 12))));
+
+    // It is hashed with the rest: a changed file is a damaged client, not a
+    // new range.
+    let file = installed.directory.unwrap().join("plugin-api.json");
+    std::fs::write(&file, api_range((1, 0), (9, 9)).to_file_text()).unwrap();
+    let tampered = fixture
+        .store()
+        .load_and_recover(&fixture.rid, &none())
+        .unwrap();
+    assert!(!tampered.is_verified());
+    assert_eq!(tampered.plugin_api, None);
+}
+
+// A client released before the file is known by its version; any other client
+// without it has no known range.
+#[test]
+fn a_client_without_the_file_is_known_only_as_a_released_version() {
+    let fixture = StoreFixture::new();
+    let store = fixture.store();
+    let old = fixture.promote(&store, "0.2.2", "old").unwrap();
+    assert!(old.is_verified(), "{}", old.status);
+    assert_eq!(old.plugin_api, Some(api_range((1, 0), (1, 9))));
+    let unknown = fixture.promote(&store, "0.2.4", "unknown").unwrap();
+    assert!(unknown.is_verified(), "{}", unknown.status);
+    assert_eq!(unknown.plugin_api, None);
 }

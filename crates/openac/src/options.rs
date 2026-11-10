@@ -29,6 +29,9 @@ Options:
                           OPENAC_LANDBLOCK_RADIUS, default 2: a 5 x 5 square).
   --help                 Show this text.
 
+`openac plugin-api` prints the plugin API versions this client loads, as the
+plugin-api.json its release carries beside it.
+
 The password comes only from the environment variable OPENAC_PASSWORD.
 Chat logs (/log) and journals go under OPENAC_DATA_DIR (default: the platform
 data directory). Typed lines that are not console commands are chat: /say,
