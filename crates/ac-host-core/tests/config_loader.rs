@@ -4,7 +4,7 @@
 //! `SessionConfigurationSharedFixtureTests.cs`, and (for the window reader)
 //! `tests/AcDream.App.Tests/Configuration/SessionConfigurationLoaderTests.cs`.
 //! Golden documents: `OpenAC/tests/Fixtures/launcher-session/session-config-shared-fixture.json`
-//! and the `bot.json` sample in `OpenAC/docs/building-and-running.md`.
+//! and the `bot.json` sample in `OpenAC/content/docs/building-and-running.md`.
 
 mod common;
 

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ config.title }}{% endblock title %}</title>
+  <meta name="description" content="{% block description %}{{ config.description }}{% endblock description %}">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="{{ get_url(path='favicon.ico') }}" sizes="any">
+  <link rel="icon" href="{{ get_url(path='icon-256.png') }}" type="image/png" sizes="256x256">
+  <link rel="apple-touch-icon" href="{{ get_url(path='icon-256.png') }}">
+  <link rel="stylesheet" href="{{ get_url(path='site.css', cachebust=true) }}">
+  <script>
+    // Apply a theme the visitor picked before the page paints.
+    try {
+      var t = localStorage.getItem("openac-theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+  <script src="{{ get_url(path='site.js', cachebust=true) }}" defer></script>
+</head>
+<body class="{% block body_class %}{% endblock body_class %}">
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{{ get_url(path='@/_index.md') }}">
+        {%- set logo = resize_image(path="icon-256.png", width=64, height=64, op="fit_width") %}
+        <img src="{{ logo.url }}" alt="" width="32" height="32">
+        <span>OpenAC</span>
+      </a>
+      <nav class="topnav" aria-label="Site">
+        <a href="{{ get_url(path='@/docs/_index.md') }}">Docs</a>
+        <a href="{{ get_url(path='@/docs/whats-new.md') }}">What's new</a>
+        <a href="{{ get_url(path='@/_index.md') }}#plugins">Plugins</a>
+        <a href="{{ config.extra.repo }}">GitHub</a>
+        <a href="{{ config.extra.discord }}">Discord</a>
+      </nav>
+      <div class="topbar-tools">
+        <div class="search" role="search">
+          <input id="search" type="search" placeholder="Search the docs" aria-label="Search the docs" autocomplete="off"
+                 data-index="{{ get_url(path='search_index.en.js') }}" data-engine="{{ get_url(path='elasticlunr.min.js') }}">
+          <div id="search-results" class="search-results" hidden></div>
+        </div>
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch between dark and light">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    {% block content %}{% endblock content %}
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <p><strong>OpenAC</strong> is an open-source Asheron's Call client, MIT licensed. It ships no game data: bring your own.</p>
+      <nav aria-label="Footer">
+        <a href="{{ config.extra.discord }}">Discord</a>
+        <a href="{{ config.extra.repo }}/issues">Issues</a>
+        <a href="{{ config.extra.repo }}">Source</a>
+        <a href="{{ config.extra.repo }}/blob/main/LICENSE">License</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

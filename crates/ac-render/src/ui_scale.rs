@@ -531,6 +531,7 @@ mod tests {
                     offset: (-200.0, -100.0),
                     start_visible: true,
                     accepts_pointer_input: true,
+                    in_markup: false,
                 },
             )
             .unwrap();
@@ -548,6 +549,7 @@ mod tests {
             &mut ui,
             &band,
             &view,
+            &[],
             &mut no_image,
             &mut |_| unreachable!("no fonts"),
             None,
@@ -613,6 +615,7 @@ mod tests {
                     &mut ui,
                     &band,
                     &view,
+                    &[],
                     &mut no_image,
                     &mut |_| unreachable!("no fonts"),
                     None,

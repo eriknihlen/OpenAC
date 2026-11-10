@@ -221,7 +221,15 @@ impl Host<'_> {
 
     /// Fly a probe sphere from the character to a target through the
     /// client's collision world (OpenAC `EvaluatePath`, with markers per
-    /// step when `query.diagnostics` is set).
+    /// step when `query.diagnostics` is set). For a missile or arc, set
+    /// `query.launch_speed` to the launcher's maximum velocity to fly the
+    /// probe as the server launches the shot (API 1.12): at that speed,
+    /// capped at 50 m/s, on the lower arc to the aim point. A speed that is
+    /// not a finite number above 0, or a target out of reach at the capped
+    /// speed, answers `InvalidTarget` with a notice saying which; any other
+    /// answer's notice ends with the speed and launch angle used. The probe
+    /// flies toward where the target is now; the server aims ahead of a
+    /// moving target, so the real shot can take a different arc.
     pub fn evaluate_projectile_path(
         &mut self,
         query: &ac_plugin_abi::projectile::ProjectilePathQuery,

@@ -815,6 +815,14 @@ pub enum Element {
         /// The picker has an alpha strip.
         alpha: bool,
     },
+    /// A rectangle the layout places and sizes, which hosts the plugin's
+    /// canvas of the same id registered in markup (OpenAC `<canvas>`). It
+    /// draws nothing itself, lets clicks through and clips, so a canvas with
+    /// no room shows nothing.
+    Canvas {
+        /// The plugin's id of the canvas it hosts.
+        canvas_id: String,
+    },
     /// Where a `<repeat>` stands in its flex container: its children are
     /// the template the window builds once per item of the list, as flex
     /// items of that container in list order. It takes no space itself.
@@ -851,6 +859,7 @@ impl Element {
             Self::Split { .. } => "split",
             Self::Hotkey { .. } => "hotkey",
             Self::Color { .. } => "color",
+            Self::Canvas { .. } => "canvas",
             Self::Repeat { .. } => "repeat",
         }
     }
@@ -2871,6 +2880,7 @@ impl<'a> Parser<'a> {
             },
             "hotkey" => self.hotkey(el)?,
             "color" => self.color_element(el)?,
+            "canvas" => self.canvas(el)?,
             "expander" => {
                 let height = f(el, "h");
                 if height < EXPANDER_HEADER_HEIGHT {
@@ -2989,6 +2999,31 @@ impl<'a> Parser<'a> {
         };
         let common = self.common(el)?;
         Ok(self.push(element, common, rect(el), parent))
+    }
+
+    /// `<canvas id="...">`: a literal id, no children, not repeated (each
+    /// copy would name the same canvas).
+    fn canvas(&self, el: XmlNode<'_, '_>) -> Result<Element, MarkupError> {
+        let id = attr(el, "id").map(str::trim).unwrap_or_default();
+        if id.is_empty() {
+            return err("<canvas> requires an id: the id of the canvas it hosts");
+        }
+        if is_binding(id) {
+            return err(format!(
+                "<canvas id=\"{id}\"> must be the canvas's id as text, not a binding"
+            ));
+        }
+        if el.children().any(|c| c.is_element()) {
+            return err(format!("<canvas id=\"{id}\"> must be empty"));
+        }
+        if !self.repeats.is_empty() {
+            return err(format!(
+                "<canvas id=\"{id}\"> cannot be inside a <repeat>: every row would name the same canvas"
+            ));
+        }
+        Ok(Element::Canvas {
+            canvas_id: id.to_owned(),
+        })
     }
 
     fn column(&self, el: XmlNode<'_, '_>, index: usize, last: bool) -> Result<Column, MarkupError> {

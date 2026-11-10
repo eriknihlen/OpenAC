@@ -32,7 +32,7 @@ use ac_ui::icons::{IconComposer, IconSource};
 use ac_ui::import::LayoutSource;
 use ac_ui::overlay::{WorldIcon, WorldIconAnchor, WorldLabel, WorldLabelAnchor};
 use ac_ui::panels::projectile_debug::{ProjectileDebugOverlay, ProjectileDebugSample};
-use ac_ui::plugin::canvas::{CanvasFont, CanvasLayer};
+use ac_ui::plugin::canvas::{CanvasFont, CanvasHost, CanvasLayer};
 use ac_ui::plugin::dock::{self, DockArt, DockMode, DockOpens, DockSize, PluginDock};
 use ac_ui::plugin::fold::SharedControlState;
 use ac_ui::plugin::{
@@ -1315,6 +1315,7 @@ impl WindowUi {
         let saved = self.plugins.save_control_state(false);
         self.notices.extend(saved);
         let camera = self.status.overlays.camera();
+        let canvas_hosts = self.plugin_canvas_hosts();
         let Self {
             host,
             content,
@@ -1323,6 +1324,7 @@ impl WindowUi {
             plugins,
             images,
             status,
+            notices,
             ..
         } = self;
         let Some(band) = status.overlays.host_mut() else {
@@ -1412,11 +1414,13 @@ impl WindowUi {
                 &mut host.root,
                 band,
                 view,
+                &canvas_hosts,
                 &mut image,
                 &mut font_of,
                 font.as_ref(),
                 &plugins.outbox,
             );
+            notices.extend(layer.take_notices().into_iter().map(|n| format!("ui: {n}")));
         }
         let shown: Vec<WorldIcon> = plugins
             .world_icons
@@ -1455,6 +1459,27 @@ impl WindowUi {
             let samples: &[ProjectileDebugSample] = if fresh { &plugins.samples } else { &[] };
             projectile.tick(&mut host.root, samples, camera.as_ref());
         }
+    }
+
+    /// The `<canvas>` elements of the plugin windows mounted, in the order
+    /// the windows were registered, each in document order.
+    fn plugin_canvas_hosts(&mut self) -> Vec<CanvasHost> {
+        let mut hosts = Vec::new();
+        for (id, name) in &self.plugins.panels {
+            let Some(owner) = self.facts.plugin_ui.panel(*id).map(|p| p.owner.id.clone()) else {
+                continue;
+            };
+            let found = self
+                .host
+                .with_controller::<PluginPanelController, _>(name, |c, _| c.canvas_hosts())
+                .unwrap_or_default();
+            hosts.extend(found.into_iter().map(|(canvas_id, element)| CanvasHost {
+                owner: owner.clone(),
+                canvas_id,
+                element,
+            }));
+        }
+        hosts
     }
 
     /// The plugins' world lines placed in the drawing frame this frame (the

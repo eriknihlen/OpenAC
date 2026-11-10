@@ -1017,7 +1017,36 @@ wire_record! {
         pub previous: Option<u32>,
         /// What is selected now.
         pub selected: Option<u32>,
+        /// Who made the change, one of [`selection_source`]. The event
+        /// compares the selection once a pass, so when it changed more than
+        /// once in a pass this is who made the last change. A plugin built
+        /// for an older version reads [`selection_source::SYSTEM`]. Added in
+        /// API 1.11.
+        since (1, 11) pub source: u8,
     }
+}
+
+/// Who changed the selection ([`SelectionChange::source`]).
+pub mod selection_source {
+    /// The client itself: the selected object died, left the world or
+    /// hid, or the session ended; the nearest monster picked as the next
+    /// target (the selected one died, or an attack with nothing selected,
+    /// with the auto-target option); a window picking a listing on its own
+    /// (a shop's first listing as it opens or changes category).
+    pub const SYSTEM: u8 = 0;
+    /// A key: a selection key (nearest, previous, self, a fellow, the last
+    /// attacker) or a quick-slot select key. A deselect asked for on
+    /// purpose (Escape, a window's or a plugin's clear) reads this too.
+    pub const KEYBOARD: u8 = 1;
+    /// The mouse, however it selected: a left click, a right click that
+    /// examines, or lifting an item to drag it, on an object in the world
+    /// or on its icon or row in a window.
+    pub const MOUSE: u8 = 2;
+    /// A plugin's select, or a selection the client makes for a command:
+    /// an attack or a spell at a target, the give key selecting where the
+    /// item went, a merge or a pickup selecting the stack it joins. A
+    /// plugin cannot read it as "my own selection".
+    pub const PLUGIN: u8 = 3;
 }
 
 #[cfg(test)]
@@ -1063,6 +1092,33 @@ mod tests {
         assert_eq!(old, without);
         let now = ItemProperties::from_bytes(&appraised.to_bytes()).unwrap();
         assert_eq!(now, appraised);
+    }
+
+    // API 1.11 added who changed the selection: a plugin built for 1.10 is
+    // sent the selection event without it, byte for byte as before, and
+    // reads it as the client's own change; one built for 1.11 gets it.
+    #[test]
+    fn the_selection_source_reaches_only_plugins_built_for_api_1_11() {
+        let v1_10 = ApiVersion::new(1, 10);
+        let clicked = crate::Event::SelectionChanged(SelectionChange {
+            previous: Some(0x5000_0001),
+            selected: Some(0x8000_0002),
+            source: selection_source::MOUSE,
+        });
+        let without = crate::Event::SelectionChanged(SelectionChange {
+            previous: Some(0x5000_0001),
+            selected: Some(0x8000_0002),
+            source: selection_source::SYSTEM,
+        });
+        assert_eq!(clicked.to_bytes_at(v1_10), without.to_bytes_at(v1_10));
+        assert_eq!(
+            clicked.to_bytes_at(v1_10).len() + 1,
+            clicked.to_bytes().len()
+        );
+        let old = crate::Event::from_bytes_at(&clicked.to_bytes_at(v1_10), v1_10).unwrap();
+        assert_eq!(old, without);
+        let now = crate::Event::from_bytes(&clicked.to_bytes()).unwrap();
+        assert_eq!(now, clicked);
     }
 
     // A loot classifier's question carries the item properties too.

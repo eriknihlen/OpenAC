@@ -567,6 +567,8 @@ fn an_attack_goes_to_the_nearest_monster_when_auto_target_is_on() {
         target: None,
     });
     assert_eq!(f.gameplay.selection().selected(), Some(FAR_MONSTER));
+    // The client picked it, not a key: plugins read it as the client's own.
+    assert_eq!(f.gameplay.selection().source(), SelectionSource::System);
     // The new selection's health is asked for as it is made, before the
     // swing goes out.
     assert_eq!(
@@ -576,6 +578,20 @@ fn an_attack_goes_to_the_nearest_monster_when_auto_target_is_on() {
             wire_combat::build_targeted_melee_attack(4, FAR_MONSTER, AttackHeight::HIGH.0, 0.0),
         ]
     );
+}
+
+/// The selected monster dies in combat with the auto-target option on: the
+/// client selects the nearest other monster itself, so the change is the
+/// client's own, not a key's.
+#[test]
+fn a_dead_targets_replacement_is_the_clients_selection() {
+    let mut f = Fixture::in_the_field();
+    f.run(GameplayCommand::SetCombatMode(CombatMode::MELEE));
+    f.options.set_bit(option_id::AUTO_TARGET, true);
+    f.run(GameplayCommand::Select(ObjectRef::Guid(MONSTER)));
+    f.apply(&death_of(MONSTER));
+    assert_eq!(f.gameplay.selection().selected(), Some(FAR_MONSTER));
+    assert_eq!(f.gameplay.selection().source(), SelectionSource::System);
 }
 
 #[test]

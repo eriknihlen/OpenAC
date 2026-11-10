@@ -9,6 +9,6 @@ client (or the retired C# client) do, and how do you know?
 - [ ] Ran the real-data tests (`--include-ignored`) if this touches data files, rendering or the interface
 - [ ] One topic per PR
 - [ ] If `ac-plugin-abi` changed: the layout fingerprint is updated and the PR says plugins must be rebuilt
-- [ ] New options are documented in `docs/launch-options.md`
+- [ ] New options are documented in `content/docs/launch-options.md`
 - [ ] No code copied from ACEmulator, ACViewer, or holtburger (AGPL/GPL)
 - [ ] No comments describing the original client's internals

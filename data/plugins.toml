@@ -1,0 +1,17 @@
+# The plugin cards on the homepage, in this order. `repo` is the GitHub
+# repository ("owner/name"); only public repositories belong here.
+
+[[plugin]]
+name = "MossTank"
+repo = "eriknihlen/openac-mosstank"
+summary = "A VTank-compatible macro bot: combat, buffs, looting and navigation, with a UtilityBelt tab."
+
+[[plugin]]
+name = "MudSort"
+repo = "eriknihlen/openac-mudsort"
+summary = "Inventory sorting: mudzereli's mudsort, ported to OpenAC."
+
+[[plugin]]
+name = "GoArrow"
+repo = "johanlundberg/OpenAC-GoArrow"
+summary = "Routes over walks, portals and recalls, with a map of Dereth."

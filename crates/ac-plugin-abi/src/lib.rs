@@ -52,7 +52,10 @@ pub use types::{
     ChatLine, ChatLinkClicked, ChatPost, CommandCall, CommandCompletion, CommandDef, Event,
     LogLevel, LogRequest, StartInfo,
 };
-pub use version::{API_CURRENT, API_MINIMUM, API_SECTION, ApiVersion, is_supported};
+pub use version::{
+    API_CURRENT, API_MINIMUM, API_RANGE, API_SECTION, ApiRange, ApiVersion, PLUGIN_API_FILE,
+    is_supported,
+};
 pub use wire::{DecodeError, Reader, Wire, Writer};
 
 /// The fixed tick a plugin is driven at, in seconds: every tick carries

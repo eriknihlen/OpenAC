@@ -19,7 +19,6 @@ use ac_host_core::paths::is_player_folder;
 use super::catalog::PluginCatalog;
 use super::inventory::{
     InstalledPluginSource, PluginInventory, evaluate_version_compatibility, find_block_reason,
-    is_client_not_installed,
 };
 use super::manifest::{
     InstallRules, PermissionDeclaration, PluginManifest, has_valid_install_id,
@@ -66,6 +65,27 @@ pub const PERMISSION_VOCABULARY_REFUSAL: &str = "This plugin needs a newer launc
 /// reviewed.
 pub const PERMISSIONS_CHANGED_REFUSAL: &str =
     "This plugin changed since you reviewed it. Check it again before installing.";
+
+/// The refusal of an install or update while no client is installed: which
+/// plugins can run (the client versions and plugin API versions a plugin
+/// needs) is the installed client's to say.
+pub const CLIENT_NEEDED_REFUSAL: &str = "No client is installed, so nothing can say whether \
+     this plugin would run. Install the client (Check for updates), then try again.";
+
+/// Refuses a plugin the installed client cannot run, or any plugin when no
+/// client is installed.
+fn refuse_incompatible(
+    manifest: &PluginManifest,
+    client: Option<&ClientVersionResolution>,
+) -> Result<(), UpdateError> {
+    if client.and_then(|client| client.version.as_ref()).is_none() {
+        return Err(UpdateError::failed(CLIENT_NEEDED_REFUSAL));
+    }
+    match evaluate_version_compatibility(manifest, client) {
+        Some(reason) => Err(UpdateError::failed(format!("'{}' {reason}.", manifest.id))),
+        None => Ok(()),
+    }
+}
 
 /// The refusal when a package ships its own top-level `data` or `vtank`
 /// folder.
@@ -355,14 +375,7 @@ impl PluginInstaller {
                 manifest.id
             )));
         }
-        if let Some(reason) = evaluate_version_compatibility(
-            &manifest,
-            client_resolution.and_then(|resolution| resolution.version.as_ref()),
-        )
-        .filter(|reason| !is_client_not_installed(reason))
-        {
-            return Err(UpdateError::failed(format!("'{}' {reason}.", manifest.id)));
-        }
+        refuse_incompatible(&manifest, client_resolution)?;
 
         let existing = self.records().find(&manifest.id).cloned();
         let is_update = existing
@@ -566,14 +579,7 @@ impl PluginInstaller {
                     manifest.id
                 )));
             }
-            if let Some(reason) = evaluate_version_compatibility(
-                &manifest,
-                client_resolution.and_then(|resolution| resolution.version.as_ref()),
-            )
-            .filter(|reason| !is_client_not_installed(reason))
-            {
-                return Err(UpdateError::failed(format!("'{}' {reason}.", manifest.id)));
-            }
+            refuse_incompatible(&manifest, client_resolution)?;
             let target = self.plugins_directory().join(&manifest.id);
             target_directory = Some(target.clone());
             let _write = self.acquire_plugin_write()?;

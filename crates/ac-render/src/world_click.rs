@@ -16,7 +16,7 @@
 //! object within the double-click time, so the double click that follows
 //! does not use what the mode just took.
 
-use ac_runtime::gameplay::GameplayCommand;
+use ac_runtime::gameplay::{GameplayCommand, SelectionSource};
 use ac_runtime::inventory::{ItemCommand, ObjectRef};
 use ac_runtime::session::SessionCommand;
 use ac_ui::event::ItemDragSource;
@@ -62,7 +62,10 @@ pub struct WorldClicks {
 }
 
 fn select(guid: u32) -> SessionCommand {
-    SessionCommand::Gameplay(GameplayCommand::Select(ObjectRef::Guid(guid)))
+    SessionCommand::Gameplay(GameplayCommand::SelectAs(
+        ObjectRef::Guid(guid),
+        SelectionSource::Mouse,
+    ))
 }
 
 fn item(command: ItemCommand) -> SessionCommand {
@@ -211,6 +214,7 @@ mod tests {
         assert_eq!(dbg(&out.commands[..1]), dbg(&[select(TARGET)]));
     }
 
+    /// A click selects as the mouse: plugins hear that the player clicked.
     #[test]
     fn a_left_click_selects() {
         let out = WorldClicks::default().click(
@@ -220,6 +224,13 @@ mod tests {
             0,
         );
         assert_eq!(dbg(&out.commands), dbg(&[select(TARGET)]));
+        assert!(matches!(
+            &out.commands[..],
+            [SessionCommand::Gameplay(GameplayCommand::SelectAs(
+                ObjectRef::Guid(TARGET),
+                SelectionSource::Mouse
+            ))]
+        ));
     }
 
     #[test]

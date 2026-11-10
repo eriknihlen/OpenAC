@@ -1,5 +1,8 @@
-# What's new
-
++++
+title = "What's new"
+weight = 20
+aliases = ["docs/whats-new.html"]
++++
 The latest releases, with credits. Every release, with its downloads and full
 changelog, is on GitHub:
 [releases](https://github.com/eriknihlen/OpenAC/releases) (the Rust client
@@ -8,6 +11,24 @@ before 0.2.0 are at
 [openac-rust releases](https://github.com/eriknihlen/openac-rust/releases).
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
+
+## OpenAC (Rust) 0.2.3 (2026-11-09)
+
+- A corpse or chest that disappeared just as it was opened stayed open for
+  the rest of the session, and a looting plugin waiting for it to close
+  stood still (seen for hours). The client now closes it when its object is
+  gone.
+- The cursor no longer turns busy while plugins appraise items in the
+  background; as in retail, only your own appraisals show it.
+- Plugins see the items your packs list as soon as you log in, before the
+  server has described each of them.
+- "Update now" in the launcher no longer fails with "The handle is invalid"
+  after the launcher has started a client.
+- A search pattern typed into a plugin can no longer stall it.
+- Plugin API 1.10: every enchantment on the character, and right-aligned
+  list columns in plugin markup.
+- Plugin API 1.11: the selection event says who changed the selection (the
+  client, a key, the mouse or a plugin).
 
 ## OpenAC (Rust) 0.2.2 (2026-11-08)
 
@@ -72,7 +93,7 @@ OpenAC from here on.
 
 The last release of the C# client. **OpenAC (C#) is retired**: the Rust
 client, OpenAC for Rust, replaces it. Get it from the
-[Rust client page](rust-client.md).
+[Rust client page](@/docs/rust-client.md).
 
 - The launcher shows the retirement notice at all times, with a **Get the
   Rust client** button that opens

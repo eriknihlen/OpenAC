@@ -43,7 +43,7 @@ use crate::route::{
 mod preview;
 mod reach;
 pub use preview::{NavPlan, PathPreview, PlanPoint, PlanStatus, PreviewTarget};
-pub use reach::{CellReach, NavReach, ReachSearch, cells_reached};
+pub use reach::{CellReach, NavReach, ON_THE_FLOOR, ReachSearch, cells_reached};
 
 /// Where a walk or route request stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -771,6 +771,9 @@ pub struct WalkController {
     /// naming the cell of each point a preview reports, with where each
     /// landblock was loaded when they were copied.
     grid_cells: Option<(Vec<PlacedLandblock>, Arc<[ac_physics::CellSurface]>)>,
+    /// The floors of the objects placed in those landblocks' interior cells,
+    /// kept and let go with them.
+    grid_object_floors: Option<(Vec<PlacedLandblock>, Arc<[ac_physics::CellSurface]>)>,
     objects_last_seen: u64,
     classified_cell_id: u32,
     classified_sealed: bool,
@@ -1239,6 +1242,7 @@ impl WalkController {
             building: None,
             grid_dungeon: 0,
             grid_cells: None,
+            grid_object_floors: None,
             objects_last_seen: 0,
             classified_cell_id: 0,
             classified_sealed: false,
@@ -3142,6 +3146,7 @@ impl WalkController {
         self.grid = None;
         self.grid_dungeon = 0;
         self.grid_cells = None;
+        self.grid_object_floors = None;
         self.grid_idle_since = f64::NAN;
         *self.aim_finder.borrow_mut() = None;
         if let Some(released) = &self.grid_released {
@@ -3416,6 +3421,7 @@ impl WalkController {
                 self.say(&format!("Navmesh: the build failed: {message}"));
                 // The cell surfaces a search over it copied go with it.
                 self.grid_cells = None;
+                self.grid_object_floors = None;
                 if !building.walk_waits {
                     return;
                 }

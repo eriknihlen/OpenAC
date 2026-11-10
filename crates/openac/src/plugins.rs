@@ -278,7 +278,7 @@ pub fn peer_tags(declared: Option<&[String]>, env: impl Fn(&str) -> Option<Strin
 }
 
 /// The process's plugin engine: with a path set, compiled plugins are kept
-/// in `<cache>/plugin-modules` (`docs/launch-options.md`), so a plugin is
+/// in `<cache>/plugin-modules` (`content/docs/launch-options.md`), so a plugin is
 /// compiled once per plugin and client build rather than at every start.
 #[must_use]
 pub fn engine(paths: Option<&ac_host::PathSet>) -> std::sync::Arc<ac_plugin::PluginEngine> {

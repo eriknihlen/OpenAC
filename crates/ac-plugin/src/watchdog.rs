@@ -69,7 +69,7 @@ pub const EPOCH_TICK: Duration = Duration::from_millis(10);
 pub const EPOCH_STEP_MAX: Duration = Duration::from_millis(100);
 
 /// The environment variable that turns the slow log on: the threshold in
-/// milliseconds (`docs/launch-options.md`).
+/// milliseconds (`content/docs/launch-options.md`).
 pub const SLOW_LOG_VARIABLE: &str = "OPENAC_PLUGIN_SLOW_LOG";
 
 /// The threshold [`SLOW_LOG_VARIABLE`] holds: a whole number of

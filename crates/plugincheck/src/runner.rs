@@ -224,7 +224,7 @@ fn parse_manifest(path: &Path, checks: &mut Vec<CheckItem>) -> Option<PluginMani
                 "plugin.json parses",
                 &error.0,
                 "Correct the problem named above in plugin.json; the field rules are in the \
-                 plugin.json section of docs/plugin-development.md. Parsing stops at the first problem, so run this \
+                 plugin.json section of content/docs/plugin-development.md. Parsing stops at the first problem, so run this \
                  again after each fix.",
             ));
             None
@@ -236,7 +236,7 @@ fn add_install_rules(manifest: &PluginManifest, checks: &mut Vec<CheckItem>) {
     match manifest.validate_for_install() {
         Ok(()) => checks.push(CheckItem::pass(
             "manifest satisfies install rules",
-            "id, version, minHostVersion, apiVersion and permissions are all valid.",
+            "id, version, minHostVersion and permissionsVersion are all valid.",
         )),
         Err(error) => checks.push(CheckItem::fail(
             "manifest satisfies install rules",

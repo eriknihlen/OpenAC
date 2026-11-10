@@ -235,7 +235,10 @@ impl Vendor {
     fn follow(&mut self, outputs: &[PanelOutput]) {
         for o in outputs {
             match o {
-                PanelOutput::SelectObject(g) => self.selected = Some(*g),
+                PanelOutput::SelectObject(g)
+                | PanelOutput::Session(SessionCommand::Gameplay(
+                    ac_runtime::gameplay::GameplayCommand::SelectAs(ObjectRef::Guid(g), _),
+                )) => self.selected = Some(*g),
                 PanelOutput::Session(SessionCommand::Gameplay(
                     ac_runtime::gameplay::GameplayCommand::ClearSelection,
                 )) => self.selected = None,
@@ -864,6 +867,39 @@ fn buy_and_add_follow_the_selection() {
 }
 
 // ── Cells ───────────────────────────────────────────────────────────────
+
+// The first listing the window picks on its own (on opening, a refresh or a
+// category) is the client's selection, not a click: plugins must not hear
+// the mouse when a shop opens. A click on a listing is the mouse's.
+#[test]
+fn the_windows_own_pick_is_the_clients_and_a_click_the_mouses() {
+    use ac_runtime::gameplay::GameplayCommand;
+    let mut v = vendor_window();
+    let opened = v.event(Some(&shop(
+        VendorViewReason::Opened,
+        profile(1.5),
+        vec![
+            listing(ARMOR, "Chainmail", ItemType::ARMOR, 200, 500),
+            listing(0x6000_0110, "Buckler", ItemType::ARMOR, 900, 40),
+        ],
+    )));
+    let selects = |out: &[PanelOutput]| -> Vec<String> {
+        out.iter()
+            .filter_map(|o| match o {
+                PanelOutput::SelectObject(g) => Some(format!("mouse {g:x}")),
+                PanelOutput::Session(SessionCommand::Gameplay(GameplayCommand::SelectAs(
+                    ObjectRef::Guid(g),
+                    source,
+                ))) => Some(format!("{source:?} {g:x}")),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(selects(&opened), [format!("System {ARMOR:x}")]);
+    let c = v.cell(vendor::ITEM_LIST_ID, 1);
+    let clicked = v.fire(c, kind::CLICK, None);
+    assert_eq!(selects(&clicked), ["mouse 60000110"]);
+}
 
 // ShopRow_ClickEvent_SelectsItem_DespiteNotBeingADragSource
 #[test]
@@ -1771,10 +1807,15 @@ mod real_dats {
             w.on_vendor_event(ui, Some(&view), &items, &mut icons);
         });
         let out = panel_outputs(&mut host);
-        assert!(
-            out.iter()
-                .any(|p| matches!(p, PanelOutput::SelectObject(ARMOR)))
-        );
+        assert!(out.iter().any(|p| matches!(
+            p,
+            PanelOutput::Session(SessionCommand::Gameplay(
+                ac_runtime::gameplay::GameplayCommand::SelectAs(
+                    ObjectRef::Guid(ARMOR),
+                    ac_runtime::gameplay::SelectionSource::System,
+                ),
+            ))
+        )));
         let items = ItemsView {
             selected: Some(ARMOR),
             ..ItemsView::new(&o.t, PLAYER)

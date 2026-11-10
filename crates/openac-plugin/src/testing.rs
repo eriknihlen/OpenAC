@@ -370,6 +370,19 @@ impl FakeHost {
         }
     }
 
+    /// What a window reports of an in-markup canvas: an element hosts it,
+    /// laid out at `size` (whole pixels), or (`None`) no element does. A new
+    /// size is the canvas's, and the plugin hears
+    /// [`Event::CanvasResized`](crate::Event::CanvasResized) at once.
+    pub fn host_canvas<P: Plugin>(
+        &mut self,
+        plugin: &mut P,
+        canvas: u32,
+        size: Option<(i32, i32)>,
+    ) {
+        self.ui_input(plugin, ac_plugin_ui::UiInput::CanvasHosted { canvas, size });
+    }
+
     /// The value last pushed for binding `name` of panel `panel`.
     #[must_use]
     pub fn panel_value(&self, panel: u32, name: &str) -> Option<crate::ui::UiValue> {
@@ -629,6 +642,7 @@ impl Transport for FakeHost {
             | Import::UiCanvasState
             | Import::UiCanvasAvailable
             | Import::UiCanvasRemove
+            | Import::UiCanvasResize
             | Import::UiMeasureText
             | Import::UiFontBundled
             | Import::UiFontLoad
@@ -729,7 +743,7 @@ mod tests {
         host.enable(&mut plugin).unwrap();
         assert_eq!(
             host.logs,
-            vec![(LogLevel::Info, "test.recorder on API 1.10".to_owned())]
+            vec![(LogLevel::Info, "test.recorder on API 1.12".to_owned())]
         );
         host.tick(&mut plugin);
         assert!(host.type_line(&mut plugin, " @R waves "));
@@ -1189,5 +1203,68 @@ mod tests {
                 (1, 5.0, 15.0)
             ]
         );
+    }
+
+    /// A world map inside a window, and a dungeon map on the screen.
+    #[derive(Default)]
+    struct MapPlugin {
+        map: Option<crate::ui::Canvas>,
+        hud: Option<crate::ui::Canvas>,
+        /// The sizes the map heard and the sizes it painted at.
+        resized: Vec<(i32, i32)>,
+        painted: Vec<(i32, i32)>,
+    }
+
+    impl Plugin for MapPlugin {
+        fn enable(&mut self, host: &mut Host<'_>, _info: &StartInfo) -> Result<(), String> {
+            self.map =
+                Some(host.register_canvas(&crate::ui::CanvasSpec::in_markup("map", 64, 48))?);
+            self.hud = Some(host.register_canvas(&crate::ui::CanvasSpec::new("hud", 100, 50))?);
+            Ok(())
+        }
+        fn on_event(&mut self, host: &mut Host<'_>, event: Event) {
+            if let Event::CanvasResized(size) = event
+                && let Some(map) = self.map
+                && size.canvas == map.id()
+            {
+                self.resized.push((size.width, size.height));
+                let mut at = (0, 0);
+                map.paint(host, |p| at = (p.width(), p.height())).unwrap();
+                self.painted.push(at);
+            }
+        }
+    }
+
+    /// A plugin's own test lays its in-markup canvas out as a window would:
+    /// the plugin hears each new size and paints at it, and its state says
+    /// so; a canvas on the screen resizes, and the in-markup one refuses.
+    #[test]
+    fn an_in_markup_canvas_hears_its_laid_out_size_and_paints_at_it() {
+        let mut host = FakeHost::new("test.atlas");
+        let mut plugin = MapPlugin::default();
+        host.enable(&mut plugin).unwrap();
+        host.attach_window(&mut plugin, true);
+        let mut map = plugin.map.unwrap();
+        assert!(map.in_markup());
+        assert!(!host.with_host(|h| map.is_available(h)));
+        host.host_canvas(&mut plugin, map.id(), Some((320, 240)));
+        host.host_canvas(&mut plugin, map.id(), Some((320, 240)));
+        host.host_canvas(&mut plugin, map.id(), Some((400, 240)));
+        assert_eq!(plugin.resized, vec![(320, 240), (400, 240)]);
+        assert_eq!(plugin.painted, plugin.resized);
+        assert!(host.with_host(|h| map.is_available(h)));
+        let state = host.with_host(|h| map.state(h)).unwrap();
+        assert_eq!((state.width, state.height), (400, 240));
+        assert_eq!((map.width(), map.height()), (64, 48), "as registered");
+        assert!(!host.with_host(|h| map.resize(h, 10, 10)));
+        host.host_canvas(&mut plugin, map.id(), None);
+        assert!(!host.with_host(|h| map.is_available(h)));
+        let mut hud = plugin.hud.unwrap();
+        assert!(host.with_host(|h| hud.resize(h, 200, 80)));
+        assert_eq!((hud.width(), hud.height()), (200, 80));
+        let state = host.with_host(|h| hud.state(h)).unwrap();
+        assert_eq!((state.width, state.height), (200, 80));
+        assert!(!host.with_host(|h| hud.resize(h, 0, 80)));
+        assert_eq!((hud.width(), hud.height()), (200, 80), "unchanged");
     }
 }

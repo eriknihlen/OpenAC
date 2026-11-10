@@ -8,7 +8,7 @@ use super::WorldRenderer;
 use super::pipelines::vertex_buffer;
 use super::shadows::PassPipelines;
 use crate::world_frame::{LandblockCoord, landblock_offset};
-use crate::world_lines::{PlacedLine, WorldLineVertex, build};
+use crate::world_lines::{PlacedLine, WorldLineVertex, build, followed_terrain};
 
 /// A landblock's side, metres.
 const LANDBLOCK_METRES: f32 = 192.0;
@@ -46,7 +46,16 @@ impl WorldRenderer {
             return;
         }
         let mut scratch = std::mem::take(&mut self.world_lines.scratch);
-        build(lines, eye, |x, y| self.sample_terrain_z(x, y), &mut scratch);
+        build(
+            lines,
+            eye,
+            followed_terrain(self.dungeon.is_some(), |x, y| self.sample_terrain_z(x, y)),
+            |x, y, at_most| {
+                self.camera_collision
+                    .floor_under(&self.origin, x, y, at_most)
+            },
+            &mut scratch,
+        );
         let gpu = &mut self.world_lines;
         if !scratch.is_empty() {
             if gpu.vertices.is_none() || scratch.len() > gpu.capacity {

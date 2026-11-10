@@ -147,6 +147,7 @@ fn ask(arm: &mut Arm, target: u32, kind: ProjectilePathKind) -> ProjectilePathRe
         step_distance: 0.7,
         maximum_collision_checks: 500,
         diagnostics: false,
+        launch_speed: None,
     })
 }
 

@@ -918,6 +918,11 @@ wire_record! {
         pub start_visible: bool,
         /// Takes pointer input while the plugin listens.
         pub accepts_pointer_input: bool,
+        /// Hosted by the `<canvas id="...">` element of the same id in one
+        /// of the plugin's markup windows instead of sitting on the screen
+        /// by itself: the window's layout places and sizes it, and the
+        /// anchor and offset are kept but ignored (API 1.12).
+        since (1, 12) pub in_markup: bool,
     }
 }
 
@@ -1020,12 +1025,41 @@ wire_record! {
 }
 
 wire_record! {
-    /// A canvas as it stands ([`crate::Import::UiCanvasState`] replies
-    /// `Option<CanvasState>`).
-    pub struct CanvasState {
+    /// A canvas's new size ([`crate::Import::UiCanvasResize`]; reply
+    /// `bool`).
+    pub struct CanvasResize {
+        /// The canvas.
+        pub canvas: u32,
+        /// Width, pixels, at least 1.
+        pub width: i32,
+        /// Height, pixels, at least 1.
+        pub height: i32,
+    }
+}
+
+wire_record! {
+    /// A canvas's size changed under the plugin
+    /// ([`crate::Event::CanvasResized`]): an in-markup canvas was laid out
+    /// at a new size. What it shows was painted for the old size; paint it
+    /// again for this one.
+    pub struct CanvasSize {
+        /// The canvas.
+        pub canvas: u32,
         /// Width, pixels.
         pub width: i32,
         /// Height, pixels.
+        pub height: i32,
+    }
+}
+
+wire_record! {
+    /// A canvas as it stands ([`crate::Import::UiCanvasState`] replies
+    /// `Option<CanvasState>`).
+    pub struct CanvasState {
+        /// Width, pixels: as registered, as last resized, or for an
+        /// in-markup canvas as last laid out.
+        pub width: i32,
+        /// Height, pixels, the same way.
         pub height: i32,
         /// Shown.
         pub visible: bool,
@@ -1138,7 +1172,8 @@ wire_record! {
         pub end: MapPoint,
         /// `0xRRGGBB`.
         pub color_rgb: u32,
-        /// Kept just above the ground along its length.
+        /// Follows the ground under it along its length: the terrain, or the
+        /// floors (stairs, ramps, bridges) when both ends stand on floors.
         pub follow_terrain: bool,
         /// Thickness, metres.
         pub width_metres: f32,

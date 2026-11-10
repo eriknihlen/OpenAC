@@ -722,6 +722,7 @@ fn a_canvas_holds_the_pointer_from_press_to_release_and_reports_a_lost_press() {
                 offset: (200.0, 100.0),
                 start_visible: true,
                 accepts_pointer_input: true,
+                in_markup: false,
             },
         )
         .unwrap();
@@ -738,6 +739,7 @@ fn a_canvas_holds_the_pointer_from_press_to_release_and_reports_a_lost_press() {
         &mut host.root,
         &band,
         &view,
+        &[],
         &mut no_image,
         &mut |_| unreachable!("no fonts"),
         None,
@@ -772,6 +774,7 @@ fn a_canvas_holds_the_pointer_from_press_to_release_and_reports_a_lost_press() {
         &mut host.root,
         &band,
         &view,
+        &[],
         &mut no_image,
         &mut |_| unreachable!("no fonts"),
         None,
@@ -795,6 +798,7 @@ fn a_canvas_holds_the_pointer_from_press_to_release_and_reports_a_lost_press() {
         &mut host.root,
         &band,
         &view,
+        &[],
         &mut no_image,
         &mut |_| unreachable!("no fonts"),
         None,
@@ -833,6 +837,7 @@ fn a_canvas_hears_the_pointer_hover_with_no_button_held_and_one_leave() {
                 offset: (200.0, 100.0),
                 start_visible: true,
                 accepts_pointer_input: true,
+                in_markup: false,
             },
         )
         .unwrap();
@@ -850,6 +855,7 @@ fn a_canvas_hears_the_pointer_hover_with_no_button_held_and_one_leave() {
             &mut host.root,
             &band,
             view,
+            &[],
             &mut no_image,
             &mut |_| unreachable!("no fonts"),
             None,
@@ -942,6 +948,7 @@ impl HoverRig {
                     offset: (200.0, 100.0),
                     start_visible: true,
                     accepts_pointer_input: true,
+                    in_markup: false,
                 },
             )
             .unwrap();
@@ -973,6 +980,7 @@ impl HoverRig {
             &mut self.host.root,
             &self.band,
             &self.view,
+            &[],
             &mut no_image,
             &mut |_| unreachable!("no fonts"),
             None,
@@ -1088,6 +1096,7 @@ fn a_canvas_is_told_which_modifier_keys_each_pointer_event_came_with() {
                 offset: (200.0, 100.0),
                 start_visible: true,
                 accepts_pointer_input: true,
+                in_markup: false,
             },
         )
         .unwrap();
@@ -1104,6 +1113,7 @@ fn a_canvas_is_told_which_modifier_keys_each_pointer_event_came_with() {
         &mut host.root,
         &band,
         &view,
+        &[],
         &mut no_image,
         &mut |_| unreachable!("no fonts"),
         None,
@@ -1169,6 +1179,7 @@ fn a_canvas_dragged_through_the_session_follows_the_pointer_without_overshooting
                 offset: (200.0, 100.0),
                 start_visible: true,
                 accepts_pointer_input: true,
+                in_markup: false,
             },
         )
         .unwrap();
@@ -1186,6 +1197,7 @@ fn a_canvas_dragged_through_the_session_follows_the_pointer_without_overshooting
         &mut host.root,
         &band,
         &view,
+        &[],
         &mut no_image,
         &mut |_| unreachable!("no fonts"),
         None,
@@ -1230,6 +1242,7 @@ fn a_canvas_dragged_through_the_session_follows_the_pointer_without_overshooting
                 &mut host.root,
                 &band,
                 &view,
+                &[],
                 &mut no_image,
                 &mut |_| unreachable!("no fonts"),
                 None,

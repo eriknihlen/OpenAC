@@ -2,7 +2,7 @@
 //! of each opcode nothing handles (once per opcode), a dump of every
 //! appearance change, and a once-a-second line of inbound pacing and
 //! transport counters with a final line when the connection ends. The
-//! switches come from the environment (see `docs/launch-options.md`); the
+//! switches come from the environment (see `content/docs/launch-options.md`); the
 //! lines are built here and printed by the session thread on standard error.
 
 use std::collections::HashSet;

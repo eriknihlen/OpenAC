@@ -10,12 +10,42 @@
 //! left out.
 //!
 //! A bar is a box around the segment, as wide and as tall as the line's
-//! width in metres. A line that follows the terrain is cut into pieces
-//! about [`PIECE_METRES`] long, each end raised to just above the ground
-//! under it (never lowered: a route over a bridge keeps its height).
+//! width in metres. A line that follows the ground is cut into pieces about
+//! [`PIECE_METRES`] long, fitted to what is under them:
+//!
+//! - When both of its ends stand on floors (the faces of interior cells and
+//!   of the objects the landblocks place, such as stairs and bridges), each
+//!   piece end stands on the floor under it, stairs and ramps included,
+//!   walked piece by piece from the start so a floor overhead is never
+//!   taken. When both ends are level with the terrain too, the terrain
+//!   counts as a floor. Where no floor is under a piece end, it stays on the
+//!   straight line. Unless an end is under the terrain (in a cellar or a
+//!   dungeon), no piece end is ever below the terrain: a line between two
+//!   porches goes over a hill between them, not through it.
+//! - Otherwise, when both ends are on the terrain, each piece end sits on
+//!   the terrain under it, down into dips as well as up over rises.
+//! - In both, a piece end is as high over the surface as the line's ends are
+//!   over theirs (taken evenly along it), and at least
+//!   [`GROUND_LIFT_METRES`].
+//! - When either end is above the terrain, on a bridge or a ledge, piece
+//!   ends are only raised to the terrain, never lowered, so a route over a
+//!   bridge keeps its height.
+//!
+//! The floors are only known in the landblocks around the player (the
+//! camera's collision neighbourhood, see
+//! [`crate::camera_collision::NEIGHBOURHOOD_RADIUS`]). Past them there are no
+//! floors, so a line there follows the terrain as above. Inside a sealed
+//! dungeon there is no terrain to follow ([`followed_terrain`]).
 
+use ac_nav::walk::ON_THE_FLOOR;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
+
+// An end is on the terrain when it is no more than `ON_THE_LAND_METRES`
+// above it, as a shape's anchor is (at or below counts). An end stands on a
+// floor when it is within `ON_THE_FLOOR` of it, as a route's node is, so a
+// route's corners on floors give a line that follows the floors.
+use crate::world_shapes::ON_THE_LAND_METRES;
 
 /// Lines further than this from the camera are not drawn, metres.
 pub const DRAW_RANGE_METRES: f32 = 250.0;
@@ -37,6 +67,14 @@ pub const VERTEX_BUDGET: usize = 4 * 1024 * 1024 / size_of::<WorldLineVertex>();
 
 /// How far above the ground a terrain-following line is kept, metres.
 pub const GROUND_LIFT_METRES: f32 = 0.05;
+
+/// How much higher than the floor under one piece end the floor under the
+/// next may be, metres: more than the steepest floor rises over a piece
+/// (about 0.85 m: a face is a floor up to about 48 degrees, a piece at most
+/// [`PIECE_METRES`] long), much less than a storey. Not a character's step
+/// height: that is a property of each creature's model, and a walkable ramp
+/// rises more than it in a piece.
+pub const FLOOR_STEP_METRES: f32 = 1.0;
 
 /// A line's width when the plugin's is not a number, metres.
 pub const DEFAULT_WIDTH_METRES: f32 = 0.25;
@@ -202,13 +240,34 @@ struct Planned {
     pieces: LinePieces,
 }
 
+/// The terrain world lines follow: `terrain`, but none inside a sealed
+/// dungeon. Its landblock's terrain is still loaded there, but is never
+/// seen, and the dungeon's floors may lie anywhere around it; lines there
+/// follow the floors alone.
+pub fn followed_terrain(
+    in_sealed_dungeon: bool,
+    terrain: impl Fn(f32, f32) -> Option<f32>,
+) -> impl Fn(f32, f32) -> Option<f32> {
+    move |x, y| {
+        if in_sealed_dungeon {
+            None
+        } else {
+            terrain(x, y)
+        }
+    }
+}
+
 /// Builds this frame's bars into `out` (cleared first): the lines seen from
-/// `camera`, each terrain-following end raised by `ground`, the height of
-/// the ground under a drawing-frame point where it is known.
+/// `camera`, each ground-following piece end fitted to `terrain`, the
+/// height of the terrain under a drawing-frame (x, y) where it is known, or
+/// to `floor`, the height of the highest floor (of an interior cell or a
+/// placed object) under a
+/// drawing-frame (x, y) no higher than a height, where there is one.
 pub fn build(
     lines: &[PlacedLine],
     camera: Vec3,
-    ground: impl Fn(f32, f32) -> Option<f32>,
+    terrain: impl Fn(f32, f32) -> Option<f32>,
+    floor: impl Fn(f32, f32, f32) -> Option<f32>,
     out: &mut Vec<WorldLineVertex>,
 ) {
     out.clear();
@@ -246,7 +305,13 @@ pub fn build(
         if line.pieces.drawn() as usize * VERTICES_PER_BAR > bars.remaining() {
             break;
         }
-        bars.line(line, &ground);
+        bars.line(
+            line,
+            &Under {
+                terrain: &terrain,
+                floor: &floor,
+            },
+        );
     }
 }
 
@@ -260,12 +325,20 @@ impl Bars<'_> {
         VERTEX_BUDGET.saturating_sub(self.out.len())
     }
 
-    fn line(&mut self, line: &Planned, ground: &impl Fn(f32, f32) -> Option<f32>) {
+    fn line(&mut self, line: &Planned, under: &Under<'_>) {
         let pieces = line.pieces;
         let along = line.end - line.start;
-        let at = |i: u32| {
+        let mut fit = Fit::of(line, under);
+        let mut at = |i: u32| {
             let t = (f64::from(i) / f64::from(pieces.count)) as f32;
-            raise(line.start + along * t, line.follow_terrain, ground)
+            let end = if i == 0 {
+                Which::Start
+            } else if i == pieces.count {
+                Which::End
+            } else {
+                Which::Neither
+            };
+            fit.place(line.start + along * t, t, end, under)
         };
         let mut previous = at(pieces.first);
         for i in pieces.first + 1..=pieces.last {
@@ -324,14 +397,201 @@ impl Bars<'_> {
     }
 }
 
-/// A terrain-following point raised to just above the ground under it.
-/// Outdoor routes can cross raised geometry above the heightmap, so the
-/// recorded height is kept; the ground only lifts a buried point.
-fn raise(mut point: Vec3, follow: bool, ground: &impl Fn(f32, f32) -> Option<f32>) -> Vec3 {
-    if follow && let Some(z) = ground(point.x, point.y) {
-        point.z = point.z.max(z + GROUND_LIFT_METRES);
+/// What a line that follows the ground can lie on, drawing frame.
+struct Under<'a> {
+    /// The terrain's height under (x, y), where it is known.
+    terrain: &'a dyn Fn(f32, f32) -> Option<f32>,
+    /// The highest floor under (x, y) no higher than a height.
+    floor: &'a dyn Fn(f32, f32, f32) -> Option<f32>,
+}
+
+/// Which end of a line a point is, if either.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Which {
+    Start,
+    End,
+    Neither,
+}
+
+/// How a line's piece ends meet what is under them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Fit {
+    /// A straight line: nothing under it is looked at.
+    Straight,
+    /// Both ends on floors: each piece end stands on the highest floor
+    /// under it no higher than [`FLOOR_STEP_METRES`] over the floor under
+    /// the piece end before it, the ends on their own floors. Floors are
+    /// only known around the player; past them a piece end has none, so it
+    /// keeps the line's height (raised to the terrain when
+    /// `above_terrain`).
+    Floor {
+        /// The ends' heights over their floors.
+        lift: (f32, f32),
+        /// The floors under the ends.
+        ends: (f32, f32),
+        /// The floor under the last piece end placed.
+        last: Option<f32>,
+        /// Both ends are on the terrain too, outdoors on paving, a step or
+        /// a ground floor: the terrain is a floor, so the line neither
+        /// drops into a cellar under it nor leaves the ground where the
+        /// floors end.
+        terrain: bool,
+        /// Neither end is under the terrain (in a cellar or a dungeon): no
+        /// piece end is drawn below the terrain, so a line between two
+        /// porches goes over a hill between them, not through it. Where the
+        /// terrain pokes through a floor, as in a building on a slope or one
+        /// whose floor is sunk a little below the terrain under it, the
+        /// line is drawn at the terrain there, over the floor.
+        above_terrain: bool,
+    },
+    /// Both ends on the terrain: each piece end sits on the terrain,
+    /// lowered into dips as well as raised over rises.
+    Hug {
+        /// The ends' heights over the terrain.
+        lift: (f32, f32),
+    },
+    /// An end above the terrain: outdoor routes can cross raised geometry
+    /// above the heightmap, so the line's height is kept and the terrain
+    /// only lifts a buried piece end.
+    Raise,
+}
+
+impl Fit {
+    fn of(line: &Planned, under: &Under<'_>) -> Self {
+        let (start, end) = (line.start, line.end);
+        if !line.follow_terrain {
+            return Self::Straight;
+        }
+        if let (Some(a), Some(b)) = (on_a_floor(start, under), on_a_floor(end, under)) {
+            let level = (
+                level_with_terrain(start, under),
+                level_with_terrain(end, under),
+            );
+            let (a, b, terrain) = match level {
+                (Some(ta), Some(tb)) => (a.max(ta), b.max(tb), true),
+                _ => (a, b, false),
+            };
+            return Self::Floor {
+                lift: (lift(start.z - a), lift(end.z - b)),
+                ends: (a, b),
+                last: None,
+                terrain,
+                above_terrain: !under_the_terrain(start, under) && !under_the_terrain(end, under),
+            };
+        }
+        if let (Some(a), Some(b)) = (on_the_terrain(start, under), on_the_terrain(end, under)) {
+            return Self::Hug {
+                lift: (lift(start.z - a), lift(end.z - b)),
+            };
+        }
+        Self::Raise
     }
-    point
+
+    /// The point `t` of the way along the line, placed for this fit. Where
+    /// nothing is known under it, it is left on the straight line.
+    fn place(&mut self, mut point: Vec3, t: f32, end: Which, under: &Under<'_>) -> Vec3 {
+        let along = |(start, end): (f32, f32)| start + (end - start) * t;
+        match self {
+            Self::Straight => {}
+            Self::Floor {
+                lift,
+                ends,
+                last,
+                terrain,
+                above_terrain,
+            } => {
+                let lift = along(*lift);
+                let ground = (under.terrain)(point.x, point.y);
+                let mut surface = match end {
+                    Which::Start => Some(ends.0),
+                    Which::End => Some(ends.1),
+                    Which::Neither => {
+                        // The first piece end drawn starts from the line's
+                        // own height when the start is out of range.
+                        let from = last.unwrap_or(point.z - lift);
+                        let floor = (under.floor)(point.x, point.y, from + FLOOR_STEP_METRES);
+                        // The terrain, when it counts as a floor, is taken
+                        // however steeply it rises: it is not a floor
+                        // overhead, and the line must not stay in the hill.
+                        let ground = ground.filter(|_| *terrain);
+                        match (floor, ground) {
+                            (Some(f), Some(g)) => Some(f.max(g)),
+                            (f, g) => f.or(g),
+                        }
+                    }
+                };
+                if let Some(z) = surface {
+                    point.z = z + lift;
+                }
+                if *above_terrain
+                    && let Some(g) = ground
+                    && point.z < g + lift
+                {
+                    point.z = g + lift;
+                    surface = Some(g);
+                }
+                if surface.is_some() {
+                    *last = surface;
+                }
+            }
+            Self::Hug { lift } => {
+                if let Some(z) = (under.terrain)(point.x, point.y) {
+                    point.z = z + along(*lift);
+                }
+            }
+            Self::Raise => {
+                if let Some(z) = (under.terrain)(point.x, point.y) {
+                    point.z = point.z.max(z + GROUND_LIFT_METRES);
+                }
+            }
+        }
+        point
+    }
+}
+
+/// A height over a surface as a piece end keeps it: at least
+/// [`GROUND_LIFT_METRES`].
+fn lift(over: f32) -> f32 {
+    over.max(GROUND_LIFT_METRES)
+}
+
+/// The point a line's end was lifted from: a plugin lifts a line meant to
+/// lie on the ground [`GROUND_LIFT_METRES`] off it, as the line is drawn.
+/// The tests below look at that point, so an end counts as on a floor or on
+/// the terrain when the point it was lifted from does.
+fn lifted_from(point: Vec3) -> Vec3 {
+    point - Vec3::Z * GROUND_LIFT_METRES
+}
+
+/// The floor a line's end stands on: the highest floor no more than
+/// [`ON_THE_FLOOR`] over or under the point it was lifted from.
+fn on_a_floor(end: Vec3, under: &Under<'_>) -> Option<f32> {
+    let point = lifted_from(end);
+    (under.floor)(point.x, point.y, point.z + ON_THE_FLOOR).filter(|z| point.z - z <= ON_THE_FLOOR)
+}
+
+/// The terrain a line's end is on: the terrain under it, when the point it
+/// was lifted from is no more than [`ON_THE_LAND_METRES`] above it, or below
+/// it. Not where the terrain is not known.
+fn on_the_terrain(end: Vec3, under: &Under<'_>) -> Option<f32> {
+    let point = lifted_from(end);
+    (under.terrain)(point.x, point.y).filter(|z| point.z <= z + ON_THE_LAND_METRES)
+}
+
+/// The terrain under a line's end that is level with it: no more than
+/// [`ON_THE_LAND_METRES`] over or under the point it was lifted from (a
+/// cellar or a dungeon deep under the terrain is not).
+fn level_with_terrain(end: Vec3, under: &Under<'_>) -> Option<f32> {
+    let point = lifted_from(end);
+    (under.terrain)(point.x, point.y).filter(|z| (point.z - z).abs() <= ON_THE_LAND_METRES)
+}
+
+/// Whether a line's end is under the terrain, the point it was lifted from
+/// more than [`ON_THE_LAND_METRES`] below it: in a cellar or a dungeon. Not
+/// where the terrain is not known.
+fn under_the_terrain(end: Vec3, under: &Under<'_>) -> bool {
+    let point = lifted_from(end);
+    (under.terrain)(point.x, point.y).is_some_and(|z| point.z < z - ON_THE_LAND_METRES)
 }
 
 #[cfg(test)]

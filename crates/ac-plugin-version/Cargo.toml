@@ -1,6 +1,6 @@
 [package]
 name = "ac-plugin-version"
-description = "The plugin API's version rules and permission vocabulary: what a plugin.json may declare, shared by the plugin calling convention, the client and the launcher. No dependencies."
+description = "The plugin API's version type, the client's plugin-api.json and the permission vocabulary: what a plugin.json may declare, shared by the plugin calling convention, the client and the launcher. Which API versions a client loads is the client's (ac-plugin-abi), not here. No dependencies."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

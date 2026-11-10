@@ -28,6 +28,15 @@ const EXIT_SESSION_FAILED: u8 = 1;
 /// Exit code for bad options.
 const EXIT_USAGE: u8 = 2;
 
+/// `openac plugin-api`: print [`plugin_api_file_text`].
+const PLUGIN_API_VERB: &str = "plugin-api";
+
+/// The `plugin-api.json` of this build: the plugin API versions its plugin
+/// host loads.
+fn plugin_api_file_text() -> String {
+    ac_plugin::abi::API_RANGE.to_file_text()
+}
+
 fn main() -> ExitCode {
     // A panic on any thread leaves a local crash report in the crash folder
     // under the logs, with what the open window (if any) knew.
@@ -57,6 +66,14 @@ fn main() -> ExitCode {
                 ExitCode::from(EXIT_SESSION_FAILED)
             }
         };
+    }
+    // The plugin API versions this client loads, as the `plugin-api.json`
+    // its release carries beside it (the launcher judges plugins by it).
+    if let [verb] = arguments.as_slice()
+        && verb == PLUGIN_API_VERB
+    {
+        outln!("{}", plugin_api_file_text().trim_end());
+        return ExitCode::SUCCESS;
     }
     // `run` and `validate` take a session-config document.
     if matches!(

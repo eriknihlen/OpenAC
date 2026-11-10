@@ -23,6 +23,21 @@ mod png;
 const ID: &str = "acme.hello";
 const ENTRY: &str = "acme.hello.wasm";
 
+/// A verified client of this build, loading the plugin API versions it was
+/// built with: the launcher installs plugins only for an installed client.
+fn this_client() -> ac_launcher_core::updates::ClientVersionResolution {
+    use ac_launcher_core::updates::{ClientVersionResolution, ClientVersionState, LauncherVersion};
+    ClientVersionResolution {
+        state: ClientVersionState::Verified,
+        status: String::new(),
+        version: LauncherVersion::try_parse(env!("CARGO_PKG_VERSION")),
+        directory: None,
+        previous_version: None,
+        record: None,
+        plugin_api: Some(ac_plugin::abi::API_RANGE),
+    }
+}
+
 struct Root(PathBuf);
 
 impl Root {
@@ -64,7 +79,7 @@ fn manifest_json(id: &str, version: &str, permissions: bool) -> String {
   "displayName": "Hello",
   "version": "{version}",
   "entry": "{ENTRY}",
-  "apiVersion": "1.10",
+  "apiVersion": "1.12",
   "minHostVersion": "0.1.0"{permissions}
 }}"#
     )
@@ -182,7 +197,7 @@ fn a_valid_directory_passes() {
     assert_no_failure(&report);
     let (status, message) = check(&report, "module matches its manifest");
     assert_eq!(status, CheckStatus::Pass);
-    assert!(message.starts_with("API 1.10;"), "{message}");
+    assert!(message.starts_with("API 1.12;"), "{message}");
     assert!(message.contains("Permissions used: chat"), "{message}");
 }
 
@@ -493,7 +508,7 @@ fn a_module_built_for_another_api_version_than_its_manifest_fails() {
     );
     assert_eq!(status, CheckStatus::Fail);
     assert!(
-        message.starts_with("the .wasm was built for API 2.0 but plugin.json says 1.10"),
+        message.starts_with("the .wasm was built for API 2.0 but plugin.json says 1.12"),
         "{message}"
     );
 }
@@ -890,7 +905,7 @@ fn a_packed_release_installs_through_the_launcher_installer() {
             repo,
             &packed.tag,
             None,
-            None,
+            Some(&this_client()),
             None,
             None,
             &CancelToken::none(),
@@ -956,7 +971,15 @@ fn a_release_packed_into_an_index_resolves_and_installs() {
     let records = Arc::new(Mutex::new(InstalledPluginRecordStore::for_paths(&paths)));
     let installer = PluginInstaller::new(&paths, transport, records);
     let result = installer
-        .install_or_update(repo, &tag, None, None, None, None, &CancelToken::none())
+        .install_or_update(
+            repo,
+            &tag,
+            None,
+            Some(&this_client()),
+            None,
+            None,
+            &CancelToken::none(),
+        )
         .unwrap();
     assert_eq!(result.id, ID);
 }

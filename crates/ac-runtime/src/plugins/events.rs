@@ -20,11 +20,23 @@ use ac_plugin::abi::world::{
 
 use super::world::Ownership;
 use crate::communication::ClientConfirmation;
-use crate::gameplay::GameplayEvent;
+use crate::gameplay::{GameplayEvent, SelectionSource};
 use crate::local_time::LocalZone;
 use crate::session::{HostEvent, SessionState};
 use crate::world::transit::{PortalKind, PortalSnapshot};
 use crate::world::{ItemChange, World, WorldChange};
+
+/// Who changed the selection, as plugins read it
+/// ([`ac_plugin::abi::world::selection_source`]).
+fn selection_source_code(source: SelectionSource) -> u8 {
+    use ac_plugin::abi::world::selection_source as code;
+    match source {
+        SelectionSource::System => code::SYSTEM,
+        SelectionSource::Keyboard => code::KEYBOARD,
+        SelectionSource::Mouse => code::MOUSE,
+        SelectionSource::Host => code::PLUGIN,
+    }
+}
 
 /// The runtime state kept for plugins, owned by the session state.
 #[derive(Debug)]
@@ -542,6 +554,7 @@ fn follow_experience(state: &mut SessionState, out: &mut Vec<Event>) {
 pub fn follow(state: &mut SessionState, in_world: bool, listening: bool) -> Vec<Event> {
     let open = state.inventory.external_containers().current_container_id();
     let selected = state.gameplay.selection().selected();
+    let selection_source = state.gameplay.selection().source();
     let completions = *state.inventory.completions();
     let services = &mut state.plugin_services;
     let mut out = Vec::new();
@@ -570,10 +583,13 @@ pub fn follow(state: &mut SessionState, in_world: bool, listening: bool) -> Vec<
         }
         services.open_container = open;
     }
+    // Compared once a pass: a selection that changed twice in the pass is
+    // reported once, with who made the last change.
     if services.selected != selected {
         out.push(Event::SelectionChanged(SelectionChange {
             previous: services.selected,
             selected,
+            source: selection_source_code(selection_source),
         }));
         services.selected = selected;
     }

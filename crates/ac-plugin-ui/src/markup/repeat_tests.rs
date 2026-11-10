@@ -365,3 +365,14 @@ fn template_names_include_nested_templates() {
         vec!["head".to_owned(), "inner".to_owned()]
     );
 }
+
+/// A `<canvas>` in a template would name the same canvas in every row.
+#[test]
+fn a_canvas_cannot_be_repeated() {
+    assert_eq!(
+        message(window(
+            "<repeat items=\"{Rows}\" key=\"{Id}\"><canvas id=\"map\" h=\"40\"/></repeat>"
+        )),
+        "<canvas id=\"map\"> cannot be inside a <repeat>: every row would name the same canvas"
+    );
+}

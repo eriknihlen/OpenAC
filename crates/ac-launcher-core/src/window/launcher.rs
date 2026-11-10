@@ -42,11 +42,11 @@ use crate::orchestration::{
     MINIMUM_RELAUNCH_DELAY_SECONDS, MonotonicClock, OrchestratorError, RelaunchAttempt,
 };
 use crate::plugins::{
-    ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo, InstalledPluginSource,
-    PermissionDeclaration, PluginInstallResult, PluginManifest, PluginReleaseCandidates,
-    PluginReleaseChannel, PluginReleaseFetchResult, PluginReleaseResolution,
-    PluginReleaseResolveResult, PluginReleaseResolver, PluginRepositoryResolution, describe,
-    github, is_built_for_csharp, is_well_formed_id,
+    CLIENT_NEEDED_REFUSAL, ICON_FILE_NAME, ICON_MAXIMUM_BYTES, InstallRules, InstalledPluginInfo,
+    InstalledPluginSource, PermissionDeclaration, PluginInstallResult, PluginManifest,
+    PluginReleaseCandidates, PluginReleaseChannel, PluginReleaseFetchResult,
+    PluginReleaseResolution, PluginReleaseResolveResult, PluginReleaseResolver,
+    PluginRepositoryResolution, describe, github, is_built_for_csharp, is_well_formed_id,
 };
 use crate::profiles::{
     LaunchMode, LauncherCheckedAccount, LauncherCheckedAccountStore, LauncherConsoleSettings,
@@ -342,6 +342,12 @@ pub struct LauncherWindow {
     /// What the profile load could not carry over from an older file,
     /// shown once.
     pub profile_migration_notice: Option<String>,
+    /// Why the last launcher update was not installed (it changed nothing),
+    /// shown once.
+    pub self_update_notice: Option<String>,
+    /// A downloaded launcher update waits for the install to be free: a
+    /// line under the header, never a dialog (clients may run all day).
+    pub launcher_update_waiting: Option<String>,
     /// The profile tag the accounts are filtered by, or `None` for all.
     pub profile_filter: Option<String>,
     /// "All" and one chip per profile tag, in the order the tags first
@@ -412,6 +418,10 @@ pub struct LauncherWindow {
     /// What they listed when a change started the check now running: seen
     /// once that check has read the plugin list.
     plugin_feeds_pending: Option<BTreeMap<String, Vec<String>>>,
+    /// The installed client changed since the installed plugins were last
+    /// checked: which updates it can run (its versions and plugin API) may
+    /// have changed too, so they are checked again once no plugin work runs.
+    plugin_check_after_client_change: bool,
 }
 
 impl std::fmt::Debug for LauncherWindow {
@@ -646,6 +656,8 @@ impl LauncherWindow {
             character_uses_account_plugins: false,
             remove_character_target: None,
             profile_migration_notice: None,
+            self_update_notice: None,
+            launcher_update_waiting: None,
             profile_filter: None,
             profile_filters: Vec::new(),
             checked_accounts: parts.checked_accounts,
@@ -695,6 +707,7 @@ impl LauncherWindow {
             plugin_watch_backoff: false,
             plugin_feeds_seen: None,
             plugin_feeds_pending: None,
+            plugin_check_after_client_change: false,
         }
     }
 
@@ -845,6 +858,10 @@ impl LauncherWindow {
             self.follow_closing();
             return;
         }
+        if self.plugin_check_after_client_change && !self.plugins.is_busy {
+            self.plugin_check_after_client_change = false;
+            self.check_installed_plugin_updates();
+        }
         if !self.relaunch_attempt_running {
             self.run_automatic_relaunch();
         }
@@ -967,6 +984,7 @@ impl LauncherWindow {
                         self.operation_status = "Versioned client activation changed.".into();
                         self.last_error = None;
                         self.refresh_from_core();
+                        self.plugin_check_after_client_change = true;
                     }
                     Err(error) if error == crate::updates::UpdateError::Cancelled.to_string() => {
                         self.update_prompt.status = "Update cancelled.".into();
@@ -983,10 +1001,16 @@ impl LauncherWindow {
                 self.update_prompt.is_progress_indeterminate = false;
                 match result {
                     Ok(true) => self.shutdown_requested = true,
+                    // Staging took the install, but something took it again
+                    // before the helper could (staging itself refuses while
+                    // the install is in use); Update hands the staged
+                    // release over once it is free.
                     Ok(false) => {
-                        self.update_prompt.status = "The launcher update is ready. Close and \
-                                                     reopen the launcher to finish it."
-                            .into();
+                        self.update_prompt.status = format!(
+                            "The launcher update is ready, but {}. Close every client (and let \
+                             other updates finish), then choose Update again.",
+                            crate::updates::self_update_bootstrap::INSTALL_IN_USE
+                        );
                     }
                     Err(error) if error == crate::updates::UpdateError::Cancelled.to_string() => {
                         self.update_prompt.status = "Update cancelled.".into();
@@ -1809,6 +1833,7 @@ impl LauncherWindow {
             || self.remove_character_target.is_some()
             || self.profiles_dialog.is_open
             || self.profile_migration_notice.is_some()
+            || self.self_update_notice.is_some()
             || self.close_prompt.is_some()
     }
 
@@ -3302,6 +3327,11 @@ impl LauncherWindow {
         self.profile_migration_notice = None;
     }
 
+    /// Dismisses the notice of a launcher update that was not installed.
+    pub fn dismiss_self_update_notice(&mut self) {
+        self.self_update_notice = None;
+    }
+
     /// Opens the session log.
     pub fn open_session_log(&mut self) {
         if self.can_interact() {
@@ -3817,6 +3847,14 @@ impl LauncherWindow {
             self.plugins.error = row.channel_unavailable_text().map(str::to_owned);
             return;
         };
+        // The install would be refused: say so now, before the review.
+        if (self.client_version)()
+            .and_then(|client| client.version)
+            .is_none()
+        {
+            self.plugins.error = Some(CLIENT_NEEDED_REFUSAL.to_owned());
+            return;
+        }
         let request = InstallDialogRequest {
             repo: row.entry.repo.clone(),
             plugin_id: row.entry.id.clone(),
@@ -4697,10 +4735,7 @@ fn channel_option(
     client: Option<&ClientVersionResolution>,
 ) -> Option<DiscoverChannelOption> {
     let resolution = result.resolution()?;
-    let compatibility = describe(
-        &resolution.manifest,
-        client.and_then(|client| client.version.as_ref()),
-    );
+    let compatibility = describe(&resolution.manifest, client);
     Some(DiscoverChannelOption {
         tag: resolution.tag.clone(),
         version: resolution.manifest.version.clone(),

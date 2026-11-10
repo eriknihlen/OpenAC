@@ -50,6 +50,9 @@ pub const MAC_BUNDLE_NAME: &str = "OpenAC.app";
 
 const TARGET_TRANSACTION_PREFIX: &str = ".acdream-self-update-";
 
+/// What the last update attempt left for the launcher to show.
+const UPDATE_NOTICE_FILE_NAME: &str = "notice.txt";
+
 /// How the launcher is installed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LauncherInstallationKind {
@@ -445,7 +448,9 @@ impl LauncherSelfUpdateManager {
     }
 
     /// Stages one launcher archive: download, verify, extract, check, and
-    /// write the plan. The running installation is not touched.
+    /// write the plan. The running installation is not touched. A release
+    /// already staged for this installation is kept (the same one, still
+    /// verified) or replaced; a plan past staging is refused.
     pub fn stage_artifact(
         &self,
         version: &LauncherVersion,
@@ -465,12 +470,68 @@ impl LauncherSelfUpdateManager {
         create_dir(&self.transactions_directory)?;
         let existing = self.load_pending()?;
         self.cleanup_owned_residue_under_lease(existing.as_ref(), &target, &lease)?;
+        // An earlier update's failure notice is about that attempt; this
+        // one replaces it.
+        self.clear_update_notice();
         if let Some(existing) = existing {
-            return Err(UpdateError::failed(format!(
-                "Launcher self-update {} is already {}. Restart the launcher to finish it \
-                 before staging another.",
-                existing.version, existing.state
-            )));
+            if existing.state != SelfUpdatePlanState::Staged {
+                // Past staging the installation is changed; only a start
+                // finishes or undoes it.
+                return Err(UpdateError::failed(format!(
+                    "Launcher self-update {} is already {}. Restart the launcher to finish it \
+                     before staging another.",
+                    existing.version, existing.state
+                )));
+            }
+            if !fsutil::paths_equal(&existing.target_directory, &target) {
+                return Err(UpdateError::failed(format!(
+                    "Launcher self-update {} is staged for the launcher in '{}'. Start that \
+                     launcher to install it before updating this one.",
+                    existing.version,
+                    existing.target_directory.display()
+                )));
+            }
+            // A staged update has not touched the installation yet: a
+            // start may have left it because a client held the install, or
+            // its helper could not be started. Staging the same release
+            // again keeps it, so the caller can hand it over now; any other
+            // (or a damaged one) is dropped and this release staged.
+            let same_release = existing.version == version.value()
+                && existing.rid == rid
+                && existing.installation_kind == layout.kind
+                && existing.archive_sha256 == artifact.sha256.to_lowercase();
+            if same_release {
+                let reused = self.verify_payload(&existing, cancel).and_then(|()| {
+                    let files: Vec<ExtractedFileRecord> = existing
+                        .files
+                        .iter()
+                        .map(|file| {
+                            ExtractedFileRecord::new(
+                                file.path.clone(),
+                                file.sha256.clone(),
+                                file.size,
+                                file.unix_mode,
+                            )
+                        })
+                        .collect();
+                    validate_staged_payload(&files, rid, layout)
+                });
+                match reused {
+                    Ok(()) => {
+                        drop(lease);
+                        return Ok(SelfUpdateStageResult {
+                            version: version.clone(),
+                            pending_plan_path: self.pending_plan_path.clone(),
+                            status: format!(
+                                "Launcher {version} is staged and will be applied on next start."
+                            ),
+                        });
+                    }
+                    Err(error) if error.is_cancelled() => return Err(error),
+                    Err(_) => {}
+                }
+            }
+            self.discard_staged_under_lease(&existing, &lease)?;
         }
 
         let transaction_id = ids::unique_hex32();
@@ -487,20 +548,7 @@ impl LauncherSelfUpdateManager {
                 &executables_for_payload(rid, true),
                 cancel,
             )?;
-            if layout.kind == LauncherInstallationKind::MacBundle {
-                validate_mac_bundle_executable(&extracted, layout)?;
-            } else {
-                validate_required_executables(&extracted, rid, true)?;
-            }
-            validate_payload_layout(&extracted, layout)?;
-            if extracted
-                .iter()
-                .any(|file| file.path.eq_ignore_ascii_case(INSTALL_RECORD_FILE_NAME))
-            {
-                return Err(UpdateError::failed(format!(
-                    "The launcher ZIP may not provide '{INSTALL_RECORD_FILE_NAME}'."
-                )));
-            }
+            validate_staged_payload(&extracted, rid, layout)?;
             let mut files: Vec<InstalledFileRecord> = extracted
                 .iter()
                 .map(|file| InstalledFileRecord {
@@ -594,9 +642,24 @@ impl LauncherSelfUpdateManager {
         }
 
         self.verify_payload(&plan, cancel)?;
-        let previous = read_and_verify_install_record(&expected_target, &plan.rid, cancel)?;
+        let previous = read_and_verify_install_record(&expected_target, &plan.rid, cancel)
+            .map_err(|error| {
+                if error.is_cancelled() {
+                    error
+                } else {
+                    UpdateError::failed(format!(
+                        "This launcher's files do not match its install record \
+                         '{INSTALL_RECORD_FILE_NAME}': {error}"
+                    ))
+                }
+            })?;
         let apply = build_apply_journal(&plan, previous.as_ref(), &expected_target, cancel)?;
         let apply = self.prepare_target_transaction(&plan, apply, cancel)?;
+        // No launcher file is moved, replaced or removed before this state
+        // is written (the preparation only fills the transaction folder
+        // beside the launcher, creating empty parent folders at most): a
+        // failure up to here leaves the plan staged, see
+        // `abandon_unapplied_under_lease`.
         plan.state = SelfUpdatePlanState::Applying;
         plan.apply = Some(apply);
         self.write_plan(&plan)?;
@@ -732,6 +795,81 @@ impl LauncherSelfUpdateManager {
         try_delete_directory(&self.target_transaction_directory(&plan)?);
         try_delete_directory(&self.transaction_directory(transaction_id)?);
         Ok(())
+    }
+
+    /// Drops a staged plan that was never applied, with its transaction:
+    /// nothing beside the launcher was changed yet.
+    fn discard_staged_under_lease(
+        &self,
+        plan: &SelfUpdatePlan,
+        lease: &ExclusiveLease,
+    ) -> Result<(), UpdateError> {
+        self.barrier.require_owned(lease)?;
+        if plan.state != SelfUpdatePlanState::Staged {
+            return Err(UpdateError::failed(
+                "Only a staged self-update can be discarded.",
+            ));
+        }
+        std::fs::remove_file(&self.pending_plan_path)
+            .map_err(|error| io_error("The staged self-update could not be discarded", error))?;
+        try_delete_directory(&self.transaction_directory(&plan.transaction_id)?);
+        Ok(())
+    }
+
+    /// `<root>/app/launcher-update/notice.txt`: why the last launcher
+    /// update was not installed, for the next start to show once.
+    pub fn update_notice_path(&self) -> PathBuf {
+        self.root_directory.join(UPDATE_NOTICE_FILE_NAME)
+    }
+
+    /// The helper could not install the staged update and changed nothing
+    /// beside the launcher (the plan is still staged): the plan is dropped,
+    /// so the next start does not hand it over again, and `notice` is kept
+    /// for the launcher to show.
+    pub fn abandon_unapplied_under_lease(
+        &self,
+        transaction_id: &str,
+        notice: &str,
+        lease: &ExclusiveLease,
+    ) -> Result<(), UpdateError> {
+        self.barrier.require_owned(lease)?;
+        let plan = self
+            .load_pending()?
+            .ok_or_else(|| UpdateError::failed("There is no staged self-update to abandon."))?;
+        if plan.transaction_id != transaction_id || plan.state != SelfUpdatePlanState::Staged {
+            return Err(UpdateError::failed(
+                "The self-update changed the installation; it is not abandoned.",
+            ));
+        }
+        // The plan goes first: a notice that cannot be written must not
+        // leave the plan for the next start to retry.
+        self.discard_staged_under_lease(&plan, lease)?;
+        // The copies the apply prepared beside the launcher, if it got that far.
+        try_delete_directory(&self.target_transaction_directory(&plan)?);
+        self.keep_update_notice(notice);
+        Ok(())
+    }
+
+    /// Keeps `notice` for the launcher to show once (best effort: the
+    /// start that could not hand an update over still opens without it).
+    pub fn keep_update_notice(&self, notice: &str) {
+        let _ = create_dir(&self.root_directory);
+        let _ = fsutil::write_atomic_unique(&self.update_notice_path(), notice.as_bytes());
+    }
+
+    /// Forgets the last update's notice (an update was confirmed, or a new
+    /// one is being staged).
+    pub fn clear_update_notice(&self) {
+        fsutil::try_delete_file(&self.update_notice_path());
+    }
+
+    /// Why the last launcher update was not installed, once: the notice is
+    /// removed as it is read.
+    pub fn take_update_notice(&self) -> Option<String> {
+        let path = self.update_notice_path();
+        let notice = std::fs::read_to_string(&path).ok()?;
+        fsutil::try_delete_file(&path);
+        Some(notice.trim().to_owned()).filter(|notice| !notice.is_empty())
     }
 
     /// Ends a rolled-back update once the prior files verify.
@@ -1579,6 +1717,30 @@ fn validate_layout(layout: &LauncherInstallationLayout, rid: &str) -> Result<(),
         return Err(UpdateError::failed(
             "The macOS launcher installation layout is invalid.",
         ));
+    }
+    Ok(())
+}
+
+/// What a launcher payload must hold for `layout`: its executable, its
+/// bundle shape on macOS, and never an install record of its own.
+fn validate_staged_payload(
+    files: &[ExtractedFileRecord],
+    rid: &str,
+    layout: &LauncherInstallationLayout,
+) -> Result<(), UpdateError> {
+    if layout.kind == LauncherInstallationKind::MacBundle {
+        validate_mac_bundle_executable(files, layout)?;
+    } else {
+        validate_required_executables(files, rid, true)?;
+    }
+    validate_payload_layout(files, layout)?;
+    if files
+        .iter()
+        .any(|file| file.path.eq_ignore_ascii_case(INSTALL_RECORD_FILE_NAME))
+    {
+        return Err(UpdateError::failed(format!(
+            "The launcher ZIP may not provide '{INSTALL_RECORD_FILE_NAME}'."
+        )));
     }
     Ok(())
 }
