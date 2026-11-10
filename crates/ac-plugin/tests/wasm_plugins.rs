@@ -952,6 +952,26 @@ fn a_plugin_built_for_api_1_9_still_loads() {
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
+/// API 1.11 gave the selection event a source (marked `since`): `probe` as
+/// an API 1.10 SDK built it still loads.
+#[test]
+fn a_plugin_built_for_api_1_10_still_loads() {
+    let v1_10 = ApiVersion::new(1, 10);
+    let (loaded, error) = load_probe_built_for("probe-1-10", "1.10", &section_at(v1_10));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.12 gave the projectile path query a launch speed and the canvas
+/// registration `in_markup` (both marked `since`), and added an import and
+/// an event: `probe` (which asks projectile paths) as an API 1.11 SDK built
+/// it still loads.
+#[test]
+fn a_plugin_built_for_api_1_11_still_loads() {
+    let v1_11 = ApiVersion::new(1, 11);
+    let (loaded, error) = load_probe_built_for("probe-1-11", "1.11", &section_at(v1_11));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
 /// API 1.10: a plugin reads every enchantment on the character through a
 /// real module, the ones a stronger enchantment surpasses and the ones that
 /// never run out among them, apart from those in effect.

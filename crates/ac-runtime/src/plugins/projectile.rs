@@ -3,7 +3,7 @@
 //! target through the session's own collision world, the one its bodies
 //! move through, so every client answers from the same place.
 
-use ac_physics::globals::EPSILON;
+use ac_physics::globals::{EPSILON, MAX_VELOCITY};
 use ac_physics::{ObjectInfoState, PhysicsBody, PhysicsEngine, PhysicsState, ResolveRequest};
 use ac_plugin::abi::combat::AttackHeight;
 use ac_plugin::abi::projectile::{
@@ -38,10 +38,12 @@ fn result(status: ProjectilePathStatus) -> ProjectilePathResult {
 
 /// The most a launch speed can be, metres per second: no object moves
 /// faster.
-const MAXIMUM_LAUNCH_SPEED: f32 = 50.0;
+const MAXIMUM_LAUNCH_SPEED: f32 = MAX_VELOCITY;
 
-/// Gravity's pull on a curved flight, metres per second squared.
-const GRAVITY: f32 = 9.8;
+/// Gravity's pull on a curved flight, metres per second squared. The
+/// physics constant points down (negative); the arc formulas here take its
+/// size.
+const GRAVITY: f32 = -ac_physics::globals::GRAVITY;
 
 /// The launch of a missile or arc at a total `speed`, as a server
 /// launches one: the lower of the two arcs under [`GRAVITY`] that reach a
@@ -297,7 +299,7 @@ fn launch(
     };
     let total_time = across / speed;
     let up = if curved {
-        (rise + 4.9 * total_time * total_time) / total_time
+        (rise + 0.5 * GRAVITY * total_time * total_time) / total_time
     } else {
         rise / total_time
     };

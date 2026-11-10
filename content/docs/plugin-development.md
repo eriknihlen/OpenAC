@@ -162,7 +162,9 @@ the shot, instead of the fixed speed lofted to land there. A speed above
 `InvalidTarget`, and so does a target no arc reaches at the capped speed
 ("The target is out of reach at 20.0 m/s.", with no angle, as there is no
 launch). Any other answer's notice ends with the speed and launch angle used
-("Launched at 20.0 m/s, 28.0° up."). A straight shot ignores the speed. A
+("Launched at 20.0 m/s, 28.0° up."). A straight shot ignores the speed. The
+probe flies toward where the target is now; the server aims ahead of a moving
+target, so the real shot can take a different arc. A
 plugin built for an older version sends no launch speed, and its probe flies
 as before. API 1.12 also added canvases inside windows: `in_markup` at the end
 of a canvas registration, the markup `<canvas>` element that hosts such a canvas
@@ -306,8 +308,10 @@ registered without `in_markup`, which sits on the screen by itself.
 (API 1.12) changes the size of a canvas on the screen. Its anchor, offset,
 visibility, pointer listening and what it shows are kept, so a canvas
 anchored at a right or bottom edge keeps that edge where it was. Paint it
-again for the new size; `Canvas::width` and `Canvas::height` report the new
-size at once. Resizing to the size it has answers true and changes nothing.
+again for the new size; `Canvas::width` and `Canvas::height` of the handle
+you resized report the new size at once. A `Canvas` is `Copy`, so another copy
+of the handle keeps the old size; `Canvas::state` asks the client for the size
+it has now. Resizing to the size it has answers true and changes nothing.
 It answers false, and nothing changes, for a width or height below 1, a
 removed canvas, and an in-markup canvas.
 

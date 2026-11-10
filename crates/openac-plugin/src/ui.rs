@@ -716,8 +716,10 @@ impl Canvas {
         self.id
     }
 
-    /// Width, pixels: as registered or last resized. An in-markup canvas's
-    /// laid-out size is its [`Self::state`].
+    /// Width, pixels: as registered or last resized through this handle
+    /// (a copy made before a [`Self::resize`] keeps the old size). The
+    /// client's current size, and an in-markup canvas's laid-out size, is
+    /// its [`Self::state`].
     #[must_use]
     pub fn width(self) -> i32 {
         self.width
@@ -812,8 +814,11 @@ impl Canvas {
     /// Changes the size of a canvas on the screen (API 1.12). It keeps its
     /// anchor, offset, visibility, listening and what it shows, so a canvas
     /// anchored at a right or bottom edge keeps that edge where it was; paint
-    /// it again for the new size. [`Self::width`] and [`Self::height`]
-    /// report the new size at once. The size it already has changes nothing
+    /// it again for the new size. [`Self::width`] and [`Self::height`] of
+    /// this handle report the new size at once; a `Canvas` is `Copy`, so
+    /// another copy of the handle keeps the size it had. [`Self::state`]
+    /// asks the client for the size it has now, whichever copy asks. The
+    /// size it already has changes nothing
     /// and answers true. False, and nothing changes, for a width or height
     /// below 1, a removed canvas, or an in-markup canvas (its element
     /// decides its size).

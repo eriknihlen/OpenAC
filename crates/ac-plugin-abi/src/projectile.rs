@@ -64,7 +64,9 @@ wire_record! {
         /// ends with the speed and launch angle used. Without it, or for a
         /// straight shot, the probe flies as before: 46 m/s across for a
         /// missile, 37.5185 m/s for an arc, lofted to land on the aim
-        /// point. Added in API 1.12.
+        /// point. The probe flies toward where the target is now; the
+        /// server aims ahead of a moving target, so the real shot can take
+        /// a different arc. Added in API 1.12.
         since (1, 12) pub launch_speed: Option<f32>,
     }
 }

@@ -227,7 +227,9 @@ impl Host<'_> {
     /// capped at 50 m/s, on the lower arc to the aim point. A speed that is
     /// not a finite number above 0, or a target out of reach at the capped
     /// speed, answers `InvalidTarget` with a notice saying which; any other
-    /// answer's notice ends with the speed and launch angle used.
+    /// answer's notice ends with the speed and launch angle used. The probe
+    /// flies toward where the target is now; the server aims ahead of a
+    /// moving target, so the real shot can take a different arc.
     pub fn evaluate_projectile_path(
         &mut self,
         query: &ac_plugin_abi::projectile::ProjectilePathQuery,
