@@ -587,7 +587,8 @@ pub struct WorldLine {
     pub end: MapPoint,
     /// `0xRRGGBB`.
     pub color_rgb: u32,
-    /// Kept just above the ground along its length.
+    /// Follows the ground under it along its length: the terrain, or the
+    /// floors (stairs, ramps, bridges) when both ends stand on floors.
     pub follow_terrain: bool,
     /// Thickness, metres.
     pub width_metres: f32,

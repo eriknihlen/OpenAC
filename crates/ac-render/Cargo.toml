@@ -17,6 +17,7 @@ ac-dat.workspace = true
 ac-proto.workspace = true
 ac-runtime.workspace = true
 ac-physics.workspace = true
+ac-nav.workspace = true
 ac-motion.workspace = true
 ac-vfx.workspace = true
 winit.workspace = true

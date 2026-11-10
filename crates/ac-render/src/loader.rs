@@ -138,8 +138,8 @@ pub enum Loaded {
     CameraCollision {
         /// The landblock whose corner is the engine's origin.
         center: LandblockCoord,
-        /// The engine.
-        engine: Result<Box<PhysicsEngine>, String>,
+        /// The engine and its floors.
+        engine: Result<(Box<PhysicsEngine>, crate::floors::Floors), String>,
     },
     /// The region's sky, ambient sounds and calendar origin (sent after
     /// the terrain atlas; absent when the region has no sky).
@@ -1305,7 +1305,10 @@ fn run(
                         &height_table,
                         center,
                     )
-                    .map(Box::new)
+                    .map(|engine| {
+                        let floors = crate::floors::Floors::of(&engine);
+                        (Box::new(engine), floors)
+                    })
                     .map_err(|error| error.to_string());
                     if !worker.send(Loaded::CameraCollision { center, engine }) {
                         return;

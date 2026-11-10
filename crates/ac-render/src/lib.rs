@@ -30,6 +30,7 @@ pub mod effects;
 pub mod emotes;
 pub mod environment;
 pub mod facts;
+pub mod floors;
 pub mod frame;
 pub mod frustum;
 pub mod gameplay_input;
