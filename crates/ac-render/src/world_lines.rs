@@ -34,7 +34,8 @@
 //! The floors are only known in the landblocks around the player (the
 //! camera's collision neighbourhood, see
 //! [`crate::camera_collision::NEIGHBOURHOOD_RADIUS`]). Past them there are no
-//! floors, so a line there follows the terrain as above.
+//! floors, so a line there follows the terrain as above. Inside a sealed
+//! dungeon there is no terrain to follow ([`followed_terrain`]).
 
 use ac_nav::walk::ON_THE_FLOOR;
 use bytemuck::{Pod, Zeroable};
@@ -239,6 +240,23 @@ struct Planned {
     pieces: LinePieces,
 }
 
+/// The terrain world lines follow: `terrain`, but none inside a sealed
+/// dungeon. Its landblock's terrain is still loaded there, but is never
+/// seen, and the dungeon's floors may lie anywhere around it; lines there
+/// follow the floors alone.
+pub fn followed_terrain(
+    in_sealed_dungeon: bool,
+    terrain: impl Fn(f32, f32) -> Option<f32>,
+) -> impl Fn(f32, f32) -> Option<f32> {
+    move |x, y| {
+        if in_sealed_dungeon {
+            None
+        } else {
+            terrain(x, y)
+        }
+    }
+}
+
 /// Builds this frame's bars into `out` (cleared first): the lines seen from
 /// `camera`, each ground-following piece end fitted to `terrain`, the
 /// height of the terrain under a drawing-frame (x, y) where it is known, or
@@ -404,7 +422,8 @@ enum Fit {
     /// under it no higher than [`FLOOR_STEP_METRES`] over the floor under
     /// the piece end before it, the ends on their own floors. Floors are
     /// only known around the player; past them a piece end has none, so it
-    /// keeps the line's height, kept above the terrain.
+    /// keeps the line's height (raised to the terrain when
+    /// `above_terrain`).
     Floor {
         /// The ends' heights over their floors.
         lift: (f32, f32),
@@ -419,7 +438,10 @@ enum Fit {
         terrain: bool,
         /// Neither end is under the terrain (in a cellar or a dungeon): no
         /// piece end is drawn below the terrain, so a line between two
-        /// porches goes over a hill between them, not through it.
+        /// porches goes over a hill between them, not through it. Where the
+        /// terrain pokes through a floor, as in a building on a slope or one
+        /// whose floor is sunk a little below the terrain under it, the
+        /// line is drawn at the terrain there, over the floor.
         above_terrain: bool,
     },
     /// Both ends on the terrain: each piece end sits on the terrain,
@@ -533,30 +555,42 @@ fn lift(over: f32) -> f32 {
     over.max(GROUND_LIFT_METRES)
 }
 
-/// The floor a point stands on: the highest floor no more than
-/// [`ON_THE_FLOOR`] over it or under it.
-fn on_a_floor(point: Vec3, under: &Under<'_>) -> Option<f32> {
+/// The point a line's end was lifted from: a plugin lifts a line meant to
+/// lie on the ground [`GROUND_LIFT_METRES`] off it, as the line is drawn.
+/// The tests below look at that point, so an end counts as on a floor or on
+/// the terrain when the point it was lifted from does.
+fn lifted_from(point: Vec3) -> Vec3 {
+    point - Vec3::Z * GROUND_LIFT_METRES
+}
+
+/// The floor a line's end stands on: the highest floor no more than
+/// [`ON_THE_FLOOR`] over or under the point it was lifted from.
+fn on_a_floor(end: Vec3, under: &Under<'_>) -> Option<f32> {
+    let point = lifted_from(end);
     (under.floor)(point.x, point.y, point.z + ON_THE_FLOOR).filter(|z| point.z - z <= ON_THE_FLOOR)
 }
 
-/// The terrain a point is on: the terrain under it, when the point is no
-/// more than [`ON_THE_LAND_METRES`] above it, or below it. Not where the
-/// terrain is not known.
-fn on_the_terrain(point: Vec3, under: &Under<'_>) -> Option<f32> {
+/// The terrain a line's end is on: the terrain under it, when the point it
+/// was lifted from is no more than [`ON_THE_LAND_METRES`] above it, or below
+/// it. Not where the terrain is not known.
+fn on_the_terrain(end: Vec3, under: &Under<'_>) -> Option<f32> {
+    let point = lifted_from(end);
     (under.terrain)(point.x, point.y).filter(|z| point.z <= z + ON_THE_LAND_METRES)
 }
 
-/// The terrain under a point that is level with it: no more than
-/// [`ON_THE_LAND_METRES`] over it or under it (a cellar or a dungeon deep
-/// under the terrain is not).
-fn level_with_terrain(point: Vec3, under: &Under<'_>) -> Option<f32> {
+/// The terrain under a line's end that is level with it: no more than
+/// [`ON_THE_LAND_METRES`] over or under the point it was lifted from (a
+/// cellar or a dungeon deep under the terrain is not).
+fn level_with_terrain(end: Vec3, under: &Under<'_>) -> Option<f32> {
+    let point = lifted_from(end);
     (under.terrain)(point.x, point.y).filter(|z| (point.z - z).abs() <= ON_THE_LAND_METRES)
 }
 
-/// Whether a point is under the terrain, more than
-/// [`ON_THE_LAND_METRES`] below it: in a cellar or a dungeon. Not where the
-/// terrain is not known.
-fn under_the_terrain(point: Vec3, under: &Under<'_>) -> bool {
+/// Whether a line's end is under the terrain, the point it was lifted from
+/// more than [`ON_THE_LAND_METRES`] below it: in a cellar or a dungeon. Not
+/// where the terrain is not known.
+fn under_the_terrain(end: Vec3, under: &Under<'_>) -> bool {
+    let point = lifted_from(end);
     (under.terrain)(point.x, point.y).is_some_and(|z| point.z < z - ON_THE_LAND_METRES)
 }
 

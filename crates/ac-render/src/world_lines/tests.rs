@@ -605,3 +605,61 @@ fn a_line_between_floors_level_with_the_terrain_climbs_a_steep_rise() {
         assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
     }
 }
+
+// Inside a sealed dungeon its landblock's terrain is still loaded, never
+// seen, and the dungeon's floors may lie anywhere around it. A line down the
+// stairs follows the stairs, not that unseen ground: here the ground is just
+// over the lower floor, so lifting the line to it would leave the line
+// floating over the foot of the stairs.
+#[test]
+fn a_line_in_a_sealed_dungeon_follows_its_floors_not_the_unseen_terrain() {
+    let floors = stairs();
+    let unseen = |_: f32, _: f32| Some(0.5);
+    let mut l = line(
+        Vec3::new(1.0, 0.0, down_the_stairs(0.0) + 0.1),
+        Vec3::new(1.0, 18.76, down_the_stairs(18.76) + 0.1),
+        true,
+    );
+    l.width_metres = 0.1;
+    let points = draw_indoors(l, followed_terrain(true, unseen), &floors);
+    for p in &points {
+        let centre = down_the_stairs(p.y) + 0.1;
+        assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
+    }
+    // Outside a dungeon the same terrain is followed: no lower than it.
+    let lowest = draw_indoors(l, followed_terrain(false, unseen), &floors)
+        .iter()
+        .map(|p| p.z)
+        .fold(f32::MAX, f32::min);
+    assert!(lowest >= 0.5, "{lowest}");
+}
+
+// A plugin lifts a line meant to lie on the ground a little off it. An end
+// lifted that much off a point that is on a floor, or on the terrain, still
+// counts as on it.
+#[test]
+fn a_line_lifted_off_a_floor_or_the_ground_still_follows_it() {
+    let floors = stairs();
+    // Each end's point as far over its floor as still counts as on it.
+    let over = ON_THE_FLOOR - 0.01 + GROUND_LIFT_METRES;
+    let mut l = line(
+        Vec3::new(1.0, 0.0, down_the_stairs(0.0) + over),
+        Vec3::new(1.0, 18.76, down_the_stairs(18.76) + over),
+        true,
+    );
+    l.width_metres = 0.1;
+    for p in draw_indoors(l, no_ground, &floors) {
+        let centre = down_the_stairs(p.y) + over;
+        assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
+    }
+    // On the terrain: ends as high over the ground as still counts as on
+    // it, lifted, go down into a dip.
+    let dip = bump(-5.0);
+    let over = ON_THE_LAND_METRES - 0.01 + GROUND_LIFT_METRES;
+    let mut l = line(Vec3::new(0.0, 0.0, over), Vec3::new(100.0, 0.0, over), true);
+    l.width_metres = 0.1;
+    for p in draw_over(l, &dip) {
+        let centre = dip(p.x, p.y).unwrap() + over;
+        assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
+    }
+}
