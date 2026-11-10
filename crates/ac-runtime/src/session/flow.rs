@@ -746,12 +746,27 @@ impl SessionFlow {
         self.next_login_character_id
     }
 
+    /// The creation screen opens: a creation not yet under way starts from
+    /// a rolled character (see [`CharacterCreation::open`]). Nothing
+    /// happens outside character selection.
+    pub fn open_creation(&mut self) {
+        if self.phase == Phase::InCharacterSelect {
+            self.creation.open();
+        }
+    }
+
     /// A character-creation command. Finishing sends the create request.
+    /// The first command of a creation opens it, rolling the character
+    /// the way the creation window does when it opens; a roll asked for
+    /// is that roll.
     ///
     /// # Errors
     /// Outside character selection, or the creation state refused it.
     pub fn creation_command(&mut self, command: &CreationCommand) -> Result<(), SessionError> {
         self.require_selection("character creation")?;
+        if *command != CreationCommand::RandomizeCharacter {
+            self.creation.open();
+        }
         if let CreationCommand::Finish {
             confirm_unspent_credits,
         } = command

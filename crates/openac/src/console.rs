@@ -1727,7 +1727,7 @@ fn create_verb(argument: &str) -> Result<CreationCommand, &'static str> {
     use CreationCommand as C;
     const USAGE: &str = "usage: /create [heritage <id> | gender <key|male|female> | template <n> \
         | attr <str|end|coord|quick|focus|self> <n> | lock <attr> on|off | train|spec|untrain <skill> \
-        | look <slot> <n|none> | shade <slot> <0..1> | town <n> | name <name> | slot <n> \
+        | look <slot> <n> | look hat none | shade <slot> <0..1> | town <n> | name <name> | slot <n> \
         | finish [confirm] | ack | random [look|clothes]]";
     let w = words(argument);
     let sub = w.first().map(|s| s.to_ascii_lowercase());
@@ -1767,8 +1767,9 @@ fn create_verb(argument: &str) -> Result<CreationCommand, &'static str> {
         (Some("spec"), 2) => number(1).map(C::SpecializeSkill),
         (Some("untrain"), 2) => number(1).map(C::UntrainSkill),
         (Some("look"), 3) => appearance_slot(&w[1]).and_then(|slot| {
+            // Only the hat can be none; every other slot holds a choice.
             if w[2].eq_ignore_ascii_case("none") {
-                Some(C::SetAppearance(slot, u32::MAX))
+                (slot == AppearanceSlot::HeadgearStyle).then_some(C::SetAppearance(slot, u32::MAX))
             } else {
                 number(2).map(|n| C::SetAppearance(slot, n))
             }
@@ -2549,6 +2550,7 @@ mod tests {
             "/nextlogin",
             "/create attr luck 5",
             "/create look ears 1",
+            "/create look hair none",
         ] {
             assert!(matches!(parse(raw, &[]), ConsoleInput::Usage(_)), "{raw}");
         }

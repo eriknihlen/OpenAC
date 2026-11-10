@@ -4,6 +4,7 @@
 //! `LiveSessionControllerCharacterCreationTests.cs` and `LiveSessionControllerTests.cs`.
 
 use super::*;
+use crate::session::creation::UNSET;
 use ac_bits::Writer;
 
 fn words(words: &[u32]) -> Vec<u8> {
@@ -46,8 +47,20 @@ fn chargen() -> Arc<ChargenOptions> {
     use ac_core::chargen::{
         ChargenAttributeValues, ChargenGenderOptions, ChargenHeritageOptions, ChargenTemplate,
     };
+    // One choice in every look list.
     let gender = ChargenGenderOptions {
         gender_key: 1,
+        hair_colors: vec![1],
+        hair_styles: vec![Default::default()],
+        eye_colors: vec![1],
+        eye_strips: vec![Default::default()],
+        nose_strips: vec![Default::default()],
+        mouth_strips: vec![Default::default()],
+        headgears: vec![Default::default()],
+        shirts: vec![Default::default()],
+        pants: vec![Default::default()],
+        footwear: vec![Default::default()],
+        clothing_colors: vec![1],
         ..ChargenGenderOptions::default()
     };
     let heritage = ChargenHeritageOptions {
@@ -64,11 +77,32 @@ fn chargen() -> Arc<ChargenOptions> {
             },
             ..ChargenTemplate::default()
         }],
-        genders_by_key: [(1, gender)].into(),
+        genders_by_key: [
+            (
+                2,
+                ChargenGenderOptions {
+                    gender_key: 2,
+                    ..gender.clone()
+                },
+            ),
+            (1, gender),
+        ]
+        .into(),
         ..ChargenHeritageOptions::default()
     };
     Arc::new(ChargenOptions {
-        heritages_by_id: [(1, heritage)].into(),
+        // The four heritages a roll picks from, alike.
+        heritages_by_id: (1..=4)
+            .map(|id| {
+                (
+                    id,
+                    ChargenHeritageOptions {
+                        heritage_id: id,
+                        ..heritage.clone()
+                    },
+                )
+            })
+            .collect(),
         ..ChargenOptions::default()
     })
 }
@@ -208,8 +242,8 @@ fn a_second_create_after_a_refused_enter_takes_the_next_wire_slot() {
     flow.handle_message(Duration::ZERO, &chargen_answer(1, 0x5000_1234, "NewChar"));
     flow.handle_message(Duration::ZERO, &words(&[0xF659, 0x0D]));
     assert_eq!(flow.phase(), Phase::InCharacterSelect);
-    flow.creation_command(&CreationCommand::SetName("SecondChar".into()))
-        .unwrap();
+    // A created character ends its creation: the next one starts afresh.
+    ready_character(&mut flow, "SecondChar");
     finish(&mut flow);
     flow.handle_message(
         Duration::ZERO,
@@ -252,6 +286,40 @@ fn an_answer_nothing_asked_for_is_dropped() {
     flow.handle_message(Duration::ZERO, &chargen_answer(3, 0, ""));
     flow.handle_message(Duration::ZERO, &chargen_answer(1, 0x5000_1234, "NewChar"));
     assert!(flow.selection().get(0x5000_1234).is_none());
+}
+
+#[test]
+fn the_first_creation_command_rolls_the_character_as_the_window_does() {
+    // The console never opens the creation window, so its first command
+    // opens the creation: a whole character is rolled, nothing unset.
+    let mut flow = selecting();
+    assert_eq!(flow.creation().snapshot().heritage_id, 0);
+    flow.creation_command(&CreationCommand::SetName("Console".into()))
+        .unwrap();
+    let s = flow.creation().snapshot();
+    assert_ne!((s.heritage_id, s.gender_key), (0, 0));
+    assert_ne!(s.appearance.eyes_strip, UNSET);
+    assert_ne!(s.appearance.shirt_style, UNSET);
+    assert_eq!(s.name, "Console");
+    // Under way: the next command does not roll again.
+    flow.creation_command(&CreationCommand::SetSlot(1)).unwrap();
+    let again = flow.creation().snapshot();
+    assert_eq!(
+        (again.heritage_id, again.appearance, again.name),
+        (s.heritage_id, s.appearance, s.name)
+    );
+}
+
+#[test]
+fn a_console_creation_with_only_a_name_is_sent_with_a_whole_look() {
+    let mut flow = selecting();
+    flow.creation_command(&CreationCommand::SetName("Console".into()))
+        .unwrap();
+    flow.creation_command(&CreationCommand::Finish {
+        confirm_unspent_credits: true,
+    })
+    .unwrap();
+    assert_eq!(opcodes(&mut flow), [(0xF656, Queue::Login)]);
 }
 
 #[test]

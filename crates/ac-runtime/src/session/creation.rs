@@ -444,6 +444,8 @@ pub struct CharacterCreation {
     start_area: i32,
     slot: u32,
     verification_pending: bool,
+    /// A creation is under way: the character was rolled when it began.
+    under_way: bool,
     last_local_refusal: LocalRefusal,
     last_rejection: Option<CreationRejection>,
     last_created: Option<CreatedIdentity>,
@@ -477,6 +479,7 @@ impl CharacterCreation {
             start_area: -1,
             slot: 0,
             verification_pending: false,
+            under_way: false,
             last_local_refusal: LocalRefusal::default(),
             last_rejection: None,
             last_created: None,
@@ -553,6 +556,7 @@ impl CharacterCreation {
     pub fn begin(&mut self, generation: Generation) {
         self.generation = generation;
         self.active = true;
+        self.under_way = false;
         self.clear_session_state();
         self.revision += 1;
         self.publish(CreationDeltaKind::Reset);
@@ -572,6 +576,7 @@ impl CharacterCreation {
     pub fn reset(&mut self, generation: Generation) {
         self.generation = generation;
         self.active = false;
+        self.under_way = false;
         self.clear_session_state();
         self.revision += 1;
         self.publish(CreationDeltaKind::Reset);
@@ -954,9 +959,10 @@ impl CharacterCreation {
 
     // -- Appearance --------------------------------------------------------
 
-    /// Choose an index for a look slot ([`UNSET`] clears it).
+    /// Choose an index for a look slot. [`UNSET`] takes the headgear off;
+    /// every other slot always holds one of its choices.
     pub fn try_set_appearance_index(&mut self, slot: AppearanceSlot, index: u32) -> bool {
-        if !self.active {
+        if !self.active || (index == UNSET && slot != AppearanceSlot::HeadgearStyle) {
             return false;
         }
         let Some(count) = self.gender().map(|g| slot_count(slot, g)) else {
@@ -1156,6 +1162,7 @@ impl CharacterCreation {
 
     fn randomize_character_inner(&mut self) {
         self.clear_session_state();
+        self.under_way = true;
         let heritage_id = self.roll_dice(1, 4).cast_unsigned();
         self.heritage_id = heritage_id;
         let options = Arc::clone(&self.options);
@@ -1203,6 +1210,17 @@ impl CharacterCreation {
         self.randomize_shirt_trousers_footwear();
         self.changed();
         true
+    }
+
+    /// The creation screen opens: a creation not yet under way starts from
+    /// a whole rolled character, as the screen rolls one when it opens, so
+    /// nothing is left unchosen. Once one is under way nothing changes.
+    /// True when it rolled.
+    pub fn open(&mut self) -> bool {
+        if self.under_way {
+            return false;
+        }
+        self.try_randomize_character()
     }
 
     // -- Town, name, slot --------------------------------------------------
@@ -1304,6 +1322,21 @@ impl CharacterCreation {
         let a = &self.appearance;
         let b = &self.attributes;
         let attribute = |v: i32| u32::try_from(v).unwrap_or(0);
+        // Each of the four clothing colors goes out as the palette template
+        // of the chosen color (the server dyes the garment with it), or 0
+        // when the color is not one of the garment's: a garment not worn,
+        // the hat when none is, has none. A garment's colors are its
+        // gender's list (every garment in the dats dyes every color of
+        // it), so the gender's list is read. Everything else goes out as
+        // chosen; 0xFFFFFFFF in the headgear style means no headgear.
+        let gender = self.gender();
+        let color = |style: AppearanceSlot, color: u32| {
+            gender
+                .filter(|g| (a.get(style) as usize) < slot_count(style, g))
+                .and_then(|g| g.clothing_colors.get(color as usize))
+                .copied()
+                .unwrap_or(0)
+        };
         let mut classes = [0u32; SKILL_ADVANCEMENT_CLASS_COUNT];
         for (slot, value) in classes.iter_mut().zip(self.skills.to_wire_classes()) {
             *slot = value;
@@ -1320,13 +1353,13 @@ impl CharacterCreation {
                     eye_color: a.eye_color,
                     hair_style: a.hair_style,
                     headgear_style: a.headgear_style,
-                    headgear_color: a.headgear_color,
+                    headgear_color: color(AppearanceSlot::HeadgearStyle, a.headgear_color),
                     shirt_style: a.shirt_style,
-                    shirt_color: a.shirt_color,
+                    shirt_color: color(AppearanceSlot::ShirtStyle, a.shirt_color),
                     trousers_style: a.trousers_style,
-                    trousers_color: a.trousers_color,
+                    trousers_color: color(AppearanceSlot::TrousersStyle, a.trousers_color),
                     footwear_style: a.footwear_style,
-                    footwear_color: a.footwear_color,
+                    footwear_color: color(AppearanceSlot::FootwearStyle, a.footwear_color),
                     skin_shade: a.skin_shade,
                     hair_shade: a.hair_shade,
                     headgear_shade: a.headgear_shade,
@@ -1362,6 +1395,7 @@ impl CharacterCreation {
         self.verification_pending = false;
         let kind = match (&response.character, response.is_ok()) {
             (Some(created), true) => {
+                self.under_way = false;
                 self.last_created = Some(CreatedIdentity {
                     guid: created.guid,
                     name: created.name.clone(),

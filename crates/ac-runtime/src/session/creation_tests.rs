@@ -213,6 +213,9 @@ fn chosen(template_index: u32) -> CharacterCreation {
     assert!(state.try_select_heritage(ALUVIAN));
     assert!(state.try_select_gender(MALE));
     assert!(state.try_select_template(template_index));
+    // A look, as the roll when creation opens leaves one.
+    assert!(state.try_randomize_appearance());
+    assert!(state.try_randomize_clothing());
     state
 }
 
@@ -516,6 +519,165 @@ fn an_accepted_finish_trims_the_name_and_sends_55_skill_slots() {
     assert_eq!(classes.len(), 55);
     assert_eq!(classes[SKILL_TRAIN_SPECIALIZE as usize], 2);
     assert_eq!(classes[SKILL_PRESET_PRIMARY as usize], 3);
+}
+
+#[test]
+fn opening_a_creation_rolls_every_slot_and_only_once() {
+    for seed in 0..50 {
+        let mut state = with_random(Box::new(SeededRandom::new(seed)));
+        assert!(state.open(), "seed {seed}");
+        let s = state.snapshot();
+        let a = s.appearance;
+        for value in [
+            a.eyes_strip,
+            a.nose_strip,
+            a.mouth_strip,
+            a.hair_style,
+            a.hair_color,
+            a.eye_color,
+            a.headgear_color,
+            a.shirt_style,
+            a.shirt_color,
+            a.trousers_style,
+            a.trousers_color,
+            a.footwear_style,
+            a.footwear_color,
+        ] {
+            assert_ne!(value, UNSET, "seed {seed}");
+        }
+        for shade in [
+            a.skin_shade,
+            a.hair_shade,
+            a.headgear_shade,
+            a.shirt_shade,
+            a.trousers_shade,
+            a.footwear_shade,
+        ] {
+            assert!((0.0..=1.0).contains(&shade), "seed {seed}: {shade}");
+        }
+        assert_ne!(s.template, TEMPLATE_UNSET);
+        assert_ne!(s.start_area, -1);
+        // Under way: opening again changes nothing.
+        assert!(!state.open());
+        assert_eq!(state.snapshot().appearance, s.appearance);
+    }
+    // Inactive, nothing opens.
+    let mut state = CharacterCreation::new(Arc::new(fixture()), Box::new(SeededRandom::new(1)));
+    assert!(!state.open());
+}
+
+#[test]
+fn a_new_creation_opens_with_a_new_roll() {
+    let mut state = active();
+    assert!(state.open());
+    state.begin(Generation(2));
+    assert_eq!(state.snapshot().appearance.hair_style, UNSET);
+    assert!(state.open());
+    assert_ne!(state.snapshot().appearance.hair_style, UNSET);
+}
+
+#[test]
+fn only_the_headgear_can_be_set_to_none() {
+    let mut state = ready_to_finish();
+    assert!(!state.try_set_appearance_index(AppearanceSlot::HairStyle, UNSET));
+    assert!(!state.try_set_appearance_index(AppearanceSlot::ShirtColor, UNSET));
+    assert_ne!(state.snapshot().appearance.hair_style, UNSET);
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearStyle, UNSET));
+    assert_eq!(state.snapshot().appearance.headgear_style, UNSET);
+}
+
+#[test]
+fn a_finish_sends_the_look_as_chosen_and_no_headgear_as_all_ones() {
+    let mut state = ready_to_finish();
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearStyle, UNSET));
+    let chosen = state.snapshot().appearance;
+    let finish = state.try_begin_finish(0, 11, false).unwrap();
+    let a = &finish.request.appearance;
+    assert_eq!(
+        [a.eyes_strip, a.nose_strip, a.mouth_strip],
+        [chosen.eyes_strip, chosen.nose_strip, chosen.mouth_strip]
+    );
+    assert_eq!(
+        [a.hair_style, a.hair_color, a.eye_color],
+        [chosen.hair_style, chosen.hair_color, chosen.eye_color]
+    );
+    assert_eq!(
+        [a.shirt_style, a.trousers_style, a.footwear_style],
+        [
+            chosen.shirt_style,
+            chosen.trousers_style,
+            chosen.footwear_style
+        ]
+    );
+    assert_eq!(a.headgear_style, 0xFFFF_FFFF);
+    assert_eq!(a.skin_shade.to_bits(), chosen.skin_shade.to_bits());
+    assert_eq!(a.footwear_shade.to_bits(), chosen.footwear_shade.to_bits());
+}
+
+#[test]
+fn a_clothing_color_goes_out_as_its_palette_template() {
+    // The fixture's gender offers the palette templates 400, 401 and 402.
+    let mut state = ready_to_finish();
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearStyle, 0));
+    for (slot, index) in [
+        (AppearanceSlot::HeadgearColor, 2),
+        (AppearanceSlot::ShirtColor, 0),
+        (AppearanceSlot::TrousersColor, 1),
+        (AppearanceSlot::FootwearColor, 2),
+    ] {
+        assert!(state.try_set_appearance_index(slot, index));
+    }
+    let a = state
+        .try_begin_finish(0, 11, false)
+        .unwrap()
+        .request
+        .appearance;
+    assert_eq!(
+        [
+            a.headgear_color,
+            a.shirt_color,
+            a.trousers_color,
+            a.footwear_color
+        ],
+        [402, 400, 401, 402]
+    );
+}
+
+#[test]
+fn a_clothing_color_out_of_range_goes_out_as_zero() {
+    let mut state = ready_to_finish();
+    for value in [3, UNSET, 0x8000_0000] {
+        state.appearance.shirt_color = value;
+        state.appearance.trousers_color = value;
+        state.appearance.footwear_color = value;
+        state.appearance.headgear_color = value;
+        let a = state.build_request().request.appearance;
+        assert_eq!(
+            [
+                a.headgear_color,
+                a.shirt_color,
+                a.trousers_color,
+                a.footwear_color
+            ],
+            [0; 4],
+            "{value:#x}"
+        );
+    }
+}
+
+#[test]
+fn the_hat_color_goes_out_as_zero_with_no_hat() {
+    let mut state = ready_to_finish();
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearStyle, 0));
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearColor, 1));
+    assert_eq!(state.build_request().request.appearance.headgear_color, 401);
+    assert!(state.try_set_appearance_index(AppearanceSlot::HeadgearStyle, UNSET));
+    let a = state
+        .try_begin_finish(0, 11, false)
+        .unwrap()
+        .request
+        .appearance;
+    assert_eq!((a.headgear_style, a.headgear_color), (UNSET, 0));
 }
 
 fn pending() -> CharacterCreation {
