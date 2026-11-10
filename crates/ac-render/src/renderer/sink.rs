@@ -799,6 +799,15 @@ impl FrameSink<'_> {
         }
         self.views.clear();
     }
+
+    /// The walk is done: an outdoor landscape is ended here (it holds its
+    /// views until then; an interior's was ended at the interior turn,
+    /// and a frame that began none has none to end).
+    pub fn walk_done(&mut self) {
+        if !self.views.is_empty() {
+            self.landscape_end();
+        }
+    }
 }
 
 /// What the sink needs to draw particles.
@@ -981,5 +990,98 @@ mod tests {
         let (c, r) = transform_drawing_sphere((Vec3::new(1.0, 2.0, 3.0), 0.5), world);
         assert_eq!(c, Vec3::new(12.0, 26.0, 42.0));
         assert_eq!(r, 2.0);
+    }
+
+    /// The sky steps of one outdoor frame of a `width` x `height` window
+    /// (no land, one sky object before and one after the world): whether
+    /// each is the one after the world.
+    fn outdoor_sky_steps(width: f32, height: f32) -> Vec<bool> {
+        use crate::draws::Step;
+        use crate::walk::{FrameWalk, WalkCamera};
+        use glam::camera::rh::{proj, view};
+
+        let eye = Vec3::new(0.0, -10.0, 1.0);
+        let target = Vec3::new(0.0, 10.0, 1.0);
+        let view_proj = proj::directx::perspective(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 5000.0)
+            * view::look_at_mat4(eye, target, Vec3::Z);
+        let camera = WalkCamera {
+            view_proj,
+            inverse_view_proj: view_proj.inverse(),
+            eye,
+            forward: (target - eye).normalize(),
+            width,
+            height,
+        };
+        let origin = LiveWorldOrigin::new();
+        let cells = HashMap::new();
+        let objects = HashMap::new();
+        let object_cells = HashMap::new();
+        let models = crate::IdMap::default();
+        let model_info = crate::IdMap::default();
+        let meshes = crate::IdMap::default();
+        let lights = WindowLights::default();
+        let terrain_present = HashSet::new();
+        let animations = AnimationPresenter::default();
+        let selection = SelectionScene::default();
+        let mut sink = FrameSink {
+            input: SinkInputs {
+                width,
+                height,
+                eye,
+                cy: camera.cy_plane(),
+                origin: &origin,
+                blocks: &[],
+                buildings: &[],
+                cells: &cells,
+                objects: &objects,
+                object_cells: &object_cells,
+                models: &models,
+                model_info: &model_info,
+                meshes: &meshes,
+                lights: &lights,
+                sky_pre: &[0],
+                sky_post: &[0],
+                terrain_present: &terrain_present,
+                animations: &animations,
+                selection: &selection,
+                wind: false,
+            },
+            out: StreamBuilder::new(),
+            views: Vec::new(),
+            portals_drawn_count: 0,
+            missing: HashSet::new(),
+            particles: None,
+            selection_parts: Vec::new(),
+            land_cells: Vec::new(),
+            scenery_wind: false,
+            stage: StageDrawn::default(),
+        };
+        FrameWalk::default().walk_frame(0x0101_0001, &camera, &[], &[], &mut sink);
+        sink.walk_done();
+        sink.out
+            .finish()
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Sky { post, .. } => Some(*post),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An outdoor frame begins and ends its landscape: the sky before the
+    /// world and the sky after it. A window one pixel wide or tall has no
+    /// view to draw through, so its frame begins none and ends none: no
+    /// sky goes out without the other.
+    #[test]
+    fn an_outdoor_frame_begins_and_ends_its_landscape_or_neither() {
+        assert_eq!(outdoor_sky_steps(1280.0, 720.0), vec![false, true]);
+        for (width, height) in [(1.0, 720.0), (720.0, 1.0)] {
+            assert_eq!(
+                outdoor_sky_steps(width, height),
+                Vec::<bool>::new(),
+                "{width} x {height}"
+            );
+        }
     }
 }
