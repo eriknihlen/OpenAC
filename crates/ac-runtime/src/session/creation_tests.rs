@@ -545,6 +545,16 @@ fn opening_a_creation_rolls_every_slot_and_only_once() {
         ] {
             assert_ne!(value, UNSET, "seed {seed}");
         }
+        for shade in [
+            a.skin_shade,
+            a.hair_shade,
+            a.headgear_shade,
+            a.shirt_shade,
+            a.trousers_shade,
+            a.footwear_shade,
+        ] {
+            assert!((0.0..=1.0).contains(&shade), "seed {seed}: {shade}");
+        }
         assert_ne!(s.template, TEMPLATE_UNSET);
         assert_ne!(s.start_area, -1);
         // Under way: opening again changes nothing.

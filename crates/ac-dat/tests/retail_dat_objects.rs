@@ -14,10 +14,10 @@ use std::path::PathBuf;
 use ac_bits::Reader;
 use ac_dat::objects::{
     Animation, AnimationHook, AnimationPartChange, BspNode, BspTag, BspTree, CHAR_GEN_ID, CharGen,
-    CombatManeuver, CombatTable, DatObject, DualEnumIdMap, EXPERIENCE_TABLE_ID, EnumIdMap, EnvCell,
-    EnvCellFlags, Environment, ExperienceTable, GearCg, HookData, MotionData, MotionDataFlags,
-    MotionTable, ObjDesc, ParticleEmitter, PhysicsScript, PhysicsScriptTable, Region,
-    SKILL_TABLE_ID, SPELL_COMPONENT_TABLE_ID, SPELL_TABLE_ID, Scene, SkillCg, SkillTable,
+    ClothingTable, CombatManeuver, CombatTable, DatObject, DualEnumIdMap, EXPERIENCE_TABLE_ID,
+    EnumIdMap, EnvCell, EnvCellFlags, Environment, ExperienceTable, GearCg, HookData, MotionData,
+    MotionDataFlags, MotionTable, ObjDesc, ParticleEmitter, PhysicsScript, PhysicsScriptTable,
+    Region, SKILL_TABLE_ID, SPELL_COMPONENT_TABLE_ID, SPELL_TABLE_ID, Scene, SkillCg, SkillTable,
     SoundTable, SpellComponentTable, SpellTable, StringTable, StringTableString, Wave,
 };
 use ac_dat::types::ColorArgb;
@@ -1873,6 +1873,59 @@ fn char_gen_matches_the_goldens() {
     assert_eq!(
         (genders, hair, parts, textures, sub_palettes),
         (26, 869, 1693, 2786, 0)
+    );
+}
+
+#[test]
+#[ignore = "needs the retail dat files"]
+fn every_garment_dyes_its_genders_whole_clothing_color_list() {
+    // A garment's colors are the palette templates of its gender's color
+    // list that its clothing table dyes. Every garment dyes every one, so
+    // the gender's list can stand in for each garment's: the same colors,
+    // though the garment's come in its table's order.
+    let d = dats();
+    let bytes = d.portal.get_bytes(CHAR_GEN_ID).unwrap().unwrap();
+    let c = CharGen::unpack(&mut Reader::new(&bytes)).unwrap();
+    let mut garments = 0;
+    let mut first_reordered = None;
+    for (heritage, h) in &c.heritage_groups {
+        for (gender, s) in &h.genders {
+            let gear = s.headgears.iter().chain(&s.shirts).chain(&s.pants);
+            for gear in gear.chain(&s.footwear) {
+                let place = format!("heritage {heritage} gender {gender} {}", gear.name);
+                let table: ClothingTable = d
+                    .portal
+                    .get(gear.clothing_table)
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{place}: no clothing table"));
+                let dyed: Vec<u32> = table
+                    .sub_pal_effects
+                    .iter()
+                    .filter(|(_, effect)| !effect.sub_palettes.is_empty())
+                    .map(|(template, _)| *template)
+                    .collect();
+                for color in &s.clothing_colors {
+                    assert!(dyed.contains(color), "{place}: no dye for {color}");
+                }
+                let own: Vec<u32> = dyed
+                    .into_iter()
+                    .filter(|t| s.clothing_colors.contains(t))
+                    .collect();
+                if own != s.clothing_colors && first_reordered.is_none() {
+                    first_reordered = Some((place, own, s.clothing_colors.clone()));
+                }
+                garments += 1;
+            }
+        }
+    }
+    assert_eq!(garments, 292);
+    assert_eq!(
+        first_reordered,
+        Some((
+            "heritage 1 gender 1 Cloth Cap".to_owned(),
+            vec![2, 3, 4, 5, 6, 7, 8, 9, 13],
+            vec![9, 6, 4, 8, 7, 5, 2, 3, 13]
+        ))
     );
 }
 

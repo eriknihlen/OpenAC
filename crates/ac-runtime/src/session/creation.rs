@@ -1325,7 +1325,9 @@ impl CharacterCreation {
         // Each of the four clothing colors goes out as the palette template
         // of the chosen color (the server dyes the garment with it), or 0
         // when the color is not one of the garment's: a garment not worn,
-        // the hat when none is, has none. Everything else goes out as
+        // the hat when none is, has none. A garment's colors are its
+        // gender's list (every garment in the dats dyes every color of
+        // it), so the gender's list is read. Everything else goes out as
         // chosen; 0xFFFFFFFF in the headgear style means no headgear.
         let gender = self.gender();
         let color = |style: AppearanceSlot, color: u32| {
