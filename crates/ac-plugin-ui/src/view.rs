@@ -211,6 +211,11 @@ impl PluginUiView {
                     c.release_count = c.release_count.wrapping_add(1);
                 }
             }
+            UiChange::CanvasResized { canvas, size } => {
+                if let Some(c) = self.canvas_mut(canvas) {
+                    c.size = size;
+                }
+            }
             UiChange::ImageAdded(image) => {
                 self.images
                     .insert((image.owner.clone(), image.handle), *image);

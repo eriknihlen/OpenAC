@@ -555,6 +555,16 @@ pub(super) fn build_set(
                 container = Some(content);
                 id
             }
+            Markup::Canvas { canvas_id } => {
+                e.click_through = true;
+                ui.add(
+                    parent,
+                    e,
+                    super::canvas::MarkupCanvas {
+                        canvas_id: canvas_id.clone(),
+                    },
+                )
+            }
             Markup::Repeat { .. } => unreachable!("a repeat gets its marker above"),
             Markup::Split {
                 horizontal,

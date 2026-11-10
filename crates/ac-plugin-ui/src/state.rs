@@ -613,6 +613,10 @@ impl PluginUi {
                 for canvas in hovered {
                     self.end_hover(canvas);
                 }
+                // Nothing hosts a canvas any more.
+                for c in &mut self.canvases {
+                    c.hosted = false;
+                }
             }
         }
     }
@@ -698,6 +702,8 @@ impl PluginUi {
         let view = CanvasView {
             id,
             owner: owner.clone(),
+            size: (descriptor.width, descriptor.height),
+            hosted: false,
             visible: descriptor.start_visible,
             anchor: descriptor.anchor,
             offset: descriptor.offset,
@@ -727,10 +733,66 @@ impl PluginUi {
     }
 
     /// Whether a window draws the canvas now (OpenAC `IsAvailable`): a
-    /// window is attached.
+    /// window is attached, and for an in-markup canvas an element of one of
+    /// its plugin's windows hosts it.
     #[must_use]
     pub fn canvas_available(&self, owner: &str, canvas: u32) -> bool {
-        self.window_attached && self.canvas(owner, canvas).is_some()
+        self.window_attached
+            && self
+                .canvas(owner, canvas)
+                .is_some_and(|c| !c.descriptor.in_markup || c.hosted)
+    }
+
+    /// Resizes a canvas on the screen (OpenAC `TryResize`): it keeps its
+    /// anchor, offset, visibility, listening and paint, so one anchored at
+    /// a right or bottom edge keeps that edge; the plugin paints again for
+    /// the new size. The same size again changes nothing. False for a size
+    /// below 1, no such canvas, or an in-markup canvas (its element sizes
+    /// it).
+    pub fn resize_canvas(&mut self, owner: &str, canvas: u32, width: i32, height: i32) -> bool {
+        if width < 1 || height < 1 {
+            return false;
+        }
+        let Some(c) = self.canvas_mut(owner, canvas) else {
+            return false;
+        };
+        if c.descriptor.in_markup {
+            return false;
+        }
+        let size = (width, height);
+        if c.size != size {
+            c.size = size;
+            self.changes.push(UiChange::CanvasResized { canvas, size });
+        }
+        true
+    }
+
+    /// The window says whether an element hosts an in-markup canvas, and at
+    /// what size: a new size is the canvas's, and its plugin hears of it.
+    fn canvas_hosted(&mut self, canvas: u32, size: Option<(i32, i32)>) {
+        if !self.window_attached {
+            return;
+        }
+        let Some(c) = self
+            .canvases
+            .iter_mut()
+            .find(|c| c.id == canvas && c.descriptor.in_markup)
+        else {
+            return;
+        };
+        c.hosted = size.is_some();
+        let Some((width, height)) = size.filter(|s| s.0 >= 1 && s.1 >= 1 && *s != c.size) else {
+            return;
+        };
+        c.size = (width, height);
+        self.events.push((
+            c.owner.id.clone(),
+            UiEvent::CanvasResized {
+                canvas,
+                width,
+                height,
+            },
+        ));
     }
 
     /// Replaces what a canvas shows.
@@ -1691,6 +1753,7 @@ impl PluginUi {
             UiInput::DialogAnswered { handle, button } => self.answer_dialog(handle, button),
             UiInput::FileIconsShown { panel, paths } => self.file_icons_shown(panel, paths),
             UiInput::DisplayDensity(density) => self.set_font_density(density),
+            UiInput::CanvasHosted { canvas, size } => self.canvas_hosted(canvas, size),
         }
     }
 
@@ -1732,7 +1795,7 @@ impl PluginUi {
             )
             && let Some(c) = self.canvases.iter().find(|c| c.id == canvas)
         {
-            let size = (c.descriptor.width as f32, c.descriptor.height as f32);
+            let size = (c.size.0 as f32, c.size.1 as f32);
             let now = canvas_origin(c.anchor, c.offset, size, place.layer);
             pointer.x += place.origin.0 - now.0;
             pointer.y += place.origin.1 - now.1;

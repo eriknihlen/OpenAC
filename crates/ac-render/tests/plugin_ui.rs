@@ -856,6 +856,7 @@ fn a_plugins_font_draws_on_its_canvas_and_sharper_on_a_dense_display() {
                 offset: (100.0, 100.0),
                 start_visible: true,
                 accepts_pointer_input: false,
+                in_markup: false,
             },
         )
         .unwrap();

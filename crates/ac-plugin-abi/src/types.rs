@@ -291,6 +291,11 @@ wire_union! {
         /// per pass of the plugins, with the value at its end (only to the
         /// subscribers; API 1.8).
         28 => StatusChanged(crate::status::StatusChange) since (1, 8),
+        /// One of the plugin's in-markup canvases was laid out at a new
+        /// size, including the first time its element hosts it at a size
+        /// other than the one registered (API 1.12). What it shows was
+        /// painted for the old size: paint it again.
+        29 => CanvasResized(crate::ui::CanvasSize) since (1, 12),
         /// One of the plugin's panels or canvases was used ([`crate::ui`];
         /// the tag is `crate::ui::EVENT_TAG`).
         100 => Ui(crate::ui::UiEvent),

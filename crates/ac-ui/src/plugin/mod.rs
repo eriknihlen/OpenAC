@@ -742,6 +742,21 @@ impl PluginPanelController {
             .and_then(|s| s.nodes.get(&node).copied())
     }
 
+    /// The window's `<canvas>` elements, in document order: the canvas id
+    /// each names and its element.
+    #[must_use]
+    pub fn canvas_hosts(&self) -> Vec<(String, ElementId)> {
+        self.document
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(node, n)| match &n.element {
+                Markup::Canvas { canvas_id } => Some((canvas_id.clone(), self.element(node)?)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The minimize button, on a window that is on the dock.
     #[must_use]
     pub fn minimize_button(&self) -> Option<ElementId> {
@@ -1506,7 +1521,7 @@ impl PluginPanelController {
                 }
                 // A marker shows nothing; its rows are synced as sets of
                 // their own.
-                Markup::Repeat { .. } => {}
+                Markup::Canvas { .. } | Markup::Repeat { .. } => {}
                 Markup::Split { position, .. } => {
                     let bound = position.as_ref().map(|name| match values.value(name) {
                         Some(UiValue::Float(v)) => *v,
@@ -1895,6 +1910,8 @@ mod flex_tests;
 mod list_align_tests;
 #[cfg(test)]
 mod list_button_tests;
+#[cfg(test)]
+mod markup_canvas_tests;
 #[cfg(test)]
 mod repeat_tests;
 #[cfg(test)]

@@ -521,6 +521,25 @@ pub struct CanvasSpec {
     pub start_visible: bool,
     /// Takes pointer input while the plugin listens ([`Canvas::listen_pointer`]).
     pub accepts_pointer_input: bool,
+    /// Sits inside one of the plugin's markup windows instead of on the
+    /// screen by itself (API 1.12): a `<canvas id="...">` element whose id
+    /// is this canvas's hosts it. The window's layout decides where it is
+    /// and how large (`w`, `h`, `grow` and the other flex item attributes),
+    /// and the canvas fills that rectangle in whole pixels. `width` and
+    /// `height` are its size only until it is first laid out; after that
+    /// [`Canvas::state`] reports the laid-out size, and each new size
+    /// arrives as [`Event::CanvasResized`](crate::Event::CanvasResized),
+    /// when the plugin paints it again. [`Canvas::resize`] answers false,
+    /// and `anchor` and `offset` are kept but ignored. It is drawn and takes
+    /// input only while it is shown and its element is: its window open, its
+    /// tab or group not hidden. [`Canvas::is_available`] is true only while
+    /// an element hosts it. Either may come first: a canvas waits for its
+    /// element, and an element draws nothing until its canvas is
+    /// registered. When two of the plugin's windows have an element with
+    /// the same id, the first one mounted hosts the canvas, and the other
+    /// takes over if that window goes away. Pointer input works as on the
+    /// screen, in the canvas's own pixels.
+    pub in_markup: bool,
 }
 
 impl CanvasSpec {
@@ -535,6 +554,18 @@ impl CanvasSpec {
             offset: (0.0, 0.0),
             start_visible: true,
             accepts_pointer_input: false,
+            in_markup: false,
+        }
+    }
+
+    /// A canvas hosted by the `<canvas id="...">` element of the same id in
+    /// one of the plugin's markup windows ([`Self::in_markup`]), shown,
+    /// click-through. `width` x `height` is its size until it is laid out.
+    #[must_use]
+    pub fn in_markup(canvas_id: &str, width: i32, height: i32) -> Self {
+        Self {
+            in_markup: true,
+            ..Self::new(canvas_id, width, height)
         }
     }
 }
@@ -545,6 +576,7 @@ pub struct Canvas {
     id: u32,
     width: i32,
     height: i32,
+    in_markup: bool,
 }
 
 /// A canvas paint being built: what the canvas shows after
@@ -684,19 +716,28 @@ impl Canvas {
         self.id
     }
 
-    /// Width, pixels.
+    /// Width, pixels: as registered or last resized. An in-markup canvas's
+    /// laid-out size is its [`Self::state`].
     #[must_use]
     pub fn width(self) -> i32 {
         self.width
     }
 
-    /// Height, pixels.
+    /// Height, pixels, the same way.
     #[must_use]
     pub fn height(self) -> i32 {
         self.height
     }
 
-    /// Replaces what the canvas shows with what `paint` draws.
+    /// Whether it was registered in markup ([`CanvasSpec::in_markup`]).
+    #[must_use]
+    pub fn in_markup(self) -> bool {
+        self.in_markup
+    }
+
+    /// Replaces what the canvas shows with what `paint` draws. The
+    /// painter's size is the canvas's now: for an in-markup canvas, the size
+    /// its element last laid it out at.
     ///
     /// # Errors
     /// Clips that do not balance, or the canvas is gone.
@@ -705,10 +746,16 @@ impl Canvas {
         host: &mut Host<'_>,
         paint: impl FnOnce(&mut Painter),
     ) -> Result<(), String> {
+        let (width, height) = if self.in_markup {
+            self.state(host)
+                .map_or((self.width, self.height), |s| (s.width, s.height))
+        } else {
+            (self.width, self.height)
+        };
         let mut painter = Painter {
             commands: Vec::new(),
-            width: self.width,
-            height: self.height,
+            width,
+            height,
         };
         paint(&mut painter);
         let request = CanvasPaint {
@@ -762,7 +809,33 @@ impl Canvas {
         self.set(host, CanvasChange::ReleasePointer)
     }
 
-    /// The canvas as it stands (`None` once removed).
+    /// Changes the size of a canvas on the screen (API 1.12). It keeps its
+    /// anchor, offset, visibility, listening and what it shows, so a canvas
+    /// anchored at a right or bottom edge keeps that edge where it was; paint
+    /// it again for the new size. [`Self::width`] and [`Self::height`]
+    /// report the new size at once. The size it already has changes nothing
+    /// and answers true. False, and nothing changes, for a width or height
+    /// below 1, a removed canvas, or an in-markup canvas (its element
+    /// decides its size).
+    pub fn resize(&mut self, host: &mut Host<'_>, width: i32, height: i32) -> bool {
+        let request = ac_plugin_abi::ui::CanvasResize {
+            canvas: self.id,
+            width,
+            height,
+        }
+        .to_bytes();
+        let reply = ui_call!(host, UiCanvasResize, ui_canvas_resize, &request);
+        let done: bool = decode(Import::UiCanvasResize, &reply);
+        if done {
+            self.width = width;
+            self.height = height;
+        }
+        done
+    }
+
+    /// The canvas as it stands (`None` once removed): its size is as
+    /// registered, as last resized, or for an in-markup canvas as its
+    /// element last laid it out.
     #[must_use]
     pub fn state(self, host: &mut Host<'_>) -> Option<CanvasState> {
         let request = self.id.to_bytes();
@@ -1194,6 +1267,7 @@ impl Host<'_> {
             offset_y: spec.offset.1,
             start_visible: spec.start_visible,
             accepts_pointer_input: spec.accepts_pointer_input,
+            in_markup: spec.in_markup,
         }
         .to_bytes();
         let reply = ui_call!(self, UiCanvasRegister, ui_canvas_register, &request);
@@ -1202,6 +1276,7 @@ impl Host<'_> {
             id: id?,
             width: spec.width,
             height: spec.height,
+            in_markup: spec.in_markup,
         })
     }
 

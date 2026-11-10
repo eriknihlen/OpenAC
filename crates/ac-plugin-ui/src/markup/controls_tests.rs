@@ -278,6 +278,52 @@ fn a_separator_takes_a_colour() {
 }
 
 #[test]
+fn a_canvas_names_its_canvas_and_is_placed_like_any_element() {
+    // UiMarkupCanvas: the id is the canvas it hosts; the layout places it.
+    let doc =
+        build(r#"<canvas id="map" x="8" y="30" w="200.5" h="120" tooltip="The map"/>"#).unwrap();
+    let node = &doc.nodes[0];
+    assert_eq!(
+        node.element,
+        Element::Canvas {
+            canvas_id: "map".to_owned()
+        }
+    );
+    assert_eq!(node.element.tag(), "canvas");
+    assert_eq!(node.common.name.as_deref(), Some("map"));
+    assert_eq!((node.rect.x, node.rect.w, node.rect.h), (8.0, 200.5, 120.0));
+    assert!(node.common.tooltip.is_some());
+    // A flex item like any other.
+    let doc = parse(
+        r#"<panel w="300" h="200" layout="column"><canvas id="map" grow="1" minh="40"/></panel>"#,
+        &schema(),
+    )
+    .unwrap();
+    let flex = doc.nodes[0].flex.as_ref().expect("a flex item");
+    assert_eq!(flex.grow, 1.0);
+}
+
+#[test]
+fn a_canvas_needs_a_literal_id_and_no_children() {
+    assert_eq!(
+        refused(r#"<canvas x="0" y="0" w="10" h="10"/>"#),
+        "<canvas> requires an id: the id of the canvas it hosts"
+    );
+    assert_eq!(
+        refused(r#"<canvas id=" " x="0" y="0" w="10" h="10"/>"#),
+        "<canvas> requires an id: the id of the canvas it hosts"
+    );
+    assert_eq!(
+        refused(r#"<canvas id="{Mode}" x="0" y="0" w="10" h="10"/>"#),
+        "<canvas id=\"{Mode}\"> must be the canvas's id as text, not a binding"
+    );
+    assert_eq!(
+        refused(r#"<canvas id="map" x="0" y="0" w="10" h="10"><label text="x"/></canvas>"#),
+        "<canvas id=\"map\"> must be empty"
+    );
+}
+
+#[test]
 fn an_expander_holds_children_and_checks_its_attributes() {
     // MarkupExpanderTests.Expander_BadAttributesThrowAtBuild
     let doc = build(

@@ -326,6 +326,7 @@ pub(crate) fn handle_import(
         | Import::UiCanvasState
         | Import::UiCanvasAvailable
         | Import::UiCanvasRemove
+        | Import::UiCanvasResize
         | Import::UiMeasureText
         | Import::UiFontBundled
         | Import::UiFontLoad

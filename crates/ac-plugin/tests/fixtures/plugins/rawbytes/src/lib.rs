@@ -4,8 +4,10 @@
 //! older API version is sent. With each event it also logs the theme the
 //! `ui_theme` import answers (`ui_theme <kind> <name>`). It registers a loot
 //! classifier `rules` (answering nothing) so another plugin can ask it a
-//! question. `/rawpaint <version>` paints a canvas with bytes it encodes itself,
-//! as that API version knows them, and `/rawpanel <version>` registers a window
+//! question. `/rawpaint <version>` registers a canvas that takes the pointer
+//! and listens for it (the first time), and paints it, with bytes it encodes
+//! itself as that API version knows them,
+//! and `/rawpanel <version>` registers a window
 //! and a typed window the same way, so a test can see what the client reads from
 //! a plugin built for an older version.
 //!
@@ -14,9 +16,11 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use ac_plugin_abi::ui::{CanvasPaint, PaintCmd, PanelRegistration, TypedPanelRegistration};
+use ac_plugin_abi::ui::{
+    CanvasPaint, CanvasRegistration, PaintCmd, PanelRegistration, TypedPanelRegistration,
+};
 use ac_plugin_abi::{ApiVersion, Wire};
-use openac_plugin::ui::{CanvasSpec, Color};
+use openac_plugin::ui::Color;
 use openac_plugin::{Host, Plugin, StartInfo};
 
 /// The canvas `/rawpaint` paints.
@@ -28,8 +32,6 @@ pub struct RawBytes;
 impl Plugin for RawBytes {
     fn enable(&mut self, host: &mut Host<'_>, info: &StartInfo) -> Result<(), String> {
         host.register_loot_classifier("rules", "Raw Rules")?;
-        let canvas = host.register_canvas(&CanvasSpec::new("raw", 40, 40))?;
-        CANVAS.store(canvas.id(), Ordering::Relaxed);
         host.register_command("rawpaint", "Paints the canvas as an API version (rawpaint 1.2)")?;
         host.register_command("rawpanel", "Registers windows as an API version (rawpanel 1.3)")?;
         Ok(())
@@ -41,6 +43,23 @@ pub fn paint_as(version: &str) {
     let Some(version) = ApiVersion::parse(version.trim()) else {
         return;
     };
+    if CANVAS.load(Ordering::Relaxed) == 0 {
+        let registration = CanvasRegistration {
+            canvas_id: "raw".into(),
+            width: 40,
+            height: 40,
+            anchor: 0,
+            offset_x: 0.0,
+            offset_y: 0.0,
+            start_visible: true,
+            accepts_pointer_input: true,
+            in_markup: false,
+        };
+        let reply = register_canvas_raw(&registration.to_bytes_at(version));
+        if let Ok(Ok(id)) = Result::<u32, String>::from_bytes(&reply) {
+            CANVAS.store(id, Ordering::Relaxed);
+        }
+    }
     let paint = CanvasPaint {
         canvas: CANVAS.load(Ordering::Relaxed),
         commands: vec![PaintCmd::Text(
@@ -106,6 +125,43 @@ fn register_raw(plain: &[u8], typed: &[u8]) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn register_raw(_plain: &[u8], _typed: &[u8]) {}
+
+/// Registers a canvas with bytes as they are, and listens for its pointer
+/// once it is registered; the registration's reply bytes.
+#[cfg(target_arch = "wasm32")]
+#[allow(unsafe_code)]
+fn register_canvas_raw(bytes: &[u8]) -> Vec<u8> {
+    use ac_plugin_abi::ui::{CanvasChange, CanvasSet};
+    #[link(wasm_import_module = "openac")]
+    unsafe extern "C" {
+        fn ui_canvas_register(ptr: *const u8, len: usize) -> i32;
+        fn ui_canvas_set(ptr: *const u8, len: usize) -> i32;
+        fn abi_reply_read(ptr: *const u8, len: usize) -> i32;
+    }
+    // SAFETY: the client reads `len` bytes from `ptr`, which are `bytes`.
+    let len = unsafe { ui_canvas_register(bytes.as_ptr(), bytes.len()) };
+    let mut reply = vec![0u8; usize::try_from(len).unwrap_or(0)];
+    if !reply.is_empty() {
+        // SAFETY: `reply` is a writable buffer of exactly the reply's
+        // length, which the client copies into and keeps no reference to.
+        let _ = unsafe { abi_reply_read(reply.as_mut_ptr().cast_const(), reply.len()) };
+    }
+    if let Ok(Ok(canvas)) = Result::<u32, String>::from_bytes(&reply) {
+        let listen = CanvasSet {
+            canvas,
+            change: CanvasChange::Listen(true),
+        }
+        .to_bytes();
+        // SAFETY: as above; the reply (a bool) is not needed.
+        let _ = unsafe { ui_canvas_set(listen.as_ptr(), listen.len()) };
+    }
+    reply
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn register_canvas_raw(_bytes: &[u8]) -> Vec<u8> {
+    Vec::new()
+}
 
 /// Paints with bytes as they are.
 #[cfg(target_arch = "wasm32")]
