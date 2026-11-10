@@ -290,6 +290,79 @@ fn an_explicit_request_sends_the_mode_without_reading_equipment() {
     assert_eq!(m.ops.trace, ["intent", "send:Magic"]);
 }
 
+// -- Parked-change watch (the client log's diagnostic) ----------------------------
+
+#[test]
+fn a_short_wait_is_never_reported() {
+    let mut w = ParkedModeWatch::default();
+    let peace = Some(CombatMode::NON_COMBAT);
+    assert_eq!(w.observe(peace, CombatMode::MISSILE, 10.0), None);
+    assert_eq!(w.observe(peace, CombatMode::MISSILE, 14.9), None);
+    // It went out before the report was due: nothing to end either.
+    assert_eq!(w.observe(None, CombatMode::NON_COMBAT, 15.0), None);
+}
+
+#[test]
+fn a_long_wait_is_reported_then_repeated_then_ended() {
+    let mut w = ParkedModeWatch::default();
+    let peace = Some(CombatMode::NON_COMBAT);
+    assert_eq!(w.observe(peace, CombatMode::MISSILE, 100.0), None);
+    assert_eq!(
+        w.observe(peace, CombatMode::MISSILE, 105.0),
+        Some(ParkedModeReport::StillParked {
+            mode: CombatMode::NON_COMBAT,
+            seconds: 5.0
+        })
+    );
+    // Asked again and again (a plugin re-requesting each pass): the wait
+    // keeps its start and the next line comes 30 s later.
+    assert_eq!(w.observe(peace, CombatMode::MISSILE, 120.0), None);
+    assert_eq!(
+        w.observe(peace, CombatMode::MISSILE, 135.0),
+        Some(ParkedModeReport::StillParked {
+            mode: CombatMode::NON_COMBAT,
+            seconds: 35.0
+        })
+    );
+    assert_eq!(
+        w.observe(None, CombatMode::NON_COMBAT, 140.0),
+        Some(ParkedModeReport::WentOut {
+            mode: CombatMode::NON_COMBAT,
+            seconds: 40.0
+        })
+    );
+    assert_eq!(w.observe(None, CombatMode::NON_COMBAT, 141.0), None);
+}
+
+#[test]
+fn a_reported_wait_replaced_by_another_mode_is_given_up() {
+    let mut w = ParkedModeWatch::default();
+    let _ = w.observe(Some(CombatMode::NON_COMBAT), CombatMode::MISSILE, 0.0);
+    assert!(matches!(
+        w.observe(Some(CombatMode::NON_COMBAT), CombatMode::MISSILE, 6.0),
+        Some(ParkedModeReport::StillParked { .. })
+    ));
+    assert_eq!(
+        w.observe(Some(CombatMode::MAGIC), CombatMode::MISSILE, 7.0),
+        Some(ParkedModeReport::GivenUp {
+            mode: CombatMode::NON_COMBAT,
+            seconds: 7.0
+        })
+    );
+    // The new change starts its own wait.
+    assert_eq!(
+        w.observe(Some(CombatMode::MAGIC), CombatMode::MISSILE, 11.9),
+        None
+    );
+    assert!(matches!(
+        w.observe(Some(CombatMode::MAGIC), CombatMode::MISSILE, 12.0),
+        Some(ParkedModeReport::StillParked {
+            mode: CombatMode::MAGIC,
+            ..
+        })
+    ));
+}
+
 // -- Attack -----------------------------------------------------------------------
 
 #[derive(Default)]

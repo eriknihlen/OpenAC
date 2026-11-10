@@ -24,7 +24,8 @@ pub use model::{
     CombatMode, DUAL_WIELD_COMBAT_STYLE, DUAL_WIELD_POWER_UP_SECONDS, DamageType,
     DefaultCombatModeDecision, READY_FORWARD_COMMAND, default_combat_mode,
     default_combat_mode_decision, height_for, player_in_ready_position,
-    player_in_ready_position_for_attack, supports_targeted_attack, toggle_mode,
+    player_in_ready_position_for_attack, ready_position_blockers, supports_targeted_attack,
+    toggle_mode,
 };
 pub use state::{CombatEvent, CombatState, DamageDealt, DamageIncoming, HealthReport};
 pub use target_policy::{

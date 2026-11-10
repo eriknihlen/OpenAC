@@ -155,6 +155,51 @@ pub fn player_in_ready_position(
     }
 }
 
+/// Why [`player_in_ready_position`] (strict, not lenient) answers false,
+/// for the log: one short reason per condition that fails, empty when the
+/// character is ready. Never consulted for a decision.
+#[must_use]
+pub fn ready_position_blockers(
+    mode: CombatMode,
+    current_style: u32,
+    forward_command: u32,
+    has_combat_table: bool,
+    motions_pending: bool,
+) -> Vec<&'static str> {
+    let mut blockers = Vec::new();
+    match mode {
+        CombatMode::NON_COMBAT | CombatMode::MAGIC => {}
+        CombatMode::MELEE => {
+            if !has_combat_table {
+                blockers.push("no combat table");
+            }
+        }
+        CombatMode::MISSILE => {
+            if !player_in_ready_position(
+                mode,
+                current_style,
+                READY_FORWARD_COMMAND,
+                true,
+                false,
+                true,
+            ) {
+                blockers.push("not in a missile stance");
+            }
+            if forward_command != READY_FORWARD_COMMAND {
+                blockers.push("not standing at the ready");
+            }
+        }
+        _ => {
+            blockers.push("no ready position in this mode");
+            return blockers;
+        }
+    }
+    if motions_pending {
+        blockers.push("motions still waiting");
+    }
+    blockers
+}
+
 /// The lenient form the attack builders use, for a character whose combat
 /// table is known. Attacks are only built in melee or missile mode.
 #[must_use]
@@ -507,5 +552,74 @@ mod tests {
                 "{mode:?} {style:#X}"
             );
         }
+    }
+
+    /// Any forward command but the ready one (the value the test above
+    /// uses for "not at the ready").
+    const NOT_READY_FORWARD: u32 = 0x4100_0006;
+
+    /// The log's reasons and the ready check never disagree: no reason
+    /// exactly when the character is ready.
+    #[test]
+    fn ready_position_blockers_agree_with_the_check() {
+        let modes = [
+            CombatMode::NON_COMBAT,
+            CombatMode::MELEE,
+            CombatMode::MISSILE,
+            CombatMode::MAGIC,
+            CombatMode::UNDEF,
+        ];
+        let styles = [
+            motion_command::NON_COMBAT,
+            motion_command::BOW_COMBAT,
+            motion_command::CROSSBOW_COMBAT,
+            motion_command::ATLATL_COMBAT,
+            motion_command::SWORD_COMBAT,
+        ];
+        for mode in modes {
+            for style in styles {
+                for forward in [READY_FORWARD_COMMAND, NOT_READY_FORWARD] {
+                    for table in [false, true] {
+                        for pending in [false, true] {
+                            let ready = player_in_ready_position(
+                                mode, style, forward, table, pending, false,
+                            );
+                            let blockers =
+                                ready_position_blockers(mode, style, forward, table, pending);
+                            assert_eq!(
+                                ready,
+                                blockers.is_empty(),
+                                "{mode:?} {style:#X} {forward:#X} table={table} \
+                                 pending={pending}: {blockers:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_bow_stance_off_ready_with_motions_waiting_names_both() {
+        assert_eq!(
+            ready_position_blockers(
+                CombatMode::MISSILE,
+                motion_command::BOW_COMBAT,
+                NOT_READY_FORWARD,
+                true,
+                true,
+            ),
+            ["not standing at the ready", "motions still waiting"]
+        );
+        assert_eq!(
+            ready_position_blockers(
+                CombatMode::MISSILE,
+                motion_command::NON_COMBAT,
+                READY_FORWARD_COMMAND,
+                true,
+                false,
+            ),
+            ["not in a missile stance"]
+        );
     }
 }

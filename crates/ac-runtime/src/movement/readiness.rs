@@ -29,6 +29,21 @@ impl Movement {
         })
     }
 
+    /// The motions the local body still waits on, oldest first, for the
+    /// log; empty with no body.
+    #[must_use]
+    pub fn pending_motion_commands(&self) -> Vec<u32> {
+        self.player.as_ref().map_or_else(Vec::new, |player| {
+            player
+                .controller
+                .object()
+                .interp
+                .pending_motions()
+                .map(|node| node.motion)
+                .collect()
+        })
+    }
+
     /// Before a swing or a cast: end autorun, stop the body completely and
     /// tell the server at once where it stopped (else the server works the
     /// swing out from where it still believes the body is). False when

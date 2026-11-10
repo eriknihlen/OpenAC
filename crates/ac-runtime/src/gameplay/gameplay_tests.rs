@@ -21,6 +21,7 @@ struct Fixture {
     gameplay: Gameplay,
     body: Option<Movement>,
     teleporting: bool,
+    clocks: Clocks,
 }
 
 impl Fixture {
@@ -34,6 +35,7 @@ impl Fixture {
             gameplay: Gameplay::default(),
             body: None,
             teleporting: false,
+            clocks: CLOCKS,
         }
     }
 
@@ -44,7 +46,7 @@ impl Fixture {
                 outbox: &mut self.outbox,
                 options: &self.options,
                 active: true,
-                clocks: CLOCKS,
+                clocks: self.clocks,
                 body: self.body.as_mut(),
                 teleporting: self.teleporting,
                 opened_corpses: None,
@@ -1244,4 +1246,63 @@ fn accepting_an_empyrean_on_the_ground_gives_the_character_the_walking_table() {
     assert_eq!(sent.len(), 1);
     // The first option (walking) is the fifteenth word after the envelope.
     assert_eq!(&sent[0][12 + 56..12 + 60], &1u32.to_le_bytes());
+}
+
+// -- The client log's line for a parked mode change -------------------------------
+
+#[test]
+fn a_mode_change_parked_behind_the_body_reaches_the_log_with_its_reason() {
+    // With a movement owner but no body the check answers "not ready": the
+    // change parks, as it does behind any body that never gets ready.
+    let mut f = Fixture::in_the_field();
+    f.body = Some(Movement::new(false));
+    let _ = f.sent();
+    f.run(GameplayCommand::SetCombatMode(CombatMode::MELEE));
+    let (ctx, gameplay) = f.ctx();
+    assert_eq!(gameplay.parked_mode_log_line(&ctx), None, "the wait starts");
+
+    f.clocks.session += Duration::from_secs(5);
+    let (ctx, gameplay) = f.ctx();
+    assert_eq!(
+        gameplay.parked_mode_log_line(&ctx).as_deref(),
+        Some("change to Melee parked 5.0 s: mode=NonCombat blocked by: no body")
+    );
+    assert_eq!(gameplay.parked_mode_log_line(&ctx), None, "not every pass");
+}
+
+#[test]
+fn the_parked_line_names_the_stance_the_motion_and_what_fails() {
+    let line = parked_mode_line(
+        ParkedModeReport::StillParked {
+            mode: CombatMode::NON_COMBAT,
+            seconds: 35.0,
+        },
+        CombatMode::MISSILE,
+        Some(BodyMotion {
+            current_style: motion_command::BOW_COMBAT,
+            forward_command: 0x4100_0006,
+            motions_pending: true,
+        }),
+        true,
+        &[0x1000_0055, 0x4000_0016],
+    );
+    assert_eq!(
+        line,
+        "change to NonCombat parked 35.0 s: mode=Missile style=0x8000003F fwd=0x41000006 \
+         waiting=[0x10000055,0x40000016] blocked by: not standing at the ready, motions still \
+         waiting"
+    );
+    assert_eq!(
+        parked_mode_line(
+            ParkedModeReport::WentOut {
+                mode: CombatMode::NON_COMBAT,
+                seconds: 40.0
+            },
+            CombatMode::NON_COMBAT,
+            None,
+            true,
+            &[],
+        ),
+        "change to NonCombat went out after 40.0 s"
+    );
 }

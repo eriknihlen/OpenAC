@@ -29,7 +29,7 @@ use ac_core::chat::{CombatLineKind, CombatNotice, LogTextType};
 use ac_core::combat::{
     CombatEvent, CombatObject, CombatState, is_hostile_monster, motion_command,
     object_is_attackable, player_in_ready_position, player_in_ready_position_for_attack,
-    should_query_health,
+    ready_position_blockers, should_query_health,
 };
 use ac_core::items::{ClientObject, ItemType};
 use ac_core::physics::PhysicsState;
@@ -59,6 +59,7 @@ pub use chess::{ChessCommand, ChessStage, ChessState, ChessView};
 pub use combat::{
     CombatAttackCommand, CombatAttackState, CombatModeRequestResult, CombatModeRequestStatus,
     CombatModeState, CombatTargetState, CreatureDeathState, HealthQuery, InputActivation,
+    ParkedModeReport, ParkedModeWatch,
 };
 pub use death::{
     CorpseSummary, DeathState, LAST_OUTSIDE_DEATH_POSITION, VitaeView, corpses,
@@ -492,6 +493,7 @@ pub struct Gameplay {
     cast: SpellCast,
     combat: CombatState,
     mode: CombatModeState,
+    parked_mode_watch: ParkedModeWatch,
     attack: CombatAttackState,
     target: CombatTargetState,
     deaths: CreatureDeathState,
@@ -533,6 +535,7 @@ impl Gameplay {
             cast: SpellCast::default(),
             combat: CombatState::new(),
             mode: CombatModeState::default(),
+            parked_mode_watch: ParkedModeWatch::default(),
             attack: CombatAttackState::default(),
             target: CombatTargetState::default(),
             deaths: CreatureDeathState::default(),
@@ -1252,9 +1255,29 @@ impl Gameplay {
             self.finish(ctx);
             self.combat_event(event, ctx);
         }
+        if let Some(line) = self.parked_mode_log_line(ctx) {
+            eprintln!("[combat-mode] {} {line}", crate::world::motion_log_stamp());
+        }
         let mut ops = ops!(self, ctx);
         self.attack.tick(&mut ops, now);
         self.finish(ctx);
+    }
+
+    /// What the client log says this pass about a mode change waiting on
+    /// the body, if anything.
+    fn parked_mode_log_line(&mut self, ctx: &GameplayContext<'_>) -> Option<String> {
+        let current = self.combat.current_mode();
+        let report =
+            self.parked_mode_watch
+                .observe(self.mode.pending_mode(), current, ctx.now())?;
+        let body = ctx.body.as_deref();
+        Some(parked_mode_line(
+            report,
+            current,
+            body.and_then(Movement::body_motion),
+            has_combat_table(ctx.world),
+            &body.map_or_else(Vec::new, Movement::pending_motion_commands),
+        ))
     }
 
     /// The character left the world: every owner forgets the session.
@@ -1272,6 +1295,7 @@ impl Gameplay {
         });
         self.combat.clear();
         self.mode.reset();
+        self.parked_mode_watch.reset();
         self.target = CombatTargetState::default();
         self.deaths.clear();
         self.death = DeathState::default();
@@ -2454,6 +2478,58 @@ fn is_dual_wield(body: Option<&Movement>, world: &World) -> bool {
         None => Some(player_motion(world).0),
     };
     style == Some(ac_core::combat::DUAL_WIELD_COMBAT_STYLE)
+}
+
+/// The client log's line for a mode change that waited on the body: the
+/// stance and motion it is waiting behind, and which condition of the
+/// ready check fails.
+fn parked_mode_line(
+    report: ParkedModeReport,
+    current: CombatMode,
+    motion: Option<BodyMotion>,
+    has_combat_table: bool,
+    waiting: &[u32],
+) -> String {
+    let name = |mode: CombatMode| mode.name().unwrap_or("Unknown");
+    let (mode, seconds) = match report {
+        ParkedModeReport::WentOut { mode, seconds } => {
+            return format!("change to {} went out after {seconds:.1} s", name(mode));
+        }
+        ParkedModeReport::GivenUp { mode, seconds } => {
+            return format!("change to {} given up after {seconds:.1} s", name(mode));
+        }
+        ParkedModeReport::StillParked { mode, seconds } => (mode, seconds),
+    };
+    let head = format!(
+        "change to {} parked {seconds:.1} s: mode={}",
+        name(mode),
+        name(current)
+    );
+    let Some(motion) = motion else {
+        return format!("{head} blocked by: no body");
+    };
+    let waiting = waiting
+        .iter()
+        .map(|command| format!("0x{command:08X}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let blockers = ready_position_blockers(
+        current,
+        motion.current_style,
+        motion.forward_command,
+        has_combat_table,
+        motion.motions_pending,
+    );
+    format!(
+        "{head} style=0x{:08X} fwd=0x{:08X} waiting=[{waiting}] blocked by: {}",
+        motion.current_style,
+        motion.forward_command,
+        if blockers.is_empty() {
+            "nothing now".to_owned()
+        } else {
+            blockers.join(", ")
+        }
+    )
 }
 
 /// What a combat mode change asks before it goes out, read from the

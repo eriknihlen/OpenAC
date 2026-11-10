@@ -206,6 +206,103 @@ impl CombatModeState {
     }
 }
 
+/// Seconds a mode change may wait for the body before the log says so.
+pub const PARKED_MODE_REPORT_AFTER_SECONDS: f64 = 5.0;
+/// Seconds between the log's lines while the change still waits.
+pub const PARKED_MODE_REPEAT_SECONDS: f64 = 30.0;
+
+/// What the parked-change watch has to say on a pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ParkedModeReport {
+    /// The change to `mode` has waited `seconds` and still waits.
+    StillParked { mode: CombatMode, seconds: f64 },
+    /// A change the log reported went out after `seconds`.
+    WentOut { mode: CombatMode, seconds: f64 },
+    /// A change the log reported was given up after `seconds` (another
+    /// request replaced it, or the session forgot it).
+    GivenUp { mode: CombatMode, seconds: f64 },
+}
+
+/// Watches the parked mode change for the client log: a change that waits
+/// on the body longer than [`PARKED_MODE_REPORT_AFTER_SECONDS`] is
+/// reported then and every [`PARKED_MODE_REPEAT_SECONDS`] after, and its
+/// end once it was reported. A diagnostic only: it decides nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ParkedModeWatch {
+    parked: Option<ParkedSince>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ParkedSince {
+    mode: CombatMode,
+    since: f64,
+    next_report: f64,
+    reported: bool,
+}
+
+impl ParkedModeWatch {
+    /// Once a pass, after the parked change had its chance: `pending` is
+    /// the change still parked, `current` the mode now, `now` the session
+    /// clock in seconds.
+    pub fn observe(
+        &mut self,
+        pending: Option<CombatMode>,
+        current: CombatMode,
+        now: f64,
+    ) -> Option<ParkedModeReport> {
+        match (pending, self.parked) {
+            (Some(mode), Some(mut parked)) if parked.mode == mode => {
+                if now < parked.next_report {
+                    return None;
+                }
+                parked.reported = true;
+                parked.next_report = now + PARKED_MODE_REPEAT_SECONDS;
+                self.parked = Some(parked);
+                Some(ParkedModeReport::StillParked {
+                    mode,
+                    seconds: now - parked.since,
+                })
+            }
+            (Some(mode), old) => {
+                self.parked = Some(ParkedSince {
+                    mode,
+                    since: now,
+                    next_report: now + PARKED_MODE_REPORT_AFTER_SECONDS,
+                    reported: false,
+                });
+                old.and_then(|old| Self::ended(old, current, now))
+            }
+            (None, old) => {
+                self.parked = None;
+                old.and_then(|old| Self::ended(old, current, now))
+            }
+        }
+    }
+
+    /// Forget the watched change without a word (the session ended).
+    pub fn reset(&mut self) {
+        self.parked = None;
+    }
+
+    fn ended(old: ParkedSince, current: CombatMode, now: f64) -> Option<ParkedModeReport> {
+        if !old.reported {
+            return None;
+        }
+        let seconds = now - old.since;
+        Some(if current == old.mode {
+            ParkedModeReport::WentOut {
+                mode: old.mode,
+                seconds,
+            }
+        } else {
+            ParkedModeReport::GivenUp {
+                mode: old.mode,
+                seconds,
+            }
+        })
+    }
+}
+
 fn refuse_during_teleport(
     current: CombatMode,
     readiness: Option<&dyn CombatModeReadiness>,
