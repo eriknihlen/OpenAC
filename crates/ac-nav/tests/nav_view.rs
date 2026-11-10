@@ -166,6 +166,9 @@ fn a_route_found_alone_is_a_lifted_magenta_line_along_its_legs_and_a_ring_at_the
     assert_eq!(legs[0].to, v(4.0, 0.0, 0.0) + lift);
     assert_eq!(legs[1].to, v(4.0, 6.0, 1.0) + lift);
     assert!(lines.iter().all(|l| l.kind == NavLineKind::Route));
+    // Legs lie along the ground; the goal's cylinder stands straight.
+    assert!(legs.iter().all(|l| l.follows_ground));
+    assert!(lines[..ring].iter().all(|l| !l.follows_ground));
 }
 
 #[test]

@@ -582,6 +582,8 @@ pub(crate) struct WorldRenderer {
     portal_vertices_capacity: usize,
     /// The plugins' world lines as this frame draws them.
     world_lines: world_lines::WorldLinesGpu,
+    /// The navigation view's lines as this frame draws them.
+    navigation_lines: world_lines::WorldLinesGpu,
     world_triangles: world_triangles::WorldTrianglesGpu,
     icon_probes: icon_probes::IconProbes,
 
@@ -943,6 +945,7 @@ impl WorldRenderer {
             ),
             portal_vertices_capacity,
             world_lines: world_lines::WorldLinesGpu::default(),
+            navigation_lines: world_lines::WorldLinesGpu::default(),
             world_triangles: world_triangles::WorldTrianglesGpu::default(),
             icon_probes: icon_probes::IconProbes::default(),
             models: crate::IdMap::default(),
@@ -1243,6 +1246,7 @@ impl WorldRenderer {
         // The plugins' lines and triangles are set again for this frame's
         // camera, after the camera has moved.
         self.world_lines.clear();
+        self.navigation_lines.clear();
         self.world_triangles.clear();
         self.pump_loader(device, queue);
         self.ensure_effects();

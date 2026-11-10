@@ -92,6 +92,25 @@ pub struct WorldLineVertex {
     pub color: [f32; 3],
 }
 
+/// How a line is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineShape {
+    /// A solid bar as wide as the line says.
+    Bar,
+    /// One pixel wide at any distance, however wide the line says it is.
+    Hairline,
+}
+
+impl LineShape {
+    /// The vertices one piece of a line takes.
+    const fn vertices(self) -> usize {
+        match self {
+            Self::Bar => VERTICES_PER_BAR,
+            Self::Hairline => 2,
+        }
+    }
+}
+
 /// A plugin's line placed in the drawing frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlacedLine {
@@ -270,6 +289,18 @@ pub fn build(
     floor: impl Fn(f32, f32, f32) -> Option<f32>,
     out: &mut Vec<WorldLineVertex>,
 ) {
+    build_as(LineShape::Bar, lines, camera, terrain, floor, out);
+}
+
+/// [`build`], each piece drawn as `shape`.
+pub fn build_as(
+    shape: LineShape,
+    lines: &[PlacedLine],
+    camera: Vec3,
+    terrain: impl Fn(f32, f32) -> Option<f32>,
+    floor: impl Fn(f32, f32, f32) -> Option<f32>,
+    out: &mut Vec<WorldLineVertex>,
+) {
     out.clear();
     let mut planned: Vec<Planned> = Vec::new();
     let mut vertices = 0usize;
@@ -290,7 +321,7 @@ pub fn build(
             follow_terrain: line.follow_terrain,
             pieces,
         });
-        vertices += pieces.drawn() as usize * VERTICES_PER_BAR;
+        vertices += pieces.drawn() as usize * shape.vertices();
     }
     // Only when the lines do not all fit is the order worth a sort.
     if vertices > VERTEX_BUDGET {
@@ -300,9 +331,9 @@ pub fn build(
                 .total_cmp(&b.pieces.distance_squared)
         });
     }
-    let mut bars = Bars { out };
+    let mut bars = Bars { out, shape };
     for line in &planned {
-        if line.pieces.drawn() as usize * VERTICES_PER_BAR > bars.remaining() {
+        if line.pieces.drawn() as usize * shape.vertices() > bars.remaining() {
             break;
         }
         bars.line(
@@ -318,6 +349,7 @@ pub fn build(
 /// The bars of one frame, bounded by [`VERTEX_BUDGET`].
 struct Bars<'a> {
     out: &'a mut Vec<WorldLineVertex>,
+    shape: LineShape,
 }
 
 impl Bars<'_> {
@@ -343,8 +375,20 @@ impl Bars<'_> {
         let mut previous = at(pieces.first);
         for i in pieces.first + 1..=pieces.last {
             let next = at(i);
-            self.bar(previous, next, line.color, line.thickness);
+            match self.shape {
+                LineShape::Bar => self.bar(previous, next, line.color, line.thickness),
+                LineShape::Hairline => self.hairline(previous, next, line.color),
+            }
             previous = next;
+        }
+    }
+
+    fn hairline(&mut self, start: Vec3, end: Vec3, color: [f32; 3]) {
+        for p in [start, end] {
+            self.out.push(WorldLineVertex {
+                position: p.to_array(),
+                color,
+            });
         }
     }
 

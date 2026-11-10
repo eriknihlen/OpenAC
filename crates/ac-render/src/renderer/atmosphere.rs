@@ -13,8 +13,9 @@ use bytemuck::{Pod, Zeroable};
 
 use super::particles::{ParticleGpu, ParticlePipelines};
 use super::pipelines::{
-    DEPTH_FORMAT, icon_probe_pipeline, mesh_pipeline_with, portal_pipeline, shader, sky_pipeline,
-    uniform_entry, world_line_pipeline, world_triangle_pipeline,
+    DEPTH_FORMAT, icon_probe_pipeline, mesh_pipeline_with, navigation_line_pipeline,
+    portal_pipeline, shader, sky_pipeline, uniform_entry, world_line_pipeline,
+    world_triangle_pipeline,
 };
 use crate::assets::{MeshGpuVertex, TerrainGpuVertex};
 use crate::atmosphere::auto_quality::{
@@ -88,6 +89,7 @@ pub(crate) struct HdrWorldPipelines {
     pub particle_meshes: HashMap<(crate::draws::ParticleBlend, Cull), wgpu::RenderPipeline>,
     /// The plugins' world lines.
     pub world_line: wgpu::RenderPipeline,
+    pub navigation_line: wgpu::RenderPipeline,
     /// The plugins' world triangles.
     pub world_triangle: wgpu::RenderPipeline,
     /// The invisible probes of the icons hidden behind the world.
@@ -199,6 +201,7 @@ impl HdrWorldPipelines {
         let (billboard, particle_meshes): ParticlePipelines =
             ParticleGpu::pipelines(device, format, samples, layouts.globals, layouts.material);
         let world_line = world_line_pipeline(device, format, samples, layouts.globals);
+        let navigation_line = navigation_line_pipeline(device, format, samples, layouts.globals);
         let world_triangle = world_triangle_pipeline(device, format, samples, layouts.globals);
         let icon_probe = icon_probe_pipeline(device, format, samples, layouts.globals);
         Self {
@@ -210,6 +213,7 @@ impl HdrWorldPipelines {
             billboard,
             particle_meshes,
             world_line,
+            navigation_line,
             world_triangle,
             icon_probe,
         }

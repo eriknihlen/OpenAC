@@ -1,6 +1,6 @@
-//! The plugins' world lines on the GPU: this frame's bars, uploaded after
-//! the camera has moved and drawn in the world pass after the rest of the
-//! world, with its depth.
+//! The plugins' world lines and the navigation view on the GPU: this
+//! frame's lines, uploaded after the camera has moved and drawn in the world
+//! pass after the rest of the world, with its depth.
 
 use glam::Vec3;
 
@@ -8,12 +8,12 @@ use super::WorldRenderer;
 use super::pipelines::vertex_buffer;
 use super::shadows::PassPipelines;
 use crate::world_frame::{LandblockCoord, landblock_offset};
-use crate::world_lines::{PlacedLine, WorldLineVertex, build, followed_terrain};
+use crate::world_lines::{LineShape, PlacedLine, WorldLineVertex, build_as, followed_terrain};
 
 /// A landblock's side, metres.
 const LANDBLOCK_METRES: f32 = 192.0;
 
-/// This frame's bars.
+/// This frame's lines of one shape.
 #[derive(Default)]
 pub(super) struct WorldLinesGpu {
     vertices: Option<wgpu::Buffer>,
@@ -27,6 +27,25 @@ impl WorldLinesGpu {
     pub(super) fn clear(&mut self) {
         self.count = 0;
     }
+
+    /// Hand the GPU what `scratch` holds.
+    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        if self.scratch.is_empty() {
+            return;
+        }
+        if self.vertices.is_none() || self.scratch.len() > self.capacity {
+            self.capacity = self.scratch.len().next_power_of_two();
+            self.vertices = Some(vertex_buffer(
+                device,
+                "world lines",
+                self.capacity * size_of::<WorldLineVertex>(),
+            ));
+        }
+        if let Some(buffer) = &self.vertices {
+            queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.scratch));
+            self.count = self.scratch.len() as u32;
+        }
+    }
 }
 
 impl WorldRenderer {
@@ -38,40 +57,54 @@ impl WorldRenderer {
         queue: &wgpu::Queue,
         lines: &[PlacedLine],
     ) {
-        self.world_lines.count = 0;
-        let Some((eye, _)) = self.camera else {
-            return;
-        };
-        if lines.is_empty() || !self.origin.is_known() {
-            return;
+        self.set_lines(device, queue, lines, LineShape::Bar);
+    }
+
+    /// This frame's navigation view, placed in the drawing frame: one pixel
+    /// wide, hidden by whatever stands in front of it.
+    pub(crate) fn set_navigation_lines(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        lines: &[PlacedLine],
+    ) {
+        self.set_lines(device, queue, lines, LineShape::Hairline);
+    }
+
+    fn lines_gpu(&mut self, shape: LineShape) -> &mut WorldLinesGpu {
+        match shape {
+            LineShape::Bar => &mut self.world_lines,
+            LineShape::Hairline => &mut self.navigation_lines,
         }
-        let mut scratch = std::mem::take(&mut self.world_lines.scratch);
-        build(
-            lines,
-            eye,
-            followed_terrain(self.dungeon.is_some(), |x, y| self.sample_terrain_z(x, y)),
-            |x, y, at_most| {
-                self.camera_collision
-                    .floor_under(&self.origin, x, y, at_most)
-            },
-            &mut scratch,
-        );
-        let gpu = &mut self.world_lines;
-        if !scratch.is_empty() {
-            if gpu.vertices.is_none() || scratch.len() > gpu.capacity {
-                gpu.capacity = scratch.len().next_power_of_two();
-                gpu.vertices = Some(vertex_buffer(
-                    device,
-                    "plugin world lines",
-                    gpu.capacity * size_of::<WorldLineVertex>(),
-                ));
-            }
-            if let Some(buffer) = &gpu.vertices {
-                queue.write_buffer(buffer, 0, bytemuck::cast_slice(&scratch));
-                gpu.count = scratch.len() as u32;
-            }
+    }
+
+    fn set_lines(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        lines: &[PlacedLine],
+        shape: LineShape,
+    ) {
+        let mut gpu = std::mem::take(self.lines_gpu(shape));
+        gpu.count = 0;
+        if let Some((eye, _)) = self.camera
+            && !lines.is_empty()
+            && self.origin.is_known()
+        {
+            build_as(
+                shape,
+                lines,
+                eye,
+                followed_terrain(self.dungeon.is_some(), |x, y| self.sample_terrain_z(x, y)),
+                |x, y, at_most| {
+                    self.camera_collision
+                        .floor_under(&self.origin, x, y, at_most)
+                },
+                &mut gpu.scratch,
+            );
+            gpu.upload(device, queue);
         }
-        gpu.scratch = scratch;
+        *self.lines_gpu(shape) = gpu;
     }
 
     /// The ground's height under a drawing-frame point, where its
@@ -94,16 +127,21 @@ impl WorldRenderer {
     /// The lines, in a world pass that drew the world (not the portal
     /// tunnel).
     pub(super) fn draw_world_lines(&self, pass: &mut wgpu::RenderPass<'_>, p: &PassPipelines<'_>) {
-        if self.world_lines.count == 0 || self.portal.hides_world() {
+        if self.portal.hides_world() {
             return;
         }
-        let Some(buffer) = &self.world_lines.vertices else {
-            return;
-        };
-        pass.set_pipeline(p.world_line);
-        pass.set_bind_group(0, &self.globals_group, &[]);
-        pass.set_vertex_buffer(0, buffer.slice(..));
-        pass.draw(0..self.world_lines.count, 0..1);
+        for (gpu, pipeline) in [
+            (&self.world_lines, p.world_line),
+            (&self.navigation_lines, p.navigation_line),
+        ] {
+            let Some(buffer) = gpu.vertices.as_ref().filter(|_| gpu.count > 0) else {
+                continue;
+            };
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &self.globals_group, &[]);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.draw(0..gpu.count, 0..1);
+        }
     }
 }
 
@@ -180,7 +218,17 @@ mod tests {
         world.prepare(device, queue, None, FlyInput::default());
         world.origin.try_initialize(127, 127);
         let lines = lines(world);
-        world.set_plugin_lines(device, queue, &lines);
+        centre_pixel_of_prepared(world, device, queue, &lines)
+    }
+
+    /// The centre pixel (RGBA) of a frame already prepared, with `lines`.
+    fn centre_pixel_of_prepared(
+        world: &mut WorldRenderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        lines: &[PlacedLine],
+    ) -> [u8; 4] {
+        world.set_plugin_lines(device, queue, lines);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("world line test target"),
             size: wgpu::Extent3d {
@@ -251,6 +299,50 @@ mod tests {
             vec![across(w, 20.0, 0xFF0000), across(w, 10.0, 0x00FF00)]
         });
         assert_eq!(near_last, [0, 255, 0, 255]);
+        assert!(crate::surface::block_on(scope.pop()).is_none());
+    }
+
+    #[test]
+    #[ignore = "needs a GPU"]
+    fn a_navigation_line_is_hidden_by_what_stands_in_front_of_it() {
+        let Some((device, queue)) = gpu() else {
+            eprintln!("no GPU adapter on this machine: the navigation lines are not checked");
+            return;
+        };
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut world = renderer(&device, &queue);
+        // A fan of upright lines, close enough that one of them lights the
+        // centre pixel wherever the pixel grid falls.
+        let navigation = |w: &WorldRenderer, distance: f32| -> Vec<PlacedLine> {
+            let (eye, look) = w.camera.expect("a camera after prepare");
+            let side = look.cross(Vec3::Z).try_normalize().unwrap_or(Vec3::X);
+            (-40..=40)
+                .map(|i| {
+                    let centre = eye + look * distance + side * (i as f32 * 0.025);
+                    PlacedLine {
+                        start: centre - Vec3::Z * 50.0,
+                        end: centre + Vec3::Z * 50.0,
+                        color_rgb: 0xFF00FF,
+                        follow_terrain: false,
+                        width_metres: 0.0,
+                    }
+                })
+                .collect()
+        };
+        let mut frame = |wall_distance: Option<f32>| {
+            world.prepare(&device, &queue, None, FlyInput::default());
+            world.origin.try_initialize(127, 127);
+            let lines = navigation(&world, 10.0);
+            world.set_navigation_lines(&device, &queue, &lines);
+            let walls: Vec<_> = wall_distance
+                .map(|d| across(&world, d, 0x00FF00))
+                .into_iter()
+                .collect();
+            centre_pixel_of_prepared(&mut world, &device, &queue, &walls)
+        };
+        assert_eq!(frame(None), [255, 0, 255, 255]);
+        assert_eq!(frame(Some(20.0)), [255, 0, 255, 255]);
+        assert_eq!(frame(Some(5.0)), [0, 255, 0, 255]);
         assert!(crate::surface::block_on(scope.pop()).is_none());
     }
 }

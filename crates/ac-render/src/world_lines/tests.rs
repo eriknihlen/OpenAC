@@ -663,3 +663,31 @@ fn a_line_lifted_off_a_floor_or_the_ground_still_follows_it() {
         assert!((p.z - centre).abs() <= 0.05 + 0.03, "{p} vs {centre}");
     }
 }
+
+#[test]
+fn a_hairline_takes_two_vertices_a_piece_and_follows_the_ground_like_a_bar() {
+    let lines = [line(
+        Vec3::new(0.0, 0.0, 0.1),
+        Vec3::new(6.0, 0.0, 0.1),
+        true,
+    )];
+    let hill = |x: f32, _: f32| Some(x.min(6.0 - x));
+    let mut hairlines = Vec::new();
+    build_as(
+        LineShape::Hairline,
+        &lines,
+        Vec3::ZERO,
+        hill,
+        no_floor,
+        &mut hairlines,
+    );
+    assert_eq!(hairlines.len(), 8 * 2);
+    let top = positions(&hairlines)
+        .iter()
+        .map(|p| p.z)
+        .fold(f32::MIN, f32::max);
+    assert!(
+        (top - 3.1).abs() < 1e-4,
+        "over the hill, not through it: {top}"
+    );
+}
