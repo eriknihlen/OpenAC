@@ -773,25 +773,12 @@ impl SessionFlow {
         {
             let roster = self.selection.entries().len();
             let slots = self.selection.snapshot().slot_count;
-            let finish =
-                match self
-                    .creation
-                    .try_begin_finish(roster, slots, *confirm_unspent_credits)
-                {
-                    Ok(finish) => finish,
-                    Err(refusal) if refusal.look_invalid => {
-                        let part = self.creation.invalid_look_part().unwrap_or("look");
-                        return Err(SessionError::Refused(format!(
-                            "creation refused: the {part} is not one of the choices; \
-                         nothing was sent"
-                        )));
-                    }
-                    Err(refusal) => {
-                        return Err(SessionError::Refused(format!(
-                            "creation refused: {refusal:?}"
-                        )));
-                    }
-                };
+            let finish = self
+                .creation
+                .try_begin_finish(roster, slots, *confirm_unspent_credits)
+                .map_err(|refusal| {
+                    SessionError::Refused(format!("creation refused: {refusal:?}"))
+                })?;
             let body = build_character_create(
                 self.selection.account_name(),
                 &finish.request,

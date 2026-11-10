@@ -4,6 +4,7 @@
 //! `LiveSessionControllerCharacterCreationTests.cs` and `LiveSessionControllerTests.cs`.
 
 use super::*;
+use crate::session::creation::UNSET;
 use ac_bits::Writer;
 
 fn words(words: &[u32]) -> Vec<u8> {
@@ -297,7 +298,8 @@ fn the_first_creation_command_rolls_the_character_as_the_window_does() {
         .unwrap();
     let s = flow.creation().snapshot();
     assert_ne!((s.heritage_id, s.gender_key), (0, 0));
-    assert_eq!(flow.creation().invalid_look_part(), None);
+    assert_ne!(s.appearance.eyes_strip, UNSET);
+    assert_ne!(s.appearance.shirt_style, UNSET);
     assert_eq!(s.name, "Console");
     // Under way: the next command does not roll again.
     flow.creation_command(&CreationCommand::SetSlot(1)).unwrap();

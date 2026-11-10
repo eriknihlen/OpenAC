@@ -255,10 +255,6 @@ pub struct LocalRefusal {
     pub roster_full: bool,
     /// No heritage or gender chosen.
     pub heritage_or_gender_unset: bool,
-    /// A look slot is not one of its gender's choices (nothing chosen, for
-    /// instance) or a shade is outside 0..=1. Only the headgear may be
-    /// none.
-    pub look_invalid: bool,
 }
 
 impl LocalRefusal {
@@ -270,7 +266,6 @@ impl LocalRefusal {
             || self.already_pending
             || self.roster_full
             || self.heritage_or_gender_unset
-            || self.look_invalid
     }
 }
 
@@ -1293,11 +1288,6 @@ impl CharacterCreation {
                 heritage_or_gender_unset: true,
                 ..LocalRefusal::default()
             }
-        } else if self.invalid_look_part().is_some() {
-            LocalRefusal {
-                look_invalid: true,
-                ..LocalRefusal::default()
-            }
         } else if !confirmed_unspent_credits && self.remaining_attribute_credits > 0 {
             LocalRefusal {
                 attribute_credits_unspent: true,
@@ -1332,11 +1322,19 @@ impl CharacterCreation {
         let a = &self.appearance;
         let b = &self.attributes;
         let attribute = |v: i32| u32::try_from(v).unwrap_or(0);
-        // The four clothing colors go out as 0 when out of range (a hat's
-        // color while no hat is worn, for instance); everything else goes
-        // out as chosen. 0xFFFFFFFF in the headgear style means no headgear.
-        let colors = self.gender().map_or(0, |g| g.clothing_colors.len());
-        let color = |v: u32| if (v as usize) < colors { v } else { 0 };
+        // Each of the four clothing colors goes out as the palette template
+        // of the chosen color (the server dyes the garment with it), or 0
+        // when the color is not one of the garment's: a garment not worn,
+        // the hat when none is, has none. Everything else goes out as
+        // chosen; 0xFFFFFFFF in the headgear style means no headgear.
+        let gender = self.gender();
+        let color = |style: AppearanceSlot, color: u32| {
+            gender
+                .filter(|g| (a.get(style) as usize) < slot_count(style, g))
+                .and_then(|g| g.clothing_colors.get(color as usize))
+                .copied()
+                .unwrap_or(0)
+        };
         let mut classes = [0u32; SKILL_ADVANCEMENT_CLASS_COUNT];
         for (slot, value) in classes.iter_mut().zip(self.skills.to_wire_classes()) {
             *slot = value;
@@ -1353,13 +1351,13 @@ impl CharacterCreation {
                     eye_color: a.eye_color,
                     hair_style: a.hair_style,
                     headgear_style: a.headgear_style,
-                    headgear_color: color(a.headgear_color),
+                    headgear_color: color(AppearanceSlot::HeadgearStyle, a.headgear_color),
                     shirt_style: a.shirt_style,
-                    shirt_color: color(a.shirt_color),
+                    shirt_color: color(AppearanceSlot::ShirtStyle, a.shirt_color),
                     trousers_style: a.trousers_style,
-                    trousers_color: color(a.trousers_color),
+                    trousers_color: color(AppearanceSlot::TrousersStyle, a.trousers_color),
                     footwear_style: a.footwear_style,
-                    footwear_color: color(a.footwear_color),
+                    footwear_color: color(AppearanceSlot::FootwearStyle, a.footwear_color),
                     skin_shade: a.skin_shade,
                     hair_shade: a.hair_shade,
                     headgear_shade: a.headgear_shade,
@@ -1385,54 +1383,6 @@ impl CharacterCreation {
             },
             skill_advancement_classes: classes,
         }
-    }
-
-    /// The first part of the look that is not one of its gender's choices
-    /// (nothing chosen, for instance), or a shade outside 0..=1: a create
-    /// with one is not sent. Only the headgear may be none, and its color
-    /// is not checked then.
-    #[must_use]
-    pub fn invalid_look_part(&self) -> Option<&'static str> {
-        use AppearanceSlot as S;
-        let Some(gender) = self.gender() else {
-            return Some("heritage and gender");
-        };
-        let a = &self.appearance;
-        let no_headgear = a.headgear_style == UNSET;
-        let indexes = [
-            (S::EyesStrip, "eyes"),
-            (S::NoseStrip, "nose"),
-            (S::MouthStrip, "mouth"),
-            (S::HairColor, "hair color"),
-            (S::EyeColor, "eye color"),
-            (S::HairStyle, "hair style"),
-            (S::HeadgearStyle, "headgear"),
-            (S::HeadgearColor, "headgear color"),
-            (S::ShirtStyle, "shirt"),
-            (S::ShirtColor, "shirt color"),
-            (S::TrousersStyle, "trousers"),
-            (S::TrousersColor, "trousers color"),
-            (S::FootwearStyle, "footwear"),
-            (S::FootwearColor, "footwear color"),
-        ];
-        for (slot, name) in indexes {
-            let unchecked = no_headgear && matches!(slot, S::HeadgearStyle | S::HeadgearColor);
-            if !unchecked && a.get(slot) as usize >= slot_count(slot, gender) {
-                return Some(name);
-            }
-        }
-        let shades = [
-            (a.skin_shade, "skin shade"),
-            (a.hair_shade, "hair shade"),
-            (a.headgear_shade, "headgear shade"),
-            (a.shirt_shade, "shirt shade"),
-            (a.trousers_shade, "trousers shade"),
-            (a.footwear_shade, "footwear shade"),
-        ];
-        shades
-            .into_iter()
-            .find(|(v, _)| !(0.0..=1.0).contains(v))
-            .map(|(_, name)| name)
     }
 
     /// The server's answer to the create.
