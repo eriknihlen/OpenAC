@@ -11,6 +11,10 @@ use ac_host_core::json::{self, JsonError, Member, Node, Value};
 /// The version of the relay protocol this crate speaks.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// The most characters kept of a word the relay chose that this version does
+/// not know (an unknown message type or refusal reason).
+pub const MAX_RELAY_WORD: usize = 64;
+
 /// Where the session is, as the relay and the browser see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionState {
@@ -410,7 +414,8 @@ pub enum RefuseReason {
     Duplicate,
     /// The hello came too late.
     HelloTimeout,
-    /// A reason this version does not know.
+    /// A reason this version does not know (at most [`MAX_RELAY_WORD`]
+    /// characters of it).
     Other(String),
 }
 
@@ -452,7 +457,7 @@ pub enum RelayMessage {
     },
     /// A message type this version does not know; ignore it.
     Unknown {
-        /// Its `type`.
+        /// Its `type` (at most [`MAX_RELAY_WORD`] characters of it).
         type_name: String,
     },
 }
@@ -515,7 +520,7 @@ impl RelayMessage {
                     "protocol" => RefuseReason::Protocol,
                     "duplicate" => RefuseReason::Duplicate,
                     "hello_timeout" => RefuseReason::HelloTimeout,
-                    other => RefuseReason::Other(other.to_owned()),
+                    other => RefuseReason::Other(relay_word(other)),
                 };
                 Self::Refused { reason }
             }
@@ -569,11 +574,17 @@ impl RelayMessage {
                 }
             }
             other => Self::Unknown {
-                type_name: other.to_owned(),
+                type_name: relay_word(other),
             },
         };
         Ok(message)
     }
+}
+
+/// A word the relay chose, kept for logs: at most [`MAX_RELAY_WORD`]
+/// characters, so a relay cannot make the endpoint hold or print long text.
+fn relay_word(text: &str) -> String {
+    text.chars().take(MAX_RELAY_WORD).collect()
 }
 
 fn member<'a>(members: &'a [Member], name: &str) -> Option<&'a Node> {
@@ -1042,5 +1053,32 @@ mod tests {
         assert_eq!(first.len(), 32);
         assert!(first.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_ne!(first, second);
+    }
+
+    // Words the relay chose are kept for logs, but never longer than
+    // MAX_RELAY_WORD characters.
+    #[test]
+    fn relay_words_are_cut_to_a_short_length() {
+        let long = "\u{e5}".repeat(100);
+        let Ok(RelayMessage::Refused {
+            reason: RefuseReason::Other(reason),
+        }) = RelayMessage::parse(&format!(r#"{{"type":"refused","reason":"{long}"}}"#))
+        else {
+            panic!("refused");
+        };
+        assert_eq!(reason, "\u{e5}".repeat(MAX_RELAY_WORD));
+        let Ok(RelayMessage::Unknown { type_name }) =
+            RelayMessage::parse(&format!(r#"{{"type":"{long}"}}"#))
+        else {
+            panic!("unknown");
+        };
+        assert_eq!(type_name.chars().count(), MAX_RELAY_WORD);
+        // Short words are kept whole.
+        assert_eq!(
+            RelayMessage::parse(r#"{"type":"weather"}"#),
+            Ok(RelayMessage::Unknown {
+                type_name: "weather".into()
+            })
+        );
     }
 }
