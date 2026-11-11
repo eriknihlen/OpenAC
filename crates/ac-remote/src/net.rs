@@ -16,6 +16,28 @@ use std::time::{Duration, Instant};
 /// The longest pause between looks at an idle socket.
 const LONGEST_PAUSE: Duration = Duration::from_millis(10);
 
+/// `wait` from now; a wait too long for the clock (a configured
+/// `Duration::MAX`) ends in a year instead of overflowing.
+pub(crate) fn after(wait: Duration) -> Instant {
+    const FAR: Duration = Duration::from_secs(365 * 24 * 3600);
+    let now = Instant::now();
+    now.checked_add(wait.min(FAR)).unwrap_or(now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_huge_wait_saturates_instead_of_overflowing() {
+        let now = Instant::now();
+        let far = after(Duration::MAX);
+        assert!(far > now + Duration::from_secs(300 * 24 * 3600));
+        let soon = after(Duration::from_millis(5));
+        assert!(soon >= now + Duration::from_millis(5) && soon < far);
+    }
+}
+
 /// The socket, under TLS or not.
 #[derive(Debug)]
 pub(crate) struct Polling {
@@ -181,7 +203,7 @@ pub(crate) fn dial(
     std::thread::Builder::new()
         .name("remote-dial".to_owned())
         .spawn(move || {
-            let _ = answer.send(connect_tcp(&host, port, Instant::now() + timeout));
+            let _ = answer.send(connect_tcp(&host, port, after(timeout)));
         })?;
     Ok(answered)
 }

@@ -10,8 +10,8 @@
 
 use std::collections::VecDeque;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvError, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -36,10 +36,15 @@ pub struct Timing {
     /// finish within this.
     pub connect_timeout: Duration,
     /// The first wait before reconnecting; it doubles after each failure and
-    /// starts over after a `hello_ok`.
+    /// starts over once a connection has stayed up for `stable_after`.
     pub backoff_first: Duration,
-    /// The longest wait before reconnecting.
+    /// The longest wait before reconnecting; also the wait after the relay
+    /// says a newer connection replaced this one.
     pub backoff_max: Duration,
+    /// A connection up this long after its `hello_ok` counts as good: the
+    /// backoff starts over. A shorter one does not, so two processes that
+    /// keep replacing each other back off.
+    pub stable_after: Duration,
 }
 
 impl Default for Timing {
@@ -50,12 +55,16 @@ impl Default for Timing {
             connect_timeout: Duration::from_secs(10),
             backoff_first: Duration::from_secs(1),
             backoff_max: Duration::from_secs(60),
+            stable_after: Duration::from_secs(15),
         }
     }
 }
 
 /// The default bound on queued outbound bytes.
 pub const DEFAULT_QUEUE_BYTES: usize = 16 * 1024 * 1024;
+
+/// The default bound on bytes held in events the caller has not taken yet.
+pub const DEFAULT_INBOUND_BYTES: usize = 4 * 1024 * 1024;
 
 /// What the link needs.
 #[derive(Debug, Clone)]
@@ -74,6 +83,9 @@ pub struct LinkConfig {
     /// The most bytes queued for sending; past it [`Link::send_binary`]
     /// refuses.
     pub queue_bytes: usize,
+    /// The most payload bytes held in events the caller has not taken yet;
+    /// past it the link drops the connection ([`LinkLoss::InboundOverflow`]).
+    pub inbound_bytes: usize,
 }
 
 impl LinkConfig {
@@ -87,12 +99,15 @@ impl LinkConfig {
             timing: Timing::default(),
             limits: WsLimits::default(),
             queue_bytes: DEFAULT_QUEUE_BYTES,
+            inbound_bytes: DEFAULT_INBOUND_BYTES,
         }
     }
 }
 
 /// Why a connection ended or could not be made. No variant carries the
-/// token or anything the relay sent as text.
+/// token. The only text from the relay is a refusal reason this version does
+/// not know ([`RefuseReason::Other`]), cut to
+/// [`MAX_RELAY_WORD`](crate::protocol::MAX_RELAY_WORD) characters.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LinkLoss {
     /// The name lookup or TCP connect failed.
@@ -128,6 +143,10 @@ pub enum LinkLoss {
     /// The relay closed the WebSocket, with its close code if it gave one.
     #[error("the relay closed the connection (code {0:?})")]
     Closed(Option<u16>),
+    /// The caller left more than [`LinkConfig::inbound_bytes`] in events it
+    /// had not taken.
+    #[error("the events waiting to be read hold too many bytes")]
+    InboundOverflow,
 }
 
 /// What happened on the link, in order.
@@ -159,6 +178,95 @@ pub enum Inbound {
         /// The wait before the next attempt.
         retry_in: Duration,
     },
+}
+
+/// What an event that carries no payload counts against the inbound
+/// budget.
+const EVENT_OVERHEAD: usize = 64;
+
+/// The link's events, in order. Taking one frees its bytes from the inbound
+/// budget ([`LinkConfig::inbound_bytes`]); the methods are those of
+/// [`std::sync::mpsc::Receiver`].
+pub struct Events {
+    receiver: Receiver<(usize, Inbound)>,
+    held: Arc<AtomicUsize>,
+}
+
+impl fmt::Debug for Events {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Events")
+            .field("held_bytes", &self.held.load(Ordering::SeqCst))
+            .finish_non_exhaustive()
+    }
+}
+
+impl Events {
+    fn taken(&self, (cost, event): (usize, Inbound)) -> Inbound {
+        self.held.fetch_sub(cost, Ordering::SeqCst);
+        event
+    }
+
+    /// The next event, waiting for it.
+    ///
+    /// # Errors
+    /// The worker is gone.
+    pub fn recv(&self) -> Result<Inbound, RecvError> {
+        self.receiver.recv().map(|e| self.taken(e))
+    }
+
+    /// The next event, waiting at most `wait`.
+    ///
+    /// # Errors
+    /// None arrived in time, or the worker is gone.
+    pub fn recv_timeout(&self, wait: Duration) -> Result<Inbound, RecvTimeoutError> {
+        self.receiver.recv_timeout(wait).map(|e| self.taken(e))
+    }
+
+    /// The next event if there is one.
+    ///
+    /// # Errors
+    /// None is waiting, or the worker is gone.
+    pub fn try_recv(&self) -> Result<Inbound, TryRecvError> {
+        self.receiver.try_recv().map(|e| self.taken(e))
+    }
+
+    /// The bytes held in events not taken yet.
+    #[must_use]
+    pub fn held_bytes(&self) -> usize {
+        self.held.load(Ordering::SeqCst)
+    }
+}
+
+/// The worker's end of the events: counts what it hands over.
+struct Outbox {
+    sender: Sender<(usize, Inbound)>,
+    held: Arc<AtomicUsize>,
+    budget: usize,
+}
+
+impl Outbox {
+    /// Hands over an event that is the link's own news (connected, lost);
+    /// never refused, as at most one arrives per connection attempt.
+    fn news(&self, event: Inbound) -> bool {
+        self.held.fetch_add(EVENT_OVERHEAD, Ordering::SeqCst);
+        self.sender.send((EVENT_OVERHEAD, event)).is_ok()
+    }
+
+    /// Hands over something the relay sent, counted as `bytes`.
+    fn relayed(&self, event: Inbound, bytes: usize) -> Result<(), LinkLoss> {
+        let cost = bytes.saturating_add(EVENT_OVERHEAD);
+        let before = self.held.fetch_add(cost, Ordering::SeqCst);
+        if before.saturating_add(cost) > self.budget {
+            // A caller that stopped taking events: hold nothing more for it.
+            self.held.fetch_sub(cost, Ordering::SeqCst);
+            return Err(LinkLoss::InboundOverflow);
+        }
+        if self.sender.send((cost, event)).is_err() {
+            // The link is being dropped; nobody will take it.
+            self.held.fetch_sub(cost, Ordering::SeqCst);
+        }
+        Ok(())
+    }
 }
 
 /// Why a message was not queued.
@@ -271,7 +379,7 @@ impl Shared {
 /// connection.
 pub struct Link {
     shared: Arc<Shared>,
-    events: Receiver<Inbound>,
+    events: Events,
     worker: Option<JoinHandle<()>>,
     limits: WsLimits,
 }
@@ -299,12 +407,22 @@ impl Link {
             wake: Condvar::new(),
             stop: Arc::new(AtomicBool::new(false)),
         });
-        let (events_tx, events) = mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
+        let held = Arc::new(AtomicUsize::new(0));
+        let events = Events {
+            receiver,
+            held: Arc::clone(&held),
+        };
+        let outbox = Outbox {
+            sender,
+            held,
+            budget: config.inbound_bytes,
+        };
         let limits = config.limits;
         let worker_shared = Arc::clone(&shared);
         let worker = std::thread::Builder::new()
             .name("remote-link".to_owned())
-            .spawn(move || run(&worker_shared, &config, &events_tx))?;
+            .spawn(move || run(&worker_shared, &config, &outbox))?;
         Ok(Self {
             shared,
             events,
@@ -315,7 +433,7 @@ impl Link {
 
     /// The events, in order.
     #[must_use]
-    pub fn events(&self) -> &Receiver<Inbound> {
+    pub fn events(&self) -> &Events {
         &self.events
     }
 
@@ -444,6 +562,11 @@ impl Backoff {
     fn reset(&mut self) {
         self.next = self.first;
     }
+
+    /// Another connection replaced this one: the next wait is the longest.
+    fn penalize(&mut self) {
+        self.next = self.max;
+    }
 }
 
 /// How one connection ended.
@@ -474,7 +597,7 @@ const READ_BURST: usize = 64;
 const WRITE_BURST: usize = 1024 * 1024;
 
 /// The worker: connect, run the connection, wait, again; until told to stop.
-fn run(shared: &Shared, config: &LinkConfig, events: &Sender<Inbound>) {
+fn run(shared: &Shared, config: &LinkConfig, events: &Outbox) {
     let mut backoff = Backoff::new(&config.timing);
     while !shared.stopping() {
         let (loss, connected) = match connect(shared, config, events, &mut backoff) {
@@ -488,13 +611,16 @@ fn run(shared: &Shared, config: &LinkConfig, events: &Sender<Inbound>) {
             state.connected = false;
             state.queue.clear();
         }
+        if loss == LinkLoss::Refused(RefuseReason::Duplicate) {
+            backoff.penalize();
+        }
         let retry_in = backoff.next();
         let event = if connected {
             Inbound::Disconnected { loss, retry_in }
         } else {
             Inbound::ConnectFailed { loss, retry_in }
         };
-        if events.send(event).is_err() || wait_or_stop(shared, retry_in) {
+        if !events.news(event) || wait_or_stop(shared, retry_in) {
             return;
         }
     }
@@ -502,7 +628,7 @@ fn run(shared: &Shared, config: &LinkConfig, events: &Sender<Inbound>) {
 
 /// Waits `wait`; true when told to stop meanwhile.
 fn wait_or_stop(shared: &Shared, wait: Duration) -> bool {
-    let deadline = Instant::now() + wait;
+    let deadline = net::after(wait);
     let mut state = shared.lock();
     loop {
         if shared.stopping() {
@@ -522,14 +648,9 @@ fn wait_or_stop(shared: &Shared, wait: Duration) -> bool {
 }
 
 /// One connection: TCP, TLS, the WebSocket handshake, then the session.
-fn connect(
-    shared: &Shared,
-    config: &LinkConfig,
-    events: &Sender<Inbound>,
-    backoff: &mut Backoff,
-) -> End {
+fn connect(shared: &Shared, config: &LinkConfig, events: &Outbox, backoff: &mut Backoff) -> End {
     let url = &config.url;
-    let deadline = Instant::now() + config.timing.connect_timeout;
+    let deadline = net::after(config.timing.connect_timeout);
     let answered = match net::dial(&url.host, url.port, config.timing.connect_timeout) {
         Ok(answered) => answered,
         Err(e) => return failed(LinkLoss::Connect(format!("no connect thread: {e}"))),
@@ -582,6 +703,7 @@ fn connect(
         backoff,
         ws: &mut ws,
         connected: false,
+        welcomed_at: None,
         sent_hello: None,
     }
     .run();
@@ -604,11 +726,12 @@ fn say_goodbye(ws: &mut WsClient<Transport>, end: &End) {
             | LinkLoss::Unexpected(_)
             | LinkLoss::ProtocolVersion(_) => Some(1002),
             LinkLoss::HelloTimeout | LinkLoss::Silent => Some(1001),
+            // The endpoint's own policy: it will not hold more for its caller.
+            LinkLoss::InboundOverflow => Some(1008),
             _ => Some(1000),
         },
     };
-    ws.get_mut()
-        .set_write_deadline(Instant::now() + GOODBYE_WRITE);
+    ws.get_mut().set_write_deadline(net::after(GOODBYE_WRITE));
     if let Some(code) = code {
         let _ = ws.close(code, "");
     }
@@ -619,11 +742,14 @@ fn say_goodbye(ws: &mut WsClient<Transport>, end: &End) {
 struct Session<'a> {
     shared: &'a Shared,
     timing: &'a Timing,
-    events: &'a Sender<Inbound>,
+    events: &'a Outbox,
     backoff: &'a mut Backoff,
     ws: &'a mut WsClient<Transport>,
     /// Since `hello_ok`.
     connected: bool,
+    /// When `hello_ok` came; the backoff starts over once the connection
+    /// has stayed up `stable_after` since.
+    welcomed_at: Option<Instant>,
     /// The hello as sent, to tell the relay what changed before `hello_ok`.
     sent_hello: Option<Hello>,
 }
@@ -650,7 +776,7 @@ impl Session<'_> {
             // lost as a silent one.
             self.ws
                 .get_mut()
-                .set_write_deadline(Instant::now() + self.timing.silence);
+                .set_write_deadline(net::after(self.timing.silence));
             for _ in 0..READ_BURST {
                 match self.ws.read_event() {
                     Ok(None) => break,
@@ -671,6 +797,13 @@ impl Session<'_> {
             if now.duration_since(last_frame) >= self.timing.silence {
                 return self.lost(LinkLoss::Silent);
             }
+            if self
+                .welcomed_at
+                .is_some_and(|at| now.duration_since(at) >= self.timing.stable_after)
+            {
+                self.backoff.reset();
+                self.welcomed_at = None;
+            }
             if self.connected {
                 let mut written = 0;
                 while written < WRITE_BURST {
@@ -681,7 +814,7 @@ impl Session<'_> {
                     written += item.len();
                     self.ws
                         .get_mut()
-                        .set_write_deadline(Instant::now() + self.timing.silence);
+                        .set_write_deadline(net::after(self.timing.silence));
                     let sent = match &item {
                         Outgoing::Text(text) => self.ws.send_text(text),
                         Outgoing::Binary(bytes) => self.ws.send_binary(bytes),
@@ -718,10 +851,11 @@ impl Session<'_> {
                 if !self.connected {
                     return Err(LinkLoss::Unexpected("a binary frame before hello_ok"));
                 }
-                let _ = self.events.send(Inbound::Binary(bytes));
-                Ok(())
+                let size = bytes.len();
+                self.events.relayed(Inbound::Binary(bytes), size)
             }
             WsEvent::Text(text) => {
+                let size = text.len();
                 let message = RelayMessage::parse(&text).map_err(LinkLoss::Message)?;
                 match message {
                     RelayMessage::HelloOk {
@@ -742,10 +876,7 @@ impl Session<'_> {
                     _ if !self.connected => {
                         Err(LinkLoss::Unexpected("a control message before hello_ok"))
                     }
-                    other => {
-                        let _ = self.events.send(Inbound::Control(other));
-                        Ok(())
-                    }
+                    other => self.events.relayed(Inbound::Control(other), size),
                 }
             }
         }
@@ -767,8 +898,8 @@ impl Session<'_> {
             }
         }
         self.connected = true;
-        self.backoff.reset();
-        let _ = self.events.send(Inbound::Connected { ping_interval_ms });
+        self.welcomed_at = Some(Instant::now());
+        self.events.news(Inbound::Connected { ping_interval_ms });
     }
 }
 
@@ -811,5 +942,43 @@ mod tests {
         assert_eq!(waits, [1, 2, 4, 8, 16, 32, 60, 60]);
         backoff.reset();
         assert_eq!(backoff.next(), Duration::from_secs(1));
+        // Replaced by a newer connection: the longest wait, then it stays
+        // there until a good connection.
+        backoff.penalize();
+        assert_eq!(backoff.next(), Duration::from_secs(60));
+        assert_eq!(backoff.next(), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn events_free_their_bytes_when_taken() {
+        let (sender, receiver) = mpsc::channel();
+        let held = Arc::new(AtomicUsize::new(0));
+        let events = Events {
+            receiver,
+            held: Arc::clone(&held),
+        };
+        let outbox = Outbox {
+            sender,
+            held,
+            budget: 1000,
+        };
+        outbox.relayed(Inbound::Binary(vec![0; 400]), 400).unwrap();
+        outbox.relayed(Inbound::Binary(vec![0; 400]), 400).unwrap();
+        // Past the budget: refused, and nothing more is held.
+        assert_eq!(
+            outbox.relayed(Inbound::Binary(vec![0; 400]), 400),
+            Err(LinkLoss::InboundOverflow)
+        );
+        assert_eq!(events.held_bytes(), 2 * (400 + EVENT_OVERHEAD));
+        // The link's own news always goes through.
+        assert!(outbox.news(Inbound::Connected {
+            ping_interval_ms: 1
+        }));
+        assert!(events.try_recv().is_ok());
+        assert!(events.recv_timeout(Duration::from_millis(1)).is_ok());
+        assert!(events.recv().is_ok());
+        assert_eq!(events.held_bytes(), 0);
+        // Taking frees room again.
+        outbox.relayed(Inbound::Binary(vec![0; 400]), 400).unwrap();
     }
 }
