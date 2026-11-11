@@ -20,6 +20,7 @@
 //! next `attached`, so such a straggler is harmless.
 
 mod base64;
+pub mod endpoint;
 pub mod link;
 mod net;
 pub mod protocol;

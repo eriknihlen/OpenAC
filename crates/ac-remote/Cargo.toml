@@ -11,6 +11,8 @@ publish.workspace = true
 [dependencies]
 # The strict JSON reader the session-config document uses.
 ac-host-core.workspace = true
+# The session whose events and commands the endpoint carries.
+ac-runtime.workspace = true
 # The same OS TLS the launcher and plugins use.
 native-tls.workspace = true
 thiserror.workspace = true
