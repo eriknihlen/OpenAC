@@ -20,6 +20,7 @@ mod database;
 mod error;
 mod header;
 pub mod objects;
+mod pack;
 pub mod texture;
 pub mod types;
 
@@ -32,3 +33,4 @@ pub use database::{DatFile, Entries, ITERATION_ID};
 pub use error::{DatError, DecodeError, Result};
 pub use header::{DatFileType, DatHeader};
 pub use objects::DatObject;
+pub use pack::DatPack;

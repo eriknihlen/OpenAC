@@ -15,6 +15,7 @@ use std::ops::Add;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::btree::Node;
 use crate::objects::{PixelFormat, RenderSurface};
 use crate::texture::{DecodeOptions, DecodedTexture};
@@ -105,6 +106,7 @@ impl<K: Copy + Eq + Hash, V: Clone> Lru<K, V> {
         Some(slot.value.clone())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn len(&self) -> usize {
         self.entries.len()
     }
@@ -147,7 +149,9 @@ pub const DEFAULT_NODE_CACHE_LIMIT: usize = 500;
 /// A bounded cache of decoded directory nodes, keyed by the block offset
 /// they were read from: a lookup walks root to leaf, and the nodes near the
 /// root (and the leaves of ids read together) are read again and again.
-/// Keeps the most recently used `limit` nodes; thread-safe.
+/// Keeps the most recently used `limit` nodes; thread-safe. A mapped dat's
+/// only (not on WebAssembly).
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub(crate) struct NodeCache {
     limit: usize,
@@ -155,6 +159,7 @@ pub(crate) struct NodeCache {
     counters: Counters,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl NodeCache {
     /// A cache of at most `limit` nodes; 0 keeps none.
     pub(crate) fn new(limit: usize) -> Self {

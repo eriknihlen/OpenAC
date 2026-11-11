@@ -1,5 +1,9 @@
 //! The dat directory: a B-tree of file entries keyed by file id, each node
 //! stored in its own block chain.
+//!
+//! On WebAssembly only packs exist, which have no directory: there only
+//! [`DatEntry`] is used.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use ac_bits::{BitsError, Reader};
 
