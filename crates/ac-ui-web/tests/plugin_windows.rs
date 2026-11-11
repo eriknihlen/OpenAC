@@ -298,3 +298,61 @@ fn a_page_that_takes_control_later_tells_the_session_what_the_window_reports() {
     later.frame();
     assert!(plugin_reports(&mut later).is_empty(), "said once");
 }
+
+/// Only watching, the page's keys, text and buttons do nothing at all: not
+/// in the panels either (a change made there would never reach the session
+/// and the picture would lie). Keys and text fall through to the page.
+#[test]
+#[ignore = "reads the installed dats"]
+fn while_only_watching_keys_text_and_buttons_do_nothing() {
+    let mut page = page_with_plugin_window(false);
+    sent(&mut page);
+    let toggle = (320.0, 234.0);
+    let now = page.now;
+    // The pointer still shows what is under it.
+    assert!(page.panels().pointer_move(toggle.0, toggle.1, now));
+    // A press on a panel is the panel's (it does not reach what the page
+    // shows underneath), and presses nothing.
+    assert_eq!(click(&mut page, toggle, true), (true, true));
+    assert_eq!(click(&mut page, (700.0, 380.0), true), (false, false));
+    let none = Modifiers::default();
+    let now = page.now;
+    assert!(!page.panels().key(true, "Enter", none, false, now));
+    assert!(!page.panels().key(false, "Enter", none, false, now));
+    assert!(!page.panels().text("x"));
+    page.frame();
+    page.frame();
+    assert!(sent(&mut page).is_empty());
+    // The chat entry did not open for the Enter.
+    let ui = page.panels().ui().expect("built");
+    assert!(!ui.host().root.wants_keyboard());
+}
+
+/// The pointer left the canvas: nothing is hovered any more.
+#[test]
+#[ignore = "reads the installed dats"]
+fn the_pointer_leaving_the_canvas_ends_the_hover() {
+    let mut page = page_with_plugin_window(true);
+    let toggle = (320.0, 234.0);
+    let now = page.now;
+    assert!(page.panels().pointer_move(toggle.0, toggle.1, now));
+    assert!(
+        page.panels()
+            .ui()
+            .expect("built")
+            .host()
+            .root
+            .hovered()
+            .is_some()
+    );
+    page.panels().pointer_leave();
+    assert!(
+        page.panels()
+            .ui()
+            .expect("built")
+            .host()
+            .root
+            .hovered()
+            .is_none()
+    );
+}

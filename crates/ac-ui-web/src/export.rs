@@ -192,6 +192,12 @@ pub extern "C" fn ui_pointer_button(
     })
 }
 
+/// The pointer left the canvas.
+#[unsafe(no_mangle)]
+pub extern "C" fn ui_pointer_leave() {
+    with(|module| module.panels().pointer_leave());
+}
+
 /// The wheel turned.
 #[unsafe(no_mangle)]
 pub extern "C" fn ui_wheel(lines: f32, x: f32, y: f32, modifiers: u32) -> u32 {

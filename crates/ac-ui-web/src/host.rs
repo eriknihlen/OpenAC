@@ -94,6 +94,8 @@ pub trait Panels {
         modifiers: Modifiers,
         now: f64,
     ) -> bool;
+    /// The pointer left the canvas.
+    fn pointer_leave(&mut self);
     /// The wheel turned by `lines` (positive: away from the user).
     fn wheel(&mut self, lines: f32, at: (f32, f32), modifiers: Modifiers) -> bool;
     /// The canvas gained or lost the keyboard.
@@ -228,6 +230,8 @@ impl Panels for NoPanels {
     ) -> bool {
         false
     }
+
+    fn pointer_leave(&mut self) {}
 
     fn wheel(&mut self, _lines: f32, _at: (f32, f32), _modifiers: Modifiers) -> bool {
         false
