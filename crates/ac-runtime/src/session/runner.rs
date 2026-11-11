@@ -294,7 +294,13 @@ pub enum SessionCommand {
     /// over this channel until [`SessionCommand::Detach`] or until the
     /// window drops its receiver.
     Attach(Sender<PresentationEvent>),
-    /// The window detaches.
+    /// A remote presentation attaches (a window shown somewhere else, over
+    /// a link that may stall or drop): it is fed as an attached window is
+    /// and replaces one, but the session never waits for it. No portal
+    /// arrival and no login is held for it, and a session whose server
+    /// falls silent logs in again as it does with nothing attached.
+    AttachRemote(Sender<PresentationEvent>),
+    /// The window, or the remote presentation, detaches.
     Detach,
     /// Log the character off and end the session.
     Shutdown,
@@ -887,7 +893,7 @@ fn run(
     let mut recovery = Recovery::new(timing.relogin_interval);
     // A window that attached while the session waited to log in again; the
     // next connection takes it.
-    let mut waiting_window: Option<Sender<PresentationEvent>> = None;
+    let mut waiting_window: Option<Presentation> = None;
     let result = loop {
         // A connection starts a generation; its end starts another.
         generation = generation.next();
@@ -919,7 +925,7 @@ fn run(
         // What a failed attempt to log in again is judged by.
         let mut ended_by: Option<SessionError> = None;
         let mut logged_in = false;
-        let mut window_after: Option<Sender<PresentationEvent>> = None;
+        let mut window_after: Option<Presentation> = None;
         // Logging in hears the host meanwhile: a window that attaches sees
         // the connecting screen, a shutdown (its Cancel) ends the attempt,
         // and other requests wait for the connection.
@@ -951,6 +957,7 @@ fn run(
                     state: &mut state,
                     events,
                     attached: None,
+                    attached_remote: false,
                     shutdown_requested: false,
                     reconnect_requested: false,
                     enter_attempted: false,
@@ -979,7 +986,7 @@ fn run(
                 };
                 if let Some(window) = connecting.window.take() {
                     session.dispatch(
-                        SessionCommand::Attach(window),
+                        window.attach_command(),
                         driver.now().as_duration(),
                         clocks(&driver),
                     );
@@ -994,7 +1001,10 @@ fn run(
                 session.announce_leaving(driver.now().as_duration(), clocks(&driver));
                 ended_by = session.ended_by.take();
                 logged_in = session.logged_in;
-                window_after = session.attached.take();
+                window_after = session.attached.take().map(|to| Presentation {
+                    to,
+                    remote: session.attached_remote,
+                });
                 generation = session.flow.generation();
                 // Chat still held for the plugins' filters is decided before
                 // the connection's state is forgotten.
@@ -1063,6 +1073,10 @@ fn run(
                     after: recovery.interval(),
                 }));
                 lifecycle.report(Lifecycle::stopped(generation));
+                // A remote presentation stays attached through the login.
+                if window_after.is_some() {
+                    waiting_window = window_after;
+                }
                 if !wait_relogin(&mut recovery, commands, events, &mut waiting_window) {
                     break Ok(());
                 }
@@ -1219,7 +1233,7 @@ fn retry_later(
     error: String,
     commands: &Receiver<SessionCommand>,
     events: &Sender<HostEvent>,
-    window: &mut Option<Sender<PresentationEvent>>,
+    window: &mut Option<Presentation>,
 ) -> bool {
     recovery.attempt_failed(Instant::now());
     let _ = events.send(HostEvent::Relogin(Relogin::AttemptFailed {
@@ -1238,7 +1252,7 @@ fn wait_relogin(
     recovery: &mut Recovery,
     commands: &Receiver<SessionCommand>,
     events: &Sender<HostEvent>,
-    window: &mut Option<Sender<PresentationEvent>>,
+    window: &mut Option<Presentation>,
 ) -> bool {
     loop {
         let now = Instant::now();
@@ -1250,7 +1264,10 @@ fn wait_relogin(
         }
         match commands.recv_timeout(deadline.saturating_duration_since(now)) {
             Ok(SessionCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => return false,
-            Ok(SessionCommand::Attach(attached)) => *window = Some(attached),
+            Ok(SessionCommand::Attach(to)) => *window = Some(Presentation { to, remote: false }),
+            Ok(SessionCommand::AttachRemote(to)) => {
+                *window = Some(Presentation { to, remote: true });
+            }
             Ok(SessionCommand::Detach) => *window = None,
             Ok(_) => {
                 let _ = events.send(HostEvent::CommandRefused(
@@ -1323,6 +1340,9 @@ struct Drive<'a> {
     state: &'a mut SessionState,
     events: &'a Sender<HostEvent>,
     attached: Option<Sender<PresentationEvent>>,
+    /// What is attached is a remote presentation: the session never waits
+    /// for it.
+    attached_remote: bool,
     shutdown_requested: bool,
     reconnect_requested: bool,
     /// The configured character was tried at this connection's character
@@ -1399,9 +1419,10 @@ impl Drive<'_> {
             // with nothing to log off from (the transport disconnect still
             // goes out as it ends). Whether a window is attached is read at
             // this moment: without one the session logs in again, with one
-            // it ends and the window shows the loss.
+            // it ends and the window shows the loss. A remote presentation
+            // is not such a window: the session logs in again and keeps it.
             if connection.is_lost() {
-                let window_attached = self.attached.is_some();
+                let window_attached = self.attached.is_some() && !self.attached_remote;
                 self.flow.lose_connection();
                 if let Some(error) = self.forward() {
                     let next = after_loss(
@@ -1733,6 +1754,8 @@ impl Drive<'_> {
     /// reaches the window still attached.
     fn follow_window(&mut self) {
         self.state
+            .set_window_remote(self.attached.is_some() && self.attached_remote);
+        self.state
             .set_window_attached(self.attached.is_some(), self.flow.outbox_mut());
         // An attached window presents the login: login complete waits for
         // the end of its presentation (OpenAC's window sends it there).
@@ -1946,74 +1969,12 @@ impl Drive<'_> {
                     // its own frame times from the snapshot's first frame (a
                     // window moving from another session never draws the new
                     // steps on the old clock).
-                    Some(SessionCommand::Attach(window))
-                        if window
-                            .send(PresentationEvent::SessionClock(self.clock_origin))
-                            .is_ok()
-                            && window
-                                .send(PresentationEvent::Snapshot(self.state.world.snapshot()))
-                                .is_ok() =>
-                    {
-                        // The clock as of now, so the window's sky starts at
-                        // the right time of day.
-                        if let Some(ticks) = self.state.world.clock().now_ticks(now) {
-                            let _ = window.send(PresentationEvent::GameTime(ticks));
-                        }
-                        // A fog override the server set before the attach
-                        // is still in force.
-                        if let Some(environ) = self.state.world.environ_override() {
-                            let _ = window.send(PresentationEvent::AdminEnvirons(environ));
-                        }
-                        // The chat and the player's panels, rebuilt from
-                        // scratch.
-                        let view = self.state.player_view();
-                        let _ = window.send(PresentationEvent::Chat(
-                            self.state.communication.transcript_lines(),
-                        ));
-                        let _ = window.send(PresentationEvent::Player(view));
-                        self.last_player_view = Some(view);
-                        // A new window starts with nothing drawn of
-                        // navigation; the next pass sends what there is.
-                        self.last_navigation_view = crate::navigation::NavigationView::default();
-                        for text in self.state.communication.status_lines().into_iter().rev() {
-                            let _ = window.send(PresentationEvent::StatusText(text));
-                        }
-                        self.presented_player = self.state.world.player_guid();
-                        let active = self.flow.phase() == Phase::InWorld;
-                        for event in self.interface.snapshot(self.state, active) {
-                            let _ = window.send(PresentationEvent::Interface(event));
-                        }
-                        // The plugins' UI as it stands replaces anything
-                        // still queued for a window.
-                        drop(self.state.plugin_ui.take_changes());
-                        self.state.plugin_ui.set_window_attached(true);
-                        let _ = window.send(PresentationEvent::Interface(
-                            InterfaceEvent::PluginUi(self.state.plugin_ui.snapshot()),
-                        ));
-                        // Portal space as it stands now replaces anything
-                        // still queued for a window.
-                        drop(self.state.take_portal_events());
-                        for portal in self.state.portal_space_now() {
-                            let _ = window.send(PresentationEvent::PortalSpace(portal));
-                        }
-                        // The pre-game screens, rebuilt from scratch.
-                        let status = connection_status(self.flow.phase(), self.failure.as_ref());
-                        let error = self.failure.as_ref().map(ToString::to_string);
-                        let source = PreGameSource {
-                            status,
-                            error: error.as_deref(),
-                            started: self.connect_started,
-                            direct_launch: self.direct_launch(),
-                            generation: self.flow.generation(),
-                            selection: self.flow.selection(),
-                            creation: self.flow.creation(),
-                        };
-                        for event in self.pregame.snapshot(&source, Some(&self.chargen)) {
-                            let _ = window.send(PresentationEvent::PreGame(event));
-                        }
-                        self.attached = Some(window);
+                    Some(SessionCommand::Attach(window)) => self.attach(window, false, now),
+                    Some(SessionCommand::AttachRemote(window)) => self.attach(window, true, now),
+                    Some(SessionCommand::Detach) => {
+                        self.attached = None;
+                        self.attached_remote = false;
                     }
-                    Some(SessionCommand::Detach) => self.attached = None,
                     Some(SessionCommand::GameTime) => {
                         let date = self.state.world.clock().date(now).and_then(Result::ok);
                         let _ = self.events.send(HostEvent::GameTime(date));
@@ -2028,11 +1989,87 @@ impl Drive<'_> {
                         );
                         let _ = self.events.send(HostEvent::LinkStatus(status));
                     }
-                    // Answered by the state owners, or a failed attach.
+                    // Answered by the state owners.
                     _ => {}
                 }
             }
         }
+    }
+
+    /// A window (or, with `remote`, a remote presentation) attaches in
+    /// place of whatever was attached, and is sent the session as it
+    /// stands. One whose receiver is already gone is not attached.
+    fn attach(&mut self, window: Sender<PresentationEvent>, remote: bool, now: Duration) {
+        self.attached = None;
+        self.attached_remote = false;
+        if window
+            .send(PresentationEvent::SessionClock(self.clock_origin))
+            .is_err()
+            || window
+                .send(PresentationEvent::Snapshot(self.state.world.snapshot()))
+                .is_err()
+        {
+            return;
+        }
+        // The clock as of now, so the window's sky starts at
+        // the right time of day.
+        if let Some(ticks) = self.state.world.clock().now_ticks(now) {
+            let _ = window.send(PresentationEvent::GameTime(ticks));
+        }
+        // A fog override the server set before the attach
+        // is still in force.
+        if let Some(environ) = self.state.world.environ_override() {
+            let _ = window.send(PresentationEvent::AdminEnvirons(environ));
+        }
+        // The chat and the player's panels, rebuilt from
+        // scratch.
+        let view = self.state.player_view();
+        let _ = window.send(PresentationEvent::Chat(
+            self.state.communication.transcript_lines(),
+        ));
+        let _ = window.send(PresentationEvent::Player(view));
+        self.last_player_view = Some(view);
+        // A new window starts with nothing drawn of
+        // navigation; the next pass sends what there is.
+        self.last_navigation_view = crate::navigation::NavigationView::default();
+        for text in self.state.communication.status_lines().into_iter().rev() {
+            let _ = window.send(PresentationEvent::StatusText(text));
+        }
+        self.presented_player = self.state.world.player_guid();
+        let active = self.flow.phase() == Phase::InWorld;
+        for event in self.interface.snapshot(self.state, active) {
+            let _ = window.send(PresentationEvent::Interface(event));
+        }
+        // The plugins' UI as it stands replaces anything
+        // still queued for a window.
+        drop(self.state.plugin_ui.take_changes());
+        self.state.plugin_ui.set_window_attached(true);
+        let _ = window.send(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+            self.state.plugin_ui.snapshot(),
+        )));
+        // Portal space as it stands now replaces anything
+        // still queued for a window.
+        drop(self.state.take_portal_events());
+        for portal in self.state.portal_space_now() {
+            let _ = window.send(PresentationEvent::PortalSpace(portal));
+        }
+        // The pre-game screens, rebuilt from scratch.
+        let status = connection_status(self.flow.phase(), self.failure.as_ref());
+        let error = self.failure.as_ref().map(ToString::to_string);
+        let source = PreGameSource {
+            status,
+            error: error.as_deref(),
+            started: self.connect_started,
+            direct_launch: self.direct_launch(),
+            generation: self.flow.generation(),
+            selection: self.flow.selection(),
+            creation: self.flow.creation(),
+        };
+        for event in self.pregame.snapshot(&source, Some(&self.chargen)) {
+            let _ = window.send(PresentationEvent::PreGame(event));
+        }
+        self.attached = Some(window);
+        self.attached_remote = remote;
     }
 
     fn lifecycle_command(&mut self, command: LifecycleCommand, now: Duration) {
@@ -2589,6 +2626,26 @@ pub(super) fn now_unix_ms() -> i64 {
 /// again.
 const CONNECT_POLL: Duration = Duration::from_millis(50);
 
+/// What is attached while no connection is up: kept for the next one.
+#[derive(Debug)]
+struct Presentation {
+    /// Where its events go.
+    to: Sender<PresentationEvent>,
+    /// A remote presentation, not a window.
+    remote: bool,
+}
+
+impl Presentation {
+    /// The command that attaches it to a connection.
+    fn attach_command(self) -> SessionCommand {
+        if self.remote {
+            SessionCommand::AttachRemote(self.to)
+        } else {
+            SessionCommand::Attach(self.to)
+        }
+    }
+}
+
 /// How an attempt to log in ended.
 enum ConnectAttempt {
     /// The server answered: the connection is up.
@@ -2604,7 +2661,7 @@ enum ConnectAttempt {
 /// its Cancel works before the server answers.
 struct Connecting {
     /// The window attached meanwhile (or before).
-    window: Option<Sender<PresentationEvent>>,
+    window: Option<Presentation>,
     /// Other requests, kept for the connection in their order.
     queued: Vec<SessionCommand>,
     /// When this attempt began.
@@ -2627,7 +2684,7 @@ impl Connecting {
         timeout: Duration,
     ) -> Result<ConnectAttempt, DriverError> {
         if let Some(window) = &self.window {
-            self.present(window, ConnectionStatus::Connecting, None, true);
+            self.present(&window.to, ConnectionStatus::Connecting, None, true);
         }
         let mut handshake = driver.begin_connect(&config.account, &config.password)?;
         let deadline = Instant::now() + timeout;
@@ -2637,9 +2694,13 @@ impl Connecting {
                     Ok(SessionCommand::Shutdown) | Err(TryRecvError::Disconnected) => {
                         return Ok(ConnectAttempt::Shutdown);
                     }
-                    Ok(SessionCommand::Attach(window)) => {
-                        self.present(&window, ConnectionStatus::Connecting, None, true);
-                        self.window = Some(window);
+                    Ok(SessionCommand::Attach(to)) => {
+                        self.present(&to, ConnectionStatus::Connecting, None, true);
+                        self.window = Some(Presentation { to, remote: false });
+                    }
+                    Ok(SessionCommand::AttachRemote(to)) => {
+                        self.present(&to, ConnectionStatus::Connecting, None, true);
+                        self.window = Some(Presentation { to, remote: true });
                     }
                     Ok(SessionCommand::Detach) => self.window = None,
                     Ok(command) => self.queued.push(command),
@@ -2662,7 +2723,7 @@ impl Connecting {
     /// screen says so.
     fn failed(&self, error: &str) {
         if let Some(window) = &self.window {
-            self.present(window, ConnectionStatus::Failed, Some(error), false);
+            self.present(&window.to, ConnectionStatus::Failed, Some(error), false);
         }
     }
 

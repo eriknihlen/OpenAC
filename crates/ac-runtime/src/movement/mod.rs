@@ -118,6 +118,10 @@ pub enum Posture {
 pub enum MovementCommand {
     /// The movement keys a window holds now.
     Keys(MovementKeys),
+    /// Whoever held the movement keys let go of all of them without
+    /// detaching (a remote presentation whose input stopped arriving): as
+    /// the keys of a window that went away.
+    ReleaseKeys,
     /// Toggle the run lock (autorun).
     ToggleRunLock,
     /// Stop: end autorun, the keys a host holds and every scripted move.
@@ -777,6 +781,12 @@ impl Movement {
         self.end_modern_mouse_look = true;
     }
 
+    /// The movement keys held now.
+    #[must_use]
+    pub fn held_keys(&self) -> MovementKeys {
+        self.keys
+    }
+
     /// Whether held movement runs by default (the ToggleRun character
     /// option; on until the character's options say otherwise). Off, the
     /// keys walk and the walk key runs.
@@ -855,6 +865,7 @@ impl Movement {
                 }
                 self.keys = keys;
             }
+            MovementCommand::ReleaseKeys => self.release_keys(),
             MovementCommand::ToggleRunLock => self.auto_run = !self.auto_run,
             MovementCommand::Stop => {
                 // Autorun and a plugin's held keys end, and the forward

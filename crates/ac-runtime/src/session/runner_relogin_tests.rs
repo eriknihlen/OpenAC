@@ -399,6 +399,57 @@ fn a_session_with_a_window_attached_ends_when_its_server_falls_silent() {
     assert!(no_second_login, "the session did not log in again");
 }
 
+/// A remote presentation is not a window the player sits at: the session
+/// logs in again as it does with nothing attached, and the remote stays
+/// attached through it, shown the new connection from a fresh snapshot.
+#[test]
+fn a_session_with_a_remote_attached_logs_in_again_and_keeps_the_remote() {
+    let (ports, address) = Ports::new();
+    let server = thread::spawn(move || {
+        let (mut first, _) = ports.accept();
+        first.enter_world();
+        // Silence: the client finds the server gone and logs in again.
+        let (second, _) =
+            ports.listen(Instant::now() + Duration::from_secs(20), Some(first.client));
+        let (client, _) = second.expect("the client logged in again");
+        let mut again = ports.answer(client);
+        again.enter_world();
+        again.wait_for(0xF653);
+        again.send(&words(&[0xF653]));
+    });
+
+    let handle = spawn_timed(config(address, None), TIMING).unwrap();
+    let mut seen = Seen::default();
+    seen.until(&handle, |s| s.entered == 1);
+    let (to_remote, remote) = mpsc::channel();
+    handle
+        .commands()
+        .send(SessionCommand::AttachRemote(to_remote))
+        .unwrap();
+    seen.until(&handle, |s| s.entered == 2);
+    let snapshots = remote
+        .try_iter()
+        .filter(|event| matches!(event, PresentationEvent::Snapshot(_)))
+        .count();
+    handle.commands().send(SessionCommand::Shutdown).unwrap();
+    let summary = seen.end(&handle);
+    server.join().unwrap();
+    handle.join();
+
+    assert_eq!(summary.error, None, "a re-login is not a failure");
+    assert_eq!(summary.connections, 2);
+    assert_eq!(
+        seen.relogins,
+        [Relogin::Scheduled {
+            after: TIMING.relogin_interval
+        }]
+    );
+    assert!(
+        snapshots >= 2,
+        "the remote saw {snapshots} snapshots: the attach's and the new connection's"
+    );
+}
+
 #[test]
 fn a_boot_ends_a_windowless_session_without_logging_in_again() {
     let (ports, address) = Ports::new();

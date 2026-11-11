@@ -122,6 +122,9 @@ pub struct SessionState {
     portal_events: Vec<PortalSpaceEvent>,
     /// A window is attached: a portal arrival waits for it.
     window_attached: bool,
+    /// What is attached is a remote presentation, shown over a link that
+    /// may stall: nothing is held for it.
+    window_remote: bool,
     /// The attached window draws the world (it presents the login).
     window_presents_world: bool,
     /// The portal arrival waiting for the attached window to show its
@@ -191,6 +194,7 @@ impl SessionState {
             last_logout: LogoutStage::None,
             portal_events: Vec::new(),
             window_attached: false,
+            window_remote: false,
             window_presents_world: false,
             held_arrival: None,
             destination_hold: None,
@@ -557,6 +561,11 @@ impl SessionState {
         if changed {
             // A window reports its own minimized state once it is up.
             self.plugin_services.window_minimized = false;
+            if !attached {
+                // Nobody is at the movement keys any more, however the
+                // window went (detached, or its receiver dropped).
+                self.movement.release_keys();
+            }
         }
         self.navigation.set_drawable(attached);
         if !attached {
@@ -567,6 +576,11 @@ impl SessionState {
         }
     }
 
+    /// What is attached is a remote presentation (`true`) or a window.
+    pub fn set_window_remote(&mut self, remote: bool) {
+        self.window_remote = remote;
+    }
+
     /// The attached window draws the world (it has the dats): it presents
     /// the login, and login complete waits for it (OpenAC holds login
     /// complete only for a window with a world to show).
@@ -574,11 +588,12 @@ impl SessionState {
         self.window_presents_world = presents;
     }
 
-    /// Whether an attached window holds the arrivals: one that is not
+    /// Whether an attached window holds the arrivals: one shown here (a
+    /// remote presentation holds nothing) that is not
     /// minimized (a minimized window draws nothing, while OpenAC's update
     /// loop runs its presentation on and completes the arrival).
     fn window_holds(&self) -> bool {
-        self.window_attached && !self.plugin_services.window_minimized
+        self.window_attached && !self.window_remote && !self.plugin_services.window_minimized
     }
 
     /// Whether the attached window presents the login (login complete
@@ -1238,6 +1253,14 @@ impl SessionState {
             }
             SessionCommand::Movement(command) => {
                 self.movement.command(command, &self.world, outbox);
+            }
+            // The runner attaches it. What it replaces is not at the
+            // movement keys any more.
+            attach @ (SessionCommand::Attach(_) | SessionCommand::AttachRemote(_)) => {
+                if self.window_attached {
+                    self.movement.release_keys();
+                }
+                return Some(attach);
             }
             SessionCommand::Character(request) => {
                 if active {
@@ -3213,6 +3236,90 @@ mod tests {
         arrive_at(&mut state, &mut outbox, 1, DESTINATION);
         assert!(outbox.is_empty());
         assert!(state.held_arrival().is_some());
+    }
+
+    /// A remote presentation never holds an arrival: its link may stall,
+    /// and the character must not wait in portal space for it.
+    #[test]
+    fn a_remote_presentation_holds_no_arrival() {
+        let (mut state, mut outbox) = in_portal_space(true, 1);
+        state.set_window_remote(true);
+        arrive_at(&mut state, &mut outbox, 1, DESTINATION);
+        assert_eq!(bodies(&mut outbox), [build_login_complete()]);
+        assert!(state.held_arrival().is_none());
+        assert!(state.transit.snapshot().completed);
+    }
+
+    /// Nor the login, even when it says it draws the world.
+    #[test]
+    fn a_remote_presentation_does_not_hold_the_login() {
+        let (mut state, _) = entering(true);
+        assert!(state.window_holds_login());
+        state.set_window_remote(true);
+        assert!(!state.window_holds_login());
+    }
+
+    fn forward_held() -> crate::movement::MovementKeys {
+        crate::movement::MovementKeys {
+            forward: true,
+            ..Default::default()
+        }
+    }
+
+    /// A window that goes away without detaching (its receiver dropped)
+    /// lets go of the movement keys it held, as a detach does: the
+    /// character must not run on with nobody at the keys.
+    #[test]
+    fn a_window_that_goes_away_releases_its_held_keys() {
+        let (mut state, mut outbox) = state();
+        state.set_window_attached(true, &mut outbox);
+        let keys = crate::movement::MovementCommand::Keys(forward_held());
+        state.command(SessionCommand::Movement(keys), &mut outbox, true, CLOCKS);
+        assert_eq!(state.movement.held_keys(), forward_held());
+        state.set_window_attached(false, &mut outbox);
+        assert_eq!(
+            state.movement.held_keys(),
+            crate::movement::MovementKeys::default()
+        );
+    }
+
+    /// A presentation that attaches in place of another does not inherit
+    /// the keys the other held: a remote that only watches would never let
+    /// go of them.
+    #[test]
+    fn attaching_in_place_of_a_window_releases_the_keys_it_held() {
+        let (mut state, mut outbox) = state();
+        state.set_window_attached(true, &mut outbox);
+        let keys = crate::movement::MovementCommand::Keys(forward_held());
+        state.command(SessionCommand::Movement(keys), &mut outbox, true, CLOCKS);
+        let (to_remote, _remote) = std::sync::mpsc::channel();
+        let passed = state.command(
+            SessionCommand::AttachRemote(to_remote),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        assert!(matches!(passed, Some(SessionCommand::AttachRemote(_))));
+        assert_eq!(
+            state.movement.held_keys(),
+            crate::movement::MovementKeys::default()
+        );
+    }
+
+    /// The controller of a presentation lets go without detaching (a remote
+    /// whose input stopped arriving): the held keys are released.
+    #[test]
+    fn release_keys_lets_go_of_the_held_keys() {
+        let (mut state, mut outbox) = state();
+        state.set_window_attached(true, &mut outbox);
+        let keys = crate::movement::MovementCommand::Keys(forward_held());
+        state.command(SessionCommand::Movement(keys), &mut outbox, true, CLOCKS);
+        let release = crate::movement::MovementCommand::ReleaseKeys;
+        state.command(SessionCommand::Movement(release), &mut outbox, true, CLOCKS);
+        assert_eq!(
+            state.movement.held_keys(),
+            crate::movement::MovementKeys::default()
+        );
     }
 
     /// OpenAC `NewerStart_ReplacesOldDestinationWithoutReusingIt`: a newer
