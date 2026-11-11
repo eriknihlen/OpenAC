@@ -33,8 +33,8 @@ pub use character_options::CharacterOption;
 pub use config::{
     CONFIG_VERSION, CharacterSelector, ConfigError, ConfigReader, ContentDescriptor,
     CredentialProvider, CredentialReference, Endpoint, HostConfig, PolicyDescriptor, PolicyRole,
-    PreparedAssetOverlay, ProcessSettings, SessionDescriptor, SessionMode, load_config,
-    load_config_file,
+    PreparedAssetOverlay, ProcessSettings, RemoteDescriptor, SessionDescriptor, SessionMode,
+    load_config, load_config_file,
 };
 pub use exit::ExitCode;
 pub use install_lease::InstallSessionLease;

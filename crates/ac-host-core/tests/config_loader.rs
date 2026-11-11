@@ -761,3 +761,53 @@ fn the_headless_shared_fixture_also_starts_a_window() {
         }
     ));
 }
+
+// --- remote -----------------------------------------------------------------
+
+const REMOTE: &str = r#""remote":{"url":"wss://relay.example/client/ws",
+    "credential":{"provider":"file","reference":"remote-token"}}"#;
+
+#[test]
+fn a_remote_block_names_the_relay_and_where_its_token_comes_from() {
+    let config = load(&with_bot(REMOTE)).unwrap();
+    let remote = single(&config).remote.as_ref().unwrap();
+    assert_eq!(remote.url, "wss://relay.example/client/ws");
+    assert_eq!(remote.credential.provider, CredentialProvider::File);
+    assert_eq!(remote.credential.reference, "remote-token");
+}
+
+#[test]
+fn a_session_without_a_remote_block_has_no_remote() {
+    let config = load(&with_bot(r#""pluginTags":["a"]"#)).unwrap();
+    assert_eq!(single(&config).remote, None);
+}
+
+#[test]
+fn a_remote_url_must_be_a_websocket_address() {
+    for url in ["", "  ", "https://relay.example/ws", "relay.example"] {
+        let block = format!(
+            r#""remote":{{"url":"{url}","credential":{{"provider":"file","reference":"t"}}}}"#
+        );
+        let message = invalid_message(load(&with_bot(&block)));
+        assert!(message.contains("remote"), "{url:?}: {message}");
+    }
+}
+
+#[test]
+fn a_remote_block_requires_a_credential_reference() {
+    let message = invalid_message(load(&with_bot(
+        r#""remote":{"url":"wss://relay.example/ws","credential":{"provider":"file","reference":" "}}"#,
+    )));
+    assert!(message.contains("remote"), "{message}");
+    assert!(is_json_error(&load(&with_bot(
+        r#""remote":{"url":"wss://relay.example/ws"}"#
+    ))));
+}
+
+#[test]
+fn a_remote_block_takes_no_unknown_members() {
+    assert!(is_json_error(&load(&with_bot(
+        r#""remote":{"url":"wss://relay.example/ws","token":"secret",
+            "credential":{"provider":"file","reference":"t"}}"#
+    ))));
+}
