@@ -7,9 +7,9 @@
 //! change; the window keeps the latest of each and rebuilds its screens
 //! from them. Nothing here touches the network.
 
-use ac_clock::Instant;
 use std::sync::Arc;
 
+use ac_clock::Instant;
 use ac_core::chargen::ChargenOptions;
 
 use super::creation::{CharacterCreation, CreationSnapshot};
