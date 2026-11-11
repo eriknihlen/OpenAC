@@ -32,6 +32,31 @@ pub struct ShortcutStore {
     revision: u64,
 }
 
+/// Every field of a [`ShortcutStore`], for code that copies it whole (a
+/// window's link). Converting either way names every field, so a field
+/// added to the store must be added here too.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShortcutStoreParts {
+    /// The slots.
+    pub entries: [Option<ShortcutEntry>; SLOT_COUNT],
+    /// Bumped by every change.
+    pub revision: u64,
+}
+
+impl From<ShortcutStore> for ShortcutStoreParts {
+    fn from(store: ShortcutStore) -> Self {
+        let ShortcutStore { entries, revision } = store;
+        Self { entries, revision }
+    }
+}
+
+impl From<ShortcutStoreParts> for ShortcutStore {
+    fn from(parts: ShortcutStoreParts) -> Self {
+        let ShortcutStoreParts { entries, revision } = parts;
+        Self { entries, revision }
+    }
+}
+
 impl ShortcutStore {
     /// All slots empty.
     #[must_use]

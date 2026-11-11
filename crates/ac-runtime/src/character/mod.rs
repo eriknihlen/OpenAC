@@ -175,6 +175,97 @@ impl Default for CharacterOptions {
     }
 }
 
+/// Every field of a [`CharacterOptions`], for code that copies the options
+/// whole (a window's link encodes them and builds them again on the other
+/// side). Converting either way names every field, so a field added to the
+/// options must be added here too.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CharacterOptionsParts {
+    /// The first word.
+    pub options1: u32,
+    /// The second word.
+    pub options2: u32,
+    /// Bumped by every change to either word.
+    pub revision: u64,
+    /// A change waits for the next block save.
+    pub dirty: bool,
+    /// When the first unsaved change was made (session clock).
+    pub first_dirtied_at: Option<Duration>,
+    /// A description seeded the words.
+    pub has_server_seed: bool,
+    /// The shortcut bar the block repeats.
+    pub echo_shortcuts: Vec<Shortcut>,
+    /// The favorite spell bars the block repeats.
+    pub echo_favorite_spells: [Vec<u32>; 8],
+    /// The desired components the block repeats.
+    pub echo_desired_components: Vec<DesiredComponent>,
+    /// The spellbook filters the block repeats.
+    pub echo_spellbook_filters: u32,
+}
+
+impl From<CharacterOptions> for CharacterOptionsParts {
+    fn from(options: CharacterOptions) -> Self {
+        let CharacterOptions {
+            options1,
+            options2,
+            revision,
+            dirty,
+            first_dirtied_at,
+            has_server_seed,
+            echo:
+                BlockEcho {
+                    shortcuts,
+                    favorite_spells,
+                    desired_components,
+                    spellbook_filters,
+                },
+        } = options;
+        Self {
+            options1,
+            options2,
+            revision,
+            dirty,
+            first_dirtied_at,
+            has_server_seed,
+            echo_shortcuts: shortcuts,
+            echo_favorite_spells: favorite_spells,
+            echo_desired_components: desired_components,
+            echo_spellbook_filters: spellbook_filters,
+        }
+    }
+}
+
+impl From<CharacterOptionsParts> for CharacterOptions {
+    fn from(parts: CharacterOptionsParts) -> Self {
+        let CharacterOptionsParts {
+            options1,
+            options2,
+            revision,
+            dirty,
+            first_dirtied_at,
+            has_server_seed,
+            echo_shortcuts,
+            echo_favorite_spells,
+            echo_desired_components,
+            echo_spellbook_filters,
+        } = parts;
+        Self {
+            options1,
+            options2,
+            revision,
+            dirty,
+            first_dirtied_at,
+            has_server_seed,
+            echo: BlockEcho {
+                shortcuts: echo_shortcuts,
+                favorite_spells: echo_favorite_spells,
+                desired_components: echo_desired_components,
+                spellbook_filters: echo_spellbook_filters,
+            },
+        }
+    }
+}
+
 impl CharacterOptions {
     /// The client defaults, unseeded.
     #[must_use]

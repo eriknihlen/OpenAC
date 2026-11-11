@@ -4,5 +4,5 @@
 mod friends;
 mod squelch;
 
-pub use friends::{FriendEntry, FriendsState, FriendsUpdate, FriendsUpdateType};
-pub use squelch::{SquelchDatabase, SquelchInfo, SquelchState};
+pub use friends::{FriendEntry, FriendsState, FriendsStateParts, FriendsUpdate, FriendsUpdateType};
+pub use squelch::{SquelchDatabase, SquelchInfo, SquelchState, SquelchStateParts};

@@ -53,6 +53,31 @@ pub struct SquelchState {
     revision: u64,
 }
 
+/// Every field of a [`SquelchState`], for code that copies it whole (a
+/// window's link). Converting either way names every field, so a field
+/// added to the state must be added here too.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SquelchStateParts {
+    /// The database.
+    pub database: SquelchDatabase,
+    /// Advances on every replace and clear.
+    pub revision: u64,
+}
+
+impl From<SquelchState> for SquelchStateParts {
+    fn from(state: SquelchState) -> Self {
+        let SquelchState { database, revision } = state;
+        Self { database, revision }
+    }
+}
+
+impl From<SquelchStateParts> for SquelchState {
+    fn from(parts: SquelchStateParts) -> Self {
+        let SquelchStateParts { database, revision } = parts;
+        Self { database, revision }
+    }
+}
+
 impl SquelchState {
     /// An empty database.
     #[must_use]

@@ -43,15 +43,17 @@ pub use item_mana::{ItemManaChange, ItemManaState};
 pub use item_type::{EquipMask, ItemType};
 pub use object::{
     ClientArmorProfile, ClientCreatureAttributes, ClientCreatureProfile, ClientObject,
-    ClientObjectHeader, ClientWeaponProfile, ObjectIdentity, PropertyBundle, WeenieData,
-    normalize_damage, pk_status,
+    ClientObjectHeader, ClientObjectParts, ClientWeaponProfile, ObjectIdentity, PropertyBundle,
+    WeenieData, normalize_damage, pk_status,
 };
 pub use placement::PlacementRejection;
 pub use public_weenie_flags::PublicWeenieFlags;
 pub use quality_stamps::{
     QualityKind, QualityStamps, STACK_SIZE_PROPERTY, quality_sequence_accepts,
 };
-pub use shortcuts::{ShortcutDropSource, ShortcutEntry, ShortcutMutation, ShortcutStore};
+pub use shortcuts::{
+    ShortcutDropSource, ShortcutEntry, ShortcutMutation, ShortcutStore, ShortcutStoreParts,
+};
 pub use small_rules::{
     AETHERIA_UNLOCK_PROPERTY, AetheriaUnlockState, SALVAGE_FAILED_TEXT, SalvageBag, ToolbarAmmo,
     aetheria_unlocks, cooldown_overlay_step, is_salvage_suitable, is_valid_salvage_material,
