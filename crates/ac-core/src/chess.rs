@@ -286,6 +286,55 @@ impl Default for ChessBoard {
     }
 }
 
+/// Every field of a [`ChessBoard`], for code that copies a position whole
+/// (a window's link). Converting either way names every field, so a field
+/// added to the board must be added here too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChessBoardParts {
+    /// The squares, row by row from White's side.
+    pub squares: [Option<ChessPiece>; 64],
+    /// The square a pawn skipped with its last move.
+    pub en_passant_target: Option<ChessSquare>,
+    /// The pawn that skipped it.
+    pub en_passant_victim: ChessSquare,
+    /// The side to move.
+    pub turn: ChessTeam,
+}
+
+impl From<ChessBoard> for ChessBoardParts {
+    fn from(board: ChessBoard) -> Self {
+        let ChessBoard {
+            squares,
+            en_passant_target,
+            en_passant_victim,
+            turn,
+        } = board;
+        Self {
+            squares,
+            en_passant_target,
+            en_passant_victim,
+            turn,
+        }
+    }
+}
+
+impl From<ChessBoardParts> for ChessBoard {
+    fn from(parts: ChessBoardParts) -> Self {
+        let ChessBoardParts {
+            squares,
+            en_passant_target,
+            en_passant_victim,
+            turn,
+        } = parts;
+        Self {
+            squares,
+            en_passant_target,
+            en_passant_victim,
+            turn,
+        }
+    }
+}
+
 fn index(square: ChessSquare) -> usize {
     usize::try_from(square.y * SIZE + square.x).unwrap_or(0)
 }

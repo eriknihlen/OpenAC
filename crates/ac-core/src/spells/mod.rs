@@ -40,7 +40,7 @@ pub use projector::{
 };
 pub use spellbook::{
     COOLDOWN_SPELL_OFFSET, CooldownCheck, DEFAULT_SPELLBOOK_FILTERS, FAVORITE_BAR_COUNT,
-    LearnOutcome, LearnedSpellRecord, MetadataAlreadyInstalled, Spellbook,
+    LearnOutcome, LearnedSpellRecord, MetadataAlreadyInstalled, Spellbook, SpellbookParts,
 };
 pub use table::{DuplicateSpellId, SpellTable, parse_row};
 pub use target_policy::{SpellTargetCandidate, SpellTargetRefusal, can_target_self, evaluate};

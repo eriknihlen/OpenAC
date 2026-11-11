@@ -218,6 +218,98 @@ impl std::fmt::Debug for LocalPlayerState {
     }
 }
 
+/// Every field of a [`LocalPlayerState`], for code that copies the numbers
+/// whole (a window's link encodes them and builds them again on the other
+/// side). Taking the state apart and building it from these names every
+/// field, so a field added to the state must be added here too.
+#[derive(Clone, Default)]
+pub struct LocalPlayerStateParts {
+    /// Health, `None` until received.
+    pub health: Option<VitalSnapshot>,
+    /// Stamina, `None` until received.
+    pub stamina: Option<VitalSnapshot>,
+    /// Mana, `None` until received.
+    pub mana: Option<VitalSnapshot>,
+    /// The six attributes, strength first.
+    pub attributes: [Option<AttributeSnapshot>; 6],
+    /// Skills by id.
+    pub skills: BTreeMap<u32, SkillSnapshot>,
+    /// Int properties by id.
+    pub int_properties: BTreeMap<u32, i32>,
+    /// The spellbook whose enchantments apply.
+    pub spellbook: Option<Spellbook>,
+    /// What recomputes skill formula terms.
+    pub skill_formula_bonus_resolver: Option<SkillFormulaBonusResolver>,
+}
+
+impl std::fmt::Debug for LocalPlayerStateParts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalPlayerStateParts")
+            .field("health", &self.health)
+            .field("stamina", &self.stamina)
+            .field("mana", &self.mana)
+            .field("attributes", &self.attributes)
+            .field("skills", &self.skills)
+            .field("int_properties", &self.int_properties)
+            .field("spellbook", &self.spellbook)
+            .field(
+                "skill_formula_bonus_resolver",
+                &self.skill_formula_bonus_resolver.is_some(),
+            )
+            .finish()
+    }
+}
+
+impl From<LocalPlayerState> for LocalPlayerStateParts {
+    fn from(state: LocalPlayerState) -> Self {
+        let LocalPlayerState {
+            health,
+            stamina,
+            mana,
+            attributes,
+            skills,
+            int_properties,
+            spellbook,
+            skill_formula_bonus_resolver,
+        } = state;
+        Self {
+            health,
+            stamina,
+            mana,
+            attributes,
+            skills,
+            int_properties,
+            spellbook,
+            skill_formula_bonus_resolver,
+        }
+    }
+}
+
+impl From<LocalPlayerStateParts> for LocalPlayerState {
+    fn from(parts: LocalPlayerStateParts) -> Self {
+        let LocalPlayerStateParts {
+            health,
+            stamina,
+            mana,
+            attributes,
+            skills,
+            int_properties,
+            spellbook,
+            skill_formula_bonus_resolver,
+        } = parts;
+        Self {
+            health,
+            stamina,
+            mana,
+            attributes,
+            skills,
+            int_properties,
+            spellbook,
+            skill_formula_bonus_resolver,
+        }
+    }
+}
+
 impl LocalPlayerState {
     /// No character yet. Without a spellbook, attributes, skills and vitals
     /// read unenchanted.

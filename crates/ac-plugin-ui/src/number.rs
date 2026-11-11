@@ -142,6 +142,22 @@ impl Dec {
         })
     }
 
+    /// The number exactly as held: `mantissa / 10^scale` ([`Self::mantissa`]
+    /// and [`Self::scale`] give them back), or `None` when it is not one a
+    /// `decimal` holds (more than 96 bits, or more than 28 digits after the
+    /// point). Nothing is rounded.
+    #[must_use]
+    pub fn from_raw(mantissa: i128, scale: u32) -> Option<Self> {
+        (mantissa.checked_abs()? <= MAX_MANTISSA && scale <= MAX_SCALE)
+            .then_some(Self { mantissa, scale })
+    }
+
+    /// The whole number the value is held as (see [`Self::from_raw`]).
+    #[must_use]
+    pub fn mantissa(self) -> i128 {
+        self.mantissa
+    }
+
     /// A whole number.
     #[must_use]
     pub fn from_i64(v: i64) -> Self {

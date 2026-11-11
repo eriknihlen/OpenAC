@@ -86,6 +86,98 @@ pub struct Spellbook {
     desired_components_revision: u64,
 }
 
+/// Every field of a [`Spellbook`], for code that copies a book whole (a
+/// window's link encodes it and builds it again on the other side). Taking
+/// a book apart and building it from these names every field, so a field
+/// added to the book must be added here too.
+#[derive(Debug, Clone)]
+pub struct SpellbookParts {
+    /// Learned spells and their power.
+    pub learned: BTreeMap<u32, f32>,
+    /// Active enchantments in arrival order, one per identity.
+    pub active: Vec<ActiveEnchantmentRecord>,
+    /// Per bucket, identities in the game's list order (head first).
+    pub order_by_bucket: BTreeMap<u32, Vec<u32>>,
+    /// The favorite bars.
+    pub favorites: [Vec<u32>; FAVORITE_BAR_COUNT],
+    /// Desired component amounts by component.
+    pub desired_components: BTreeMap<u32, u32>,
+    /// The spell table.
+    pub table: Arc<SpellTable>,
+    /// The spell table was installed.
+    pub metadata_installed: bool,
+    /// The spellbook filter.
+    pub filters: u32,
+    /// Bumped by every change to the learned spells, favorites or filter.
+    pub spellbook_revision: u64,
+    /// Bumped by every change to the enchantments.
+    pub enchantment_revision: u64,
+    /// Bumped by every change to the desired components.
+    pub desired_components_revision: u64,
+}
+
+impl From<Spellbook> for SpellbookParts {
+    fn from(book: Spellbook) -> Self {
+        let Spellbook {
+            learned,
+            active,
+            order_by_bucket,
+            favorites,
+            desired_components,
+            table,
+            metadata_installed,
+            filters,
+            spellbook_revision,
+            enchantment_revision,
+            desired_components_revision,
+        } = book;
+        Self {
+            learned,
+            active,
+            order_by_bucket,
+            favorites,
+            desired_components,
+            table,
+            metadata_installed,
+            filters,
+            spellbook_revision,
+            enchantment_revision,
+            desired_components_revision,
+        }
+    }
+}
+
+impl From<SpellbookParts> for Spellbook {
+    fn from(parts: SpellbookParts) -> Self {
+        let SpellbookParts {
+            learned,
+            active,
+            order_by_bucket,
+            favorites,
+            desired_components,
+            table,
+            metadata_installed,
+            filters,
+            spellbook_revision,
+            enchantment_revision,
+            desired_components_revision,
+        } = parts;
+        Self {
+            learned,
+            active,
+            order_by_bucket,
+            favorites,
+            desired_components,
+            table,
+            metadata_installed,
+            filters,
+            spellbook_revision,
+            enchantment_revision,
+            desired_components_revision,
+        }
+    }
+}
+
 impl Default for Spellbook {
     fn default() -> Self {
         Self::new(None)

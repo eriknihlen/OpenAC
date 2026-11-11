@@ -49,6 +49,31 @@ pub struct FriendsState {
     revision: u64,
 }
 
+/// Every field of a [`FriendsState`], for code that copies the list whole
+/// (a window's link). Converting either way names every field, so a field
+/// added to the state must be added here too.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FriendsStateParts {
+    /// The friends, in server order.
+    pub entries: Vec<FriendEntry>,
+    /// Advances on every change.
+    pub revision: u64,
+}
+
+impl From<FriendsState> for FriendsStateParts {
+    fn from(state: FriendsState) -> Self {
+        let FriendsState { entries, revision } = state;
+        Self { entries, revision }
+    }
+}
+
+impl From<FriendsStateParts> for FriendsState {
+    fn from(parts: FriendsStateParts) -> Self {
+        let FriendsStateParts { entries, revision } = parts;
+        Self { entries, revision }
+    }
+}
+
 impl FriendsState {
     /// An empty list.
     #[must_use]
