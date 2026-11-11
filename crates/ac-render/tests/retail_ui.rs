@@ -359,7 +359,7 @@ fn f11_opens_the_options_window_and_its_changes_reach_the_window() {
     let size = (1280, 720);
     let settings = ac_host::settings::PlayerSettings::default();
     let dats_for_strings = dats.clone();
-    let mut ui = WindowUi::build_with(dats, size, &settings, vec!["1280x720".into()])
+    let mut ui = WindowUi::build_with(dats, size, &settings, vec!["1280x720".into()], None)
         .expect("the UI builds");
     assert!(!ui.host().root.is_window_visible(OPTIONS_WINDOW));
     assert!(ui.run_hotkey(ac_render::ui::window::Hotkey::Options));
@@ -459,7 +459,7 @@ fn a_console_display_change_survives_the_options_windows_next_change() {
     let dats = dats();
     let size = (1280, 720);
     let settings = ac_host::settings::PlayerSettings::default();
-    let mut ui = WindowUi::build_with(dats.clone(), size, &settings, vec!["1280x720".into()])
+    let mut ui = WindowUi::build_with(dats.clone(), size, &settings, vec!["1280x720".into()], None)
         .expect("the UI builds");
     assert!(ui.run_hotkey(ac_render::ui::window::Hotkey::Options));
     let vsync = configuration_vsync_row(&mut ui, dats);
@@ -1747,7 +1747,7 @@ fn the_side_by_side_vitals_option_swaps_the_vitals_windows() {
     let dats = dats();
     let size = (1280, 720);
     let settings = ac_host::settings::PlayerSettings::default();
-    let mut ui = WindowUi::build_with(dats.clone(), size, &settings, vec!["1280x720".into()])
+    let mut ui = WindowUi::build_with(dats.clone(), size, &settings, vec!["1280x720".into()], None)
         .expect("the UI builds");
     let notices = ui.take_notices();
     assert!(notices.is_empty(), "{notices:?}");

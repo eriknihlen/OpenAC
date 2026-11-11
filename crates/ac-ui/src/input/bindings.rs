@@ -3,11 +3,15 @@
 //! action.
 
 use std::collections::{BTreeMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use ac_host::json::{self, Node, Value};
 
 use crate::event::{Key, Modifiers};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::{FileUiStorage, WriteMode};
+use crate::storage::{UiStorage, keys};
 
 use super::action::InputAction;
 use super::chord::{
@@ -357,9 +361,17 @@ impl KeyBindings {
     /// is empty); every other action keeps its defaults. A missing file is
     /// the defaults; a file that cannot be read or parsed is the defaults
     /// with the reason (the file is left as it is).
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn load_or_default(path: &Path) -> (Self, Option<KeyBindingsError>) {
-        let bytes = match std::fs::read(path) {
+        Self::load_from(&single_file(path), keys::KEY_BINDINGS)
+    }
+
+    /// [`KeyBindings::load_or_default`] over the bindings stored under
+    /// `key`.
+    #[must_use]
+    pub fn load_from(storage: &dyn UiStorage, key: &str) -> (Self, Option<KeyBindingsError>) {
+        let bytes = match storage.get(key) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return (Self::retail_defaults(), None);
@@ -528,13 +540,25 @@ impl KeyBindings {
     ///
     /// # Errors
     /// The directory or file could not be written.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_to_file(&self, path: &Path) -> Result<(), KeyBindingsError> {
-        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(path, self.to_json())?;
+        self.save_to(&mut single_file(path), keys::KEY_BINDINGS)
+    }
+
+    /// Store the bindings document under `key`.
+    ///
+    /// # Errors
+    /// It could not be written.
+    pub fn save_to(&self, storage: &mut dyn UiStorage, key: &str) -> Result<(), KeyBindingsError> {
+        storage.put(key, self.to_json().as_bytes())?;
         Ok(())
     }
+}
+
+/// A storage of the one bindings file at `path`.
+#[cfg(not(target_arch = "wasm32"))]
+fn single_file(path: &Path) -> FileUiStorage {
+    FileUiStorage::new().with_file(keys::KEY_BINDINGS, path, WriteMode::InPlace)
 }
 
 fn quoted(text: &str) -> String {

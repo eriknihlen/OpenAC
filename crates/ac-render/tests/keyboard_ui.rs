@@ -46,8 +46,15 @@ fn the_configure_keyboard_screen_rebinds_a_key_and_saves_it() {
         bindings_file: dir.join("keybinds.json"),
         keymap_directory: dir.join("keymaps"),
     };
-    let mut ui = WindowUi::build(dats(), (1280, 720)).expect("the UI builds");
-    ui.attach_key_bindings(&KeyBindings::retail_defaults(), Some(files.clone()));
+    let mut ui = WindowUi::build_with(
+        dats(),
+        (1280, 720),
+        &ac_host::settings::PlayerSettings::default(),
+        ac_render::ui::options::resolution_choices(&[], None),
+        Some(Box::new(files.storage())),
+    )
+    .expect("the UI builds");
+    ui.attach_key_bindings(&KeyBindings::retail_defaults());
     assert!(
         ui.mounted().contains(&KEYBOARD_WINDOW),
         "{:?}",

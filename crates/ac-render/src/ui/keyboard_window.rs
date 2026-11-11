@@ -3,9 +3,10 @@
 //! centred, hidden until the key map's Configure Keyboard key or the
 //! options window's button), with its dialogs (the capture instructions,
 //! the overwrite question, the refusal message, the profile menu and the
-//! profile name) on their own queue, and the profiles and bindings files
-//! it saves to. The window that owns the key dispatcher takes the screen's
-//! requests ([`KeyboardRequest`]): live bindings and key captures.
+//! profile name) on their own queue, and the profiles and bindings it
+//! saves through the window's storage. The window that owns the key
+//! dispatcher takes the screen's requests ([`KeyboardRequest`]): live
+//! bindings and key captures.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ use ac_dat::objects::StringTable;
 use ac_ui::font::DEFAULT_FONT_ID;
 use ac_ui::import::{LayoutSource, import, import_infos, import_infos_rooted};
 use ac_ui::input::key_names::RetailKeyNames;
-use ac_ui::input::keymap_file::{KeymapProfileStore, KeymapSaveResult, KeymapSaveStatus};
+use ac_ui::input::keymap_file::{self, KeymapSaveResult, KeymapSaveStatus};
 use ac_ui::input::unmapped::RetailUnmappedKeyBindings;
 use ac_ui::input::{KeyBindings, KeyChord, action_map};
 use ac_ui::panels::DatRowTemplates;
@@ -24,6 +25,7 @@ use ac_ui::panels::keyboard_config::{
     TEMPLATE_STRING_TABLE_ID,
 };
 use ac_ui::root::ElementMessage;
+use ac_ui::storage::{FileUiStorage, UiStorage, keys};
 use ac_ui::strings::{StringResolver, compute_hash};
 use ac_ui::tree::ElementId;
 
@@ -52,16 +54,18 @@ impl KeyboardFiles {
     pub fn unmapped_file(&self) -> PathBuf {
         unmapped_path(&self.bindings_file)
     }
+
+    /// The storage over these files, for [`WindowUi::build_with`].
+    #[must_use]
+    pub fn storage(&self) -> FileUiStorage {
+        FileUiStorage::for_key_bindings(&self.bindings_file, &self.keymap_directory)
+    }
 }
 
 /// `keybinds.json` → `keybinds.unmapped.json`, beside it.
 #[must_use]
 pub fn unmapped_path(bindings_file: &Path) -> PathBuf {
-    let stem = bindings_file
-        .file_stem()
-        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
-    let dir = bindings_file.parent().unwrap_or(Path::new("."));
-    dir.join(format!("{stem}.unmapped.json"))
+    ac_ui::input::unmapped::unmapped_path(bindings_file)
 }
 
 /// What the screen asks of the window owning the key dispatcher.
@@ -86,7 +90,6 @@ enum KeyboardDialog {
 /// The screen's state in the window.
 #[derive(Debug, Default)]
 pub struct KeyboardUi {
-    files: Option<KeyboardFiles>,
     unmapped: RetailUnmappedKeyBindings,
     requests: Vec<KeyboardRequest>,
     dialogs: DialogFactory<KeyboardDialog>,
@@ -105,20 +108,22 @@ impl KeyboardUi {
 }
 
 impl WindowUi {
-    /// The window's bindings (and where they are saved, if anywhere): the
-    /// screen is built on the first call and shows these afterwards.
-    pub fn attach_key_bindings(&mut self, bindings: &KeyBindings, files: Option<KeyboardFiles>) {
-        let unmapped = files
-            .as_ref()
-            .map(|f| {
-                let (u, error) = RetailUnmappedKeyBindings::load_or_empty(&f.unmapped_file());
+    /// The window's bindings: the screen is built on the first call and
+    /// shows these afterwards. It saves through the window's storage
+    /// ([`WindowUi::build_with`]); a window without one saves nothing.
+    pub fn attach_key_bindings(&mut self, bindings: &KeyBindings) {
+        let unmapped = self
+            .storage
+            .as_deref()
+            .map(|storage| {
+                let (u, error) =
+                    RetailUnmappedKeyBindings::load_from(storage, keys::UNMAPPED_KEY_BINDINGS);
                 if let Some(error) = error {
                     self.notices.push(format!("keyboard config: {error}"));
                 }
                 u
             })
             .unwrap_or_default();
-        self.keyboard.files = files;
         self.keyboard.unmapped = unmapped.clone();
         if self.host.has_controller(KEYBOARD_WINDOW) {
             self.host
@@ -163,10 +168,9 @@ impl WindowUi {
             crate::platform::key_name_provider(),
         );
         let filename = self
-            .keyboard
-            .files
-            .as_ref()
-            .map(|f| store_of(f).current_file_name());
+            .storage
+            .as_deref()
+            .map(keymap_file::active_profile_name);
         let content = &self.content;
         let mut rows = DatRowTemplates::new(content, font);
         let strings = content.strings();
@@ -436,18 +440,17 @@ impl WindowUi {
     }
 
     fn open_load_keymap(&mut self) {
-        let Some(files) = self.keyboard.files.clone() else {
+        let Some(storage) = self.storage.as_deref() else {
             return;
         };
-        let store = store_of(&files);
-        let names = match store.list_files() {
+        let names = match keymap_file::list_profiles(storage) {
             Ok(names) => names,
             Err(e) => {
                 self.notices.push(format!("keyboard config: keymaps: {e}"));
                 return;
             }
         };
-        let current = store.current_file_name();
+        let current = keymap_file::active_profile_name(storage);
         let selected = names
             .iter()
             .position(|n| n.eq_ignore_ascii_case(&current))
@@ -470,14 +473,16 @@ impl WindowUi {
     }
 
     fn load_keymap(&mut self, name: &str) {
-        let Some(files) = self.keyboard.files.clone() else {
+        if self.storage.is_none() {
             return;
-        };
+        }
         let Some(base) = self.keyboard_bindings() else {
             return;
         };
-        let store = store_of(&files);
-        let loaded = match store.load(name, &base) {
+        let Some(storage) = self.storage.as_deref_mut() else {
+            return;
+        };
+        let loaded = match keymap_file::load_profile(storage, name, &base) {
             Ok(loaded) => loaded,
             Err(e) => {
                 self.notices
@@ -488,13 +493,13 @@ impl WindowUi {
         self.keyboard
             .requests
             .push(KeyboardRequest::Apply(loaded.clone()));
-        if let Err(e) = save_mirrors(&files, &loaded, &self.keyboard.unmapped) {
+        if let Err(e) = save_mirrors(storage, &loaded, &self.keyboard.unmapped) {
             self.notices.push(format!(
                 "keyboard config: loaded profile mirror failed: {e}"
             ));
         }
         let unmapped = self.keyboard.unmapped.clone();
-        let current = store.current_file_name();
+        let current = keymap_file::active_profile_name(storage);
         self.host
             .with_controller::<KeyboardConfigController, _>(KEYBOARD_WINDOW, |c, ui| {
                 c.reload(ui, loaded, unmapped);
@@ -504,29 +509,32 @@ impl WindowUi {
 
     /// OK with changes: the active profile and the mirrors.
     fn save_active_keymap(&mut self) {
-        let Some(files) = self.keyboard.files.clone() else {
+        let Some(storage) = self.storage.as_deref() else {
             return;
         };
-        let name = store_of(&files).current_file_name();
+        let name = keymap_file::active_profile_name(storage);
         self.save_keymap(&name, true);
     }
 
     fn save_keymap(&mut self, name: &str, overwrite: bool) {
-        let Some(files) = self.keyboard.files.clone() else {
+        if self.storage.is_none() {
             return;
-        };
+        }
         let Some(bindings) = self.keyboard_bindings() else {
             return;
         };
-        let store = store_of(&files);
-        let result: KeymapSaveResult = store.save(name, &bindings, overwrite);
+        let Some(storage) = self.storage.as_deref_mut() else {
+            return;
+        };
+        let result: KeymapSaveResult =
+            keymap_file::save_profile(storage, name, &bindings, overwrite);
         match result.status {
             KeymapSaveStatus::Saved => {
-                if let Err(e) = save_mirrors(&files, &bindings, &self.keyboard.unmapped) {
+                if let Err(e) = save_mirrors(storage, &bindings, &self.keyboard.unmapped) {
                     self.notices
                         .push(format!("keyboard config: JSON mirror save failed: {e}"));
                 }
-                let current = store.current_file_name();
+                let current = keymap_file::active_profile_name(storage);
                 self.host.with_controller::<KeyboardConfigController, _>(
                     KEYBOARD_WINDOW,
                     |c, ui| {
@@ -575,20 +583,16 @@ impl WindowUi {
     }
 }
 
-fn store_of(files: &KeyboardFiles) -> KeymapProfileStore {
-    KeymapProfileStore::new(&files.bindings_file, &files.keymap_directory)
-}
-
 /// The bindings file and the unmapped file mirror the active profile.
 fn save_mirrors(
-    files: &KeyboardFiles,
+    storage: &mut dyn UiStorage,
     bindings: &KeyBindings,
     unmapped: &RetailUnmappedKeyBindings,
 ) -> Result<(), String> {
     bindings
-        .save_to_file(&files.bindings_file)
+        .save_to(storage, keys::KEY_BINDINGS)
         .map_err(|e| e.to_string())?;
     unmapped
-        .save_to_file(&files.unmapped_file())
+        .save_to(storage, keys::UNMAPPED_KEY_BINDINGS)
         .map_err(|e| e.to_string())
 }
