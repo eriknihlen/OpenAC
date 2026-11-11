@@ -866,8 +866,14 @@ impl Panels for ClientPanels {
     }
 
     fn session(&mut self, session: Session) {
+        let gained = session.controlling && !self.outbox.session().controlling;
         if self.outbox.set_session(session) {
             self.release_all(true);
+        }
+        // What the window told the session about itself while it only
+        // watched was dropped with every other command: it is said again.
+        if gained && let Some(ui) = self.ui.as_mut() {
+            ui.report_plugin_state_again();
         }
     }
 

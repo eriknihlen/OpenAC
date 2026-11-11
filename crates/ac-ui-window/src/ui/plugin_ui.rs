@@ -1716,6 +1716,30 @@ impl WindowUi {
             );
     }
 
+    /// Tell the session again, from the next frame, everything the window
+    /// reports about itself: the display density, a theme other than the
+    /// classic one, the client windows it has and shows, its key map's
+    /// chords and the file icons its plugin windows draw. For a host whose
+    /// reports could not reach the session until now (a viewer that only
+    /// watched and has just taken control): what it said before was lost.
+    pub fn report_plugin_state_again(&mut self) {
+        if let Some(pixels) = self.plugins.sharp_density {
+            self.plugins
+                .outbox
+                .borrow_mut()
+                .push(UiInput::DisplayDensity(pixels));
+        }
+        if self.plugins.theme_kind != ThemeKind::Classic {
+            self.plugins
+                .outbox
+                .borrow_mut()
+                .push(UiInput::Theme(self.plugins.theme_kind));
+        }
+        self.plugins.reported = None;
+        self.plugins.reported_chords = None;
+        self.plugins.files_shown.clear();
+    }
+
     /// What the player did with the plugins' UI since the last call, as
     /// session commands.
     pub fn take_plugin_commands(&mut self) -> Vec<SessionCommand> {
