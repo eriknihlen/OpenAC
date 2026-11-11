@@ -568,7 +568,7 @@ impl ClientPanels {
         self.gameplay.focus_lost(&mut out);
         let _ = self.gameplay.take_fired();
         let cx = self.encode_context();
-        self.outbox.release_keys(tell, &cx);
+        self.outbox.release_keys(tell, self.now_ms, &cx);
     }
 
     /// The pointer is at `at` for the UI (a wheel or a press elsewhere
@@ -670,7 +670,7 @@ impl ClientPanels {
     /// What the frame owes the page besides the picture.
     fn hand_over(&mut self, out: &mut Outputs) {
         let cx = self.encode_context();
-        self.outbox.repeat_held(self.now_ms, &cx);
+        self.outbox.heartbeat(self.now_ms, &cx);
         for frame in self.outbox.take_frames() {
             out.command_frame(&frame);
         }
@@ -1129,6 +1129,54 @@ mod tests {
         let requests = words(&out.take(kind::DAT_REQUESTS));
         assert!(!requests.is_empty(), "the build asked for files");
         requests.chunks_exact(2).map(|r| r[0]).collect()
+    }
+
+    #[test]
+    fn with_control_a_frame_goes_every_quarter_second_held_keys_or_not() {
+        let up = format!(
+            "{:?}",
+            SessionCommand::Movement(MovementCommand::Keys(Default::default()))
+        );
+        let mut panels = ClientPanels::new();
+        panels.init(800, 600, 1.0, 0.0);
+        let mut out = Outputs::default();
+        panels.frame(16.0, &mut out);
+        assert!(out.take(kind::COMMAND_FRAMES).is_empty(), "no control");
+        panels.session(Session {
+            generation: 3,
+            ..controlling(true)
+        });
+        panels.session(controlling(true));
+        panels.frame(32.0, &mut out);
+        let frames = out.take(kind::COMMAND_FRAMES);
+        assert_eq!(commands(&frames), std::slice::from_ref(&up), "at once");
+        assert_eq!(generations(&frames), [4], "the latest generation");
+        panels.frame(200.0, &mut out);
+        assert!(out.take(kind::COMMAND_FRAMES).is_empty());
+        panels.frame(282.0, &mut out);
+        assert_eq!(
+            commands(&out.take(kind::COMMAND_FRAMES)),
+            std::slice::from_ref(&up)
+        );
+        // Several seconds at once: one frame.
+        panels.frame(5000.0, &mut out);
+        assert_eq!(commands(&out.take(kind::COMMAND_FRAMES)), [up]);
+    }
+
+    /// The generation each command frame is stamped with.
+    fn generations(bytes: &[u8]) -> Vec<u64> {
+        let cx = DecodeContext::new(Instant::now(), None, None);
+        let mut at = 0;
+        let mut found = Vec::new();
+        while at < bytes.len() {
+            let len = words(&bytes[at..at + 4])[0] as usize;
+            match ac_remote_wire::decode_command(&bytes[at + 4..at + 4 + len], &cx).unwrap() {
+                SessionCommand::AtGeneration { generation, .. } => found.push(generation.0),
+                other => panic!("not stamped: {other:?}"),
+            }
+            at += 4 + len;
+        }
+        found
     }
 
     #[test]
