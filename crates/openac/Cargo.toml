@@ -18,6 +18,7 @@ ac-host.workspace = true
 ac-core.workspace = true
 ac-ui.workspace = true
 ac-plugin.workspace = true
+ac-remote.workspace = true
 
 [dev-dependencies]
 # The launcher end-to-end test drives this binary through the launcher core.

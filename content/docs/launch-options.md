@@ -181,6 +181,19 @@ comments and trailing commas are refused:
   last; every new generation runs the list again. A line the chat box cannot
   route writes a `loginCommandFailed` status line and the list goes on.
 - `plugins`, `pluginTags`, `pluginSettings`: see [Plugins](#plugins).
+- `sessions[].remote` (optional): a relay the session offers itself to, so it
+  can be shown and played somewhere else:
+  `{ "url": "wss://…", "credential": { "provider": …, "reference": … } }`.
+  The client dials out to `url` (a `wss://` address; `ws://` only for this
+  computer) and keeps the link open; the credential names where the
+  session's token for the relay comes from, read as the login credential is,
+  so the token is never in the document. Without the member nothing connects
+  anywhere. A relay can never stop a session: an address or token that
+  cannot be used, a relay that is down, a lost link or a closed remote
+  window leave the session playing, with a line on the console when the
+  endpoint could not start. A remote window that takes control loses it
+  after a second without input, and the movement keys are let go. Not
+  started for `mode: "probe"`.
 - `process.content.preparedAssetPath` and the overlay members are parsed and
   checked but not used: this client reads the dats directly and has no
   prepared asset package.

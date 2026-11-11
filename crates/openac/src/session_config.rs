@@ -149,17 +149,20 @@ pub fn run(
         errln!("Configuration invalid: a window cannot run a probe session.");
         return exit(HostExit::Configuration);
     };
-    let password = {
+    let (password, relay) = {
         let stdin = std::io::stdin();
         let mut lock = stdin.lock();
         let mut resolver = CredentialResolver::new(&mut lock, &paths.config_directory, &platform);
-        match resolver.resolve(&descriptor.id, &descriptor.credential) {
+        let password = match resolver.resolve(&descriptor.id, &descriptor.credential) {
             Ok(password) => password,
             Err(error) => {
                 errln!("Credential unavailable: {error}");
                 return exit(HostExit::Credential);
             }
-        }
+        };
+        let relay = crate::remote::resolve(std::slice::from_ref(&descriptor), &mut resolver)
+            .remove(&descriptor.id);
+        (password, relay)
     };
     let Some(server) = multi::resolve_endpoint(&descriptor.endpoint.host, descriptor.endpoint.port)
     else {
@@ -257,6 +260,7 @@ pub fn run(
     };
     drop(password);
     let commands = handle.commands();
+    let remote = relay.and_then(|relay| crate::remote::start(relay, &descriptor, commands.clone()));
     // Which session the window is on, told to the status file.
     let (tracker, mut notes) = WindowTracker::new([descriptor.id.as_str()]);
     let notes = notes.remove(&descriptor.id);
@@ -324,7 +328,12 @@ pub fn run(
                 };
                 // A window ignores the document's bot policy.
                 let liveness = multi::Liveness::requested(Some(window.clone()));
-                let result = multi::monitor(&id, handle, status, &printer, None, notes, liveness);
+                let beside = multi::Beside {
+                    window: notes,
+                    liveness,
+                    remote,
+                };
+                let result = multi::monitor(&id, handle, status, &printer, None, beside);
                 if let Ok(mut code) = code.lock() {
                     *code = result;
                 }

@@ -278,6 +278,8 @@ pub fn compose(
         login_command_delay_ms: login_command_delay_ms
             .unwrap_or(ac_host_core::config::DEFAULT_LOGIN_COMMAND_DELAY_MS),
         status_file: Some(status_file_path.clone()),
+        // The launcher does not offer its sessions to a relay.
+        remote: None,
     };
     Ok(ComposedSessionConfig {
         session_id: session_id.to_owned(),
@@ -326,6 +328,8 @@ pub fn compose_probe(
         login_commands: None,
         login_command_delay_ms: ac_host_core::config::DEFAULT_LOGIN_COMMAND_DELAY_MS,
         status_file: Some(status_file_path.clone()),
+        // The launcher does not offer its sessions to a relay.
+        remote: None,
     };
     Ok(ComposedSessionConfig {
         session_id: session_id.to_owned(),
