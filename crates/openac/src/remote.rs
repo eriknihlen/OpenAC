@@ -17,8 +17,8 @@ use ac_runtime::session::{HostEvent, SessionCommand, SessionEvent};
 use crate::stdio::errln;
 
 /// The version of the browser interface this client's panels are built
-/// for: none yet.
-const UI_INTERFACE: u32 = 0;
+/// for (the web module's interface number).
+const UI_INTERFACE: u32 = 1;
 
 /// A session's relay and its token for it.
 #[derive(Debug)]
