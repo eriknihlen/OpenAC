@@ -112,13 +112,22 @@ mod tests {
         );
     }
 
-    // Lengths around the padding boundary (55, 56, 63, 64 bytes) agree with
-    // a byte-at-a-time reference: the padding never miscounts.
+    // Lengths around the padding boundaries: 55 bytes is the longest tail
+    // that fits its length in the same block, 56 needs a second block, 64
+    // and 120 sit on block edges. The expected digests were computed
+    // independently with .NET's `System.Security.Cryptography.SHA1` (from
+    // PowerShell) over runs of the letter `a`.
     #[test]
-    fn padding_boundaries_differ() {
-        let mut seen = std::collections::HashSet::new();
-        for len in [55usize, 56, 57, 63, 64, 65, 119, 120] {
-            assert!(seen.insert(digest(&vec![b'x'; len])), "length {len}");
+    fn padding_boundaries_match_an_independent_implementation() {
+        for (len, expected) in [
+            (55usize, "c1c8bbdc22796e28c0e15163d20899b65621d65a"),
+            (56, "c2db330f6083854c99d4b5bfb6e8f29f201be699"),
+            (63, "03f09f5b158a7a8cdad920bddc29b81c18a551f5"),
+            (64, "0098ba824b5c16427bd7a1122a5a442a25ec644d"),
+            (119, "ee971065aaa017e0632a8ca6c77bb3bf8b1dfc56"),
+            (120, "f34c1488385346a55709ba056ddd08280dd4c6d6"),
+        ] {
+            assert_eq!(hex(&digest(&vec![b'a'; len])), expected, "length {len}");
         }
     }
 }

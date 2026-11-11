@@ -72,33 +72,68 @@ fn a_refused_token_is_a_typed_error_and_the_link_backs_off() {
     refuse();
     let (_, second) = expect_failed(&link);
     assert_eq!(second, Duration::from_millis(40));
-    // A good connection starts the backoff over.
+    // A hello_ok alone does not start the backoff over: a connection that
+    // ends at once keeps doubling.
     let mut conn = relay.accept();
     conn.accept_session(&link);
     conn.send_close(1000);
     let (loss, retry_in) = expect_lost(&link);
     assert_eq!(loss, LinkLoss::Closed(Some(1000)));
-    assert_eq!(retry_in, Duration::from_millis(20));
+    assert_eq!(retry_in, Duration::from_millis(80));
+}
+
+#[test]
+fn a_connection_that_stays_up_starts_the_backoff_over() {
+    let relay = TestRelay::start();
+    let mut config = relay.config();
+    config.timing.backoff_max = Duration::from_secs(1);
+    config.timing.stable_after = Duration::from_millis(150);
+    let link = Link::start(config).unwrap();
+    for wanted in [20, 40] {
+        let mut conn = relay.accept();
+        conn.read_request();
+        conn.send_raw(b"HTTP/1.1 503 Busy\r\n\r\n");
+        assert_eq!(expect_failed(&link).1, Duration::from_millis(wanted));
+    }
+    let mut conn = relay.accept();
+    conn.accept_session(&link);
+    // Up for twice the stable time (waiting longer only makes it more so).
+    std::thread::sleep(Duration::from_millis(300));
+    conn.send_close(1000);
+    assert_eq!(expect_lost(&link).1, Duration::from_millis(20));
 }
 
 #[test]
 fn refused_backs_off_and_reconnects() {
     let relay = TestRelay::start();
-    let link = relay.link();
+    let mut config = relay.config();
+    config.timing.backoff_max = Duration::from_millis(400);
+    let link = Link::start(config).unwrap();
     let mut conn = relay.accept();
     conn.upgrade();
     conn.read_text();
     conn.send_text(r#"{"type":"refused","reason":"protocol"}"#);
     conn.send_close(1008);
-    let (loss, _) = expect_failed(&link);
+    let (loss, retry_in) = expect_failed(&link);
     assert_eq!(loss, LinkLoss::Refused(RefuseReason::Protocol));
+    assert_eq!(retry_in, Duration::from_millis(20));
     // The newer connection wins a duplicate; this one hears it while
-    // connected.
+    // connected, and waits the longest before trying again, so two
+    // processes with the same session do not trade places every second.
     let mut conn = relay.accept();
     conn.accept_session(&link);
     conn.send_text(r#"{"type":"refused","reason":"duplicate"}"#);
-    let (loss, _) = expect_lost(&link);
+    let (loss, retry_in) = expect_lost(&link);
     assert_eq!(loss, LinkLoss::Refused(RefuseReason::Duplicate));
+    assert_eq!(retry_in, Duration::from_millis(400));
+    // Before hello_ok, the same.
+    let mut conn = relay.accept();
+    conn.upgrade();
+    conn.read_text();
+    conn.send_text(r#"{"type":"refused","reason":"duplicate"}"#);
+    let (loss, retry_in) = expect_failed(&link);
+    assert_eq!(loss, LinkLoss::Refused(RefuseReason::Duplicate));
+    assert_eq!(retry_in, Duration::from_millis(400));
     relay.accept().accept_session(&link);
 }
 
@@ -249,17 +284,36 @@ fn silence_is_a_lost_link_and_the_next_hello_has_the_new_state() {
         conn.read_text(),
         r#"{"type":"status","state":"portal_space"}"#
     );
-    // Pings keep it alive past the silence time.
-    let alive_until = Instant::now() + Duration::from_millis(600);
+    // Pings keep it alive past the silence time. The test measures how far
+    // apart its pings really went out: on a machine so loaded that they
+    // came half the silence time apart, an early loss proves nothing.
+    let silence = Duration::from_millis(300);
+    let alive_until = Instant::now() + silence * 2;
+    let mut last_ping = Instant::now();
+    let mut widest_gap = Duration::ZERO;
+    let mut early = None;
     while Instant::now() < alive_until {
         conn.send_frame(true, 9, b"");
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(link.events().try_recv().is_err(), "pings keep the link");
+        let now = Instant::now();
+        widest_gap = widest_gap.max(now - last_ping);
+        last_ping = now;
+        if let Ok(event) = link.events().recv_timeout(Duration::from_millis(20)) {
+            early = Some(event);
+            break;
+        }
     }
-    let started = Instant::now();
-    let (loss, _) = expect_lost(&link);
+    let loss = match early {
+        None => expect_lost(&link).0,
+        Some(Inbound::Disconnected { loss, .. }) => {
+            assert!(
+                widest_gap >= silence / 2,
+                "lost while pinged every {widest_gap:?} at most: {loss:?}"
+            );
+            loss
+        }
+        Some(other) => panic!("unexpected {other:?}"),
+    };
     assert_eq!(loss, LinkLoss::Silent);
-    assert!(started.elapsed() < Duration::from_secs(2));
     // Sending is refused while down.
     assert_eq!(
         link.send_control(EndpointMessage::Attached { request_id: 1 }),
@@ -345,12 +399,131 @@ fn dropping_the_link_stops_it_while_it_waits_to_reconnect() {
 fn shutdown_does_not_wait_for_a_relay_that_never_answers() {
     let relay = TestRelay::start();
     let link = relay.link();
-    let _conn = relay.accept();
-    // The link waits in its handshake for an answer that never comes.
-    std::thread::sleep(Duration::from_millis(50));
+    let mut conn = relay.accept();
+    // The upgrade request arrived: the link now waits in its handshake for
+    // an answer that never comes.
+    conn.read_request();
     let started = Instant::now();
     link.shutdown();
     assert!(started.elapsed() < Duration::from_millis(500));
+}
+
+#[test]
+fn undrained_events_past_the_budget_drop_the_link() {
+    let relay = TestRelay::start();
+    let mut config = relay.config();
+    config.inbound_bytes = 1000;
+    let link = Link::start(config).unwrap();
+    let mut conn = relay.accept();
+    conn.accept_session(&link);
+    // Taken as they come, frames never fill the budget.
+    for _ in 0..10 {
+        conn.send_binary(&[1; 400]);
+        assert_eq!(next_event(&link), Inbound::Binary(vec![1; 400]));
+    }
+    // Left lying, the third would pass it.
+    conn.send_binary(&[2; 400]);
+    conn.send_binary(&[3; 400]);
+    conn.send_binary(&[4; 400]);
+    let frames = conn.read_to_end();
+    assert!(
+        frames
+            .iter()
+            .any(|f| f.opcode == 8 && f.payload.starts_with(&1008u16.to_be_bytes())),
+        "closed with 1008, policy: {frames:?}"
+    );
+    assert_eq!(next_event(&link), Inbound::Binary(vec![2; 400]));
+    assert_eq!(next_event(&link), Inbound::Binary(vec![3; 400]));
+    assert_eq!(expect_lost(&link).0, LinkLoss::InboundOverflow);
+    // Once taken, the link carries on.
+    let mut conn = relay.accept();
+    conn.accept_session(&link);
+    conn.send_binary(&[5; 400]);
+    assert_eq!(next_event(&link), Inbound::Binary(vec![5; 400]));
+    assert!(link.events().held_bytes() == 0);
+}
+
+#[test]
+fn a_flood_of_empty_fragments_drops_the_link_and_shutdown_stays_prompt() {
+    let relay = TestRelay::start();
+    let link = relay.link();
+    let mut conn = relay.accept();
+    conn.accept_session(&link);
+    let flood = conn.flood(&[0x01, 0x00], &[0x00, 0x00]);
+    assert_eq!(
+        expect_lost(&link).0,
+        LinkLoss::Ws(WsError::TooManyFragments)
+    );
+    drop(flood);
+    // Shut down while a flood is still coming in.
+    let mut conn = relay.accept();
+    conn.accept_session(&link);
+    let _flood = conn.flood(&[0x01, 0x00], &[0x00, 0x00]);
+    std::thread::sleep(Duration::from_millis(20));
+    let started = Instant::now();
+    link.shutdown();
+    let took = started.elapsed();
+    assert!(took < Duration::from_millis(500), "{took:?}");
+}
+
+#[test]
+fn huge_timings_do_not_overflow_the_clock() {
+    let relay = TestRelay::start();
+    let mut config = relay.config();
+    config.timing = Timing {
+        silence: Duration::MAX,
+        hello_timeout: Duration::MAX,
+        connect_timeout: Duration::MAX,
+        backoff_first: Duration::from_millis(20),
+        backoff_max: Duration::MAX,
+        stable_after: Duration::MAX,
+    };
+    let link = Link::start(config).unwrap();
+    let mut conn = relay.accept();
+    conn.accept_session(&link);
+    conn.send_binary(&[1]);
+    assert_eq!(next_event(&link), Inbound::Binary(vec![1]));
+    link.send_binary(vec![2]).unwrap();
+    assert_eq!(conn.read_frame().unwrap().payload, vec![2]);
+    conn.send_close(1000);
+    assert_eq!(expect_lost(&link).0, LinkLoss::Closed(Some(1000)));
+    relay.accept().accept_session(&link);
+    // A wait for ever before reconnecting still stops at once.
+    let mut config = relay.config();
+    config.timing.backoff_first = Duration::MAX;
+    config.timing.backoff_max = Duration::MAX;
+    let waiting = Link::start(config).unwrap();
+    let mut conn = relay.accept();
+    conn.read_request();
+    conn.send_raw(b"HTTP/1.1 503 Busy\r\n\r\n");
+    assert_eq!(expect_failed(&waiting).1, Duration::MAX);
+    let started = Instant::now();
+    drop(waiting);
+    assert!(started.elapsed() < Duration::from_millis(500));
+}
+
+#[test]
+fn a_secure_address_against_a_plain_listener_is_a_tls_loss() {
+    let relay = TestRelay::start();
+    let mut config = relay.config();
+    config.url =
+        ac_remote::RelayUrl::parse(&format!("wss://127.0.0.1:{}/client/ws", relay.url().port))
+            .unwrap();
+    let started = Instant::now();
+    let link = Link::start(config).unwrap();
+    let mut conn = relay.accept();
+    // The TLS greeting arrives; a plain server answers it with HTTP.
+    assert!(!conn.read_some().is_empty());
+    conn.send_raw(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    drop(conn);
+    assert!(matches!(expect_failed(&link).0, LinkLoss::Tls(_)));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    // And it tries again.
+    assert!(relay.accept_within(PATIENCE).is_some());
 }
 
 #[test]
@@ -403,6 +576,7 @@ fn nothing_shows_the_token() {
         LinkLoss::Ws(WsError::Closed),
         LinkLoss::Unexpected("x"),
         LinkLoss::Closed(None),
+        LinkLoss::InboundOverflow,
     ];
     for loss in losses {
         assert!(!format!("{loss} {loss:?}").contains(TOKEN));

@@ -6,6 +6,9 @@
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac_remote::protocol::{Capability, Hello, SessionState};
@@ -42,6 +45,7 @@ pub fn fast_timing() -> Timing {
         connect_timeout: Duration::from_secs(3),
         backoff_first: Duration::from_millis(20),
         backoff_max: Duration::from_millis(80),
+        stable_after: Duration::from_secs(10),
     }
 }
 
@@ -162,6 +166,41 @@ impl RelayConn {
         Ok(())
     }
 
+    /// Whatever bytes arrive first (at least one).
+    pub fn read_some(&mut self) -> Vec<u8> {
+        self.fill_until(|b| !b.is_empty()).expect("some bytes");
+        std::mem::take(&mut self.buffer)
+    }
+
+    /// Writes `first`, then `each` over and over from a thread until the
+    /// returned flood is dropped or the link goes away.
+    pub fn flood(&self, first: &[u8], each: &[u8]) -> Flood {
+        let mut stream = self.stream.try_clone().expect("clone");
+        stream
+            .set_write_timeout(Some(Duration::from_millis(50)))
+            .expect("timeout");
+        let stop = Arc::new(AtomicBool::new(false));
+        let watch = Arc::clone(&stop);
+        let first = first.to_vec();
+        let chunk = each.repeat(512);
+        let thread = std::thread::spawn(move || {
+            if stream.write_all(&first).is_err() {
+                return;
+            }
+            while !watch.load(Ordering::SeqCst) {
+                match stream.write(&chunk) {
+                    Ok(_) => {}
+                    Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                    Err(_) => return,
+                }
+            }
+        });
+        Flood {
+            stop,
+            thread: Some(thread),
+        }
+    }
+
     pub fn read_request(&mut self) -> Request {
         self.fill_until(|b| b.windows(4).any(|w| w == b"\r\n\r\n"))
             .expect("a request");
@@ -272,6 +311,21 @@ impl RelayConn {
             frames.push(frame);
         }
         frames
+    }
+}
+
+/// A thread writing to the link without pause.
+pub struct Flood {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for Flood {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 

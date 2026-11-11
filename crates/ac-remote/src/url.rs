@@ -1,6 +1,7 @@
-//! The relay's address: `wss://host[:port]/path`, or `ws://` (plain, for
-//! local tests only). No user name, query or fragment: the token travels in
-//! a header, never in the address.
+//! The relay's address: `wss://host[:port]/path`, or `ws://` to this
+//! computer only (local tests and a relay on the same machine). No user
+//! name, query or fragment: the token travels in a header, never in the
+//! address, and never in clear text across the network.
 
 use std::fmt;
 
@@ -41,6 +42,10 @@ pub enum UrlError {
     /// The path has spaces or control characters.
     #[error("the path has spaces or control characters")]
     BadPath,
+    /// `ws://` to a host other than this computer: the token would cross
+    /// the network in clear text.
+    #[error("a secure address (wss://) is required for a relay on another computer")]
+    InsecureRemote,
 }
 
 impl RelayUrl {
@@ -124,6 +129,9 @@ impl RelayUrl {
         if !path.bytes().all(|b| b.is_ascii_graphic()) {
             return Err(UrlError::BadPath);
         }
+        if !secure && !is_loopback(host) {
+            return Err(UrlError::InsecureRemote);
+        }
         Ok(Self {
             secure,
             host: host.to_owned(),
@@ -148,6 +156,14 @@ impl RelayUrl {
             format!("{host}:{}", self.port)
         }
     }
+}
+
+/// `localhost`, an address in 127.0.0.0/8, or `::1`: this computer.
+fn is_loopback(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
 }
 
 fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
@@ -199,7 +215,42 @@ mod tests {
             RelayUrl::parse("ws://[::1]:9000/x"),
             Ok(url(false, "::1", 9000, "/x"))
         );
-        assert_eq!(RelayUrl::parse("ws://h"), Ok(url(false, "h", 80, "/")));
+        assert_eq!(
+            RelayUrl::parse("ws://localhost"),
+            Ok(url(false, "localhost", 80, "/"))
+        );
+    }
+
+    // The bearer token is in a header, so plain ws:// would show it to
+    // anyone on the way: only this computer may be reached without TLS.
+    #[test]
+    fn plain_addresses_are_for_this_computer_only() {
+        for text in [
+            "ws://localhost:8797/",
+            "ws://LocalHost/",
+            "ws://127.0.0.1/",
+            "ws://127.5.6.7:1/",
+            "ws://[::1]/",
+        ] {
+            assert!(RelayUrl::parse(text).is_ok(), "{text}");
+        }
+        for text in [
+            "ws://relay.example/",
+            "ws://10.0.0.1/",
+            "ws://128.0.0.1/",
+            "ws://localhost.example/",
+            "ws://127.0.0.1.example/",
+            "ws://[::2]/",
+            "ws://[::ffff:127.0.0.1]/",
+            "ws://0.0.0.0/",
+        ] {
+            assert_eq!(
+                RelayUrl::parse(text),
+                Err(UrlError::InsecureRemote),
+                "{text}"
+            );
+        }
+        assert!(RelayUrl::parse("wss://relay.example/").is_ok());
     }
 
     #[test]

@@ -20,6 +20,19 @@ const ACCEPT_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 /// The longest response header the handshake reads.
 pub const MAX_RESPONSE_HEADER: usize = 16 * 1024;
 
+/// The most fragments one message may arrive in. Empty fragments add no
+/// bytes, so the size limits alone would let a peer send them forever.
+pub const MAX_FRAGMENTS: usize = 1024;
+
+/// The most frames one [`WsClient::read_event`] call parses, so a call always
+/// returns soon and its caller can look at its clock and stop flag.
+pub const MAX_FRAMES_PER_READ: usize = 256;
+
+/// The most reads from the stream one [`WsClient::read_event`] call makes:
+/// enough for a 64 KiB frame in one call, few enough to return soon under a
+/// flood.
+pub const MAX_FILLS_PER_READ: usize = 8;
+
 /// The `Sec-WebSocket-Accept` value a server answers `key` with.
 #[must_use]
 pub fn accept_key(key: &str) -> String {
@@ -117,6 +130,10 @@ fn check_answer(head: &str, key: &str) -> Result<(), HandshakeError> {
         .filter(|digits| digits.bytes().all(|b| b.is_ascii_digit()))
         .and_then(|digits| digits.parse::<u16>().ok())
         .ok_or(HandshakeError::Malformed)?;
+    // A refusal is its status, whatever else the answer holds.
+    if code != 101 {
+        return Err(HandshakeError::Status(code));
+    }
     let mut upgrade = false;
     let mut connection = false;
     let mut accept = None;
@@ -137,9 +154,6 @@ fn check_answer(head: &str, key: &str) -> Result<(), HandshakeError> {
         {
             extension = true;
         }
-    }
-    if code != 101 {
-        return Err(HandshakeError::Status(code));
     }
     if !upgrade || !connection {
         return Err(HandshakeError::NotUpgraded);
@@ -268,6 +282,9 @@ pub enum WsError {
     /// A new message before the fragmented one ended.
     #[error("a new message started inside a fragmented one")]
     InterleavedMessage,
+    /// A message in more fragments than [`MAX_FRAGMENTS`].
+    #[error("a message is split into more than {MAX_FRAGMENTS} fragments")]
+    TooManyFragments,
     /// A text message that is not UTF-8.
     #[error("a text message is not UTF-8")]
     InvalidUtf8,
@@ -311,6 +328,8 @@ pub struct WsClient<S> {
     start: usize,
     /// A fragmented message so far: whether it is text, and its bytes.
     partial: Option<(bool, Vec<u8>)>,
+    /// How many fragments it came in so far.
+    fragments: usize,
     masks: Masks,
     close_sent: bool,
     close_received: bool,
@@ -371,14 +390,18 @@ impl<S: Read + Write> WsClient<S> {
             inbound: leftover,
             start: 0,
             partial: None,
+            fragments: 0,
             masks: Masks::new(),
             close_sent: false,
             close_received: false,
         }
     }
 
-    /// The next event, reading from the stream until one is complete or the
-    /// stream has nothing more right now (`None`).
+    /// The next event, reading from the stream until one is complete, the
+    /// stream has nothing more right now, or the call has done its share of
+    /// work (at most [`MAX_FILLS_PER_READ`] reads and
+    /// [`MAX_FRAMES_PER_READ`] frames): `None` then, and the next call goes
+    /// on where this one stopped.
     ///
     /// # Errors
     /// The stream failed or ended, or the server broke the protocol.
@@ -386,14 +409,16 @@ impl<S: Read + Write> WsClient<S> {
         if self.close_received {
             return Err(WsError::AlreadyClosed);
         }
-        loop {
-            if let Some(event) = self.parse_buffered()? {
+        let mut frames = MAX_FRAMES_PER_READ;
+        for _ in 0..MAX_FILLS_PER_READ {
+            if let Some(event) = self.parse_buffered(&mut frames)? {
                 return Ok(Some(event));
             }
-            if !self.fill()? {
+            if frames == 0 || !self.fill()? {
                 return Ok(None);
             }
         }
+        self.parse_buffered(&mut frames)
     }
 
     /// Reads once into the inbound buffer: whether bytes came.
@@ -427,10 +452,13 @@ impl<S: Read + Write> WsClient<S> {
         }
     }
 
-    /// Parses frames out of the inbound buffer until one completes an event
-    /// or a frame is not all there yet.
-    fn parse_buffered(&mut self) -> Result<Option<WsEvent>, WsError> {
+    /// Parses frames out of the inbound buffer until one completes an event,
+    /// a frame is not all there yet, or `frames` more were parsed.
+    fn parse_buffered(&mut self, frames: &mut usize) -> Result<Option<WsEvent>, WsError> {
         loop {
+            if *frames == 0 {
+                return Ok(None);
+            }
             let buffer = &self.inbound[self.start..];
             let (Some(&first), Some(&second)) = (buffer.first(), buffer.get(1)) else {
                 return Ok(None);
@@ -443,7 +471,7 @@ impl<S: Read + Write> WsClient<S> {
             if second & 0x80 != 0 {
                 return Err(WsError::MaskedFrame);
             }
-            let (length, header) = match second & 0x7F {
+            let (length, header): (u64, usize) = match second & 0x7F {
                 126 => {
                     let Some(bytes) = buffer.get(2..4) else {
                         return Ok(None);
@@ -483,6 +511,9 @@ impl<S: Read + Write> WsClient<S> {
             } else {
                 let text = match (opcode, &self.partial) {
                     (CONTINUATION, None) => return Err(WsError::UnexpectedContinuation),
+                    (CONTINUATION, Some(_)) if self.fragments >= MAX_FRAGMENTS => {
+                        return Err(WsError::TooManyFragments);
+                    }
                     (CONTINUATION, Some((text, _))) => *text,
                     (_, Some(_)) => return Err(WsError::InterleavedMessage),
                     (kind, None) => kind == TEXT,
@@ -503,11 +534,15 @@ impl<S: Read + Write> WsClient<S> {
             // Bounded above: a control frame is at most 125 bytes and a data
             // frame at most the limit.
             let length = usize::try_from(length).map_err(|_| WsError::NonMinimalLength)?;
-            let Some(payload) = buffer.get(header..header + length) else {
+            let end = header
+                .checked_add(length)
+                .ok_or(WsError::TooBig { limit: usize::MAX })?;
+            let Some(payload) = buffer.get(header..end) else {
                 return Ok(None);
             };
             let payload = payload.to_vec();
-            self.start += header + length;
+            self.start += end;
+            *frames -= 1;
             match opcode {
                 PING => {
                     self.send_frame(PONG, &payload)?;
@@ -516,9 +551,15 @@ impl<S: Read + Write> WsClient<S> {
                 PONG => return Ok(Some(WsEvent::Pong)),
                 CLOSE => return self.closed_by_server(&payload).map(Some),
                 _ => {
-                    let (text, mut bytes) =
-                        self.partial.take().unwrap_or((opcode == TEXT, Vec::new()));
+                    let (text, mut bytes) = match self.partial.take() {
+                        Some(partial) => partial,
+                        None => {
+                            self.fragments = 0;
+                            (opcode == TEXT, Vec::new())
+                        }
+                    };
                     bytes.extend_from_slice(&payload);
+                    self.fragments += 1;
                     if !fin {
                         self.partial = Some((text, bytes));
                         continue;
@@ -829,10 +870,14 @@ mod tests {
         }
     }
 
+    /// Every event the script yields: a call may stop early (its share of
+    /// work done), so this keeps calling well past the script's end.
     fn read_all(client: &mut WsClient<Script>) -> Result<Vec<WsEvent>, WsError> {
         let mut events = Vec::new();
-        while let Some(event) = client.read_event()? {
-            events.push(event);
+        for _ in 0..2000 {
+            if let Some(event) = client.read_event()? {
+                events.push(event);
+            }
         }
         Ok(events)
     }
@@ -1414,5 +1459,105 @@ mod tests {
         let payload = &frames[0].2;
         assert!(payload.len() <= 125);
         assert!(std::str::from_utf8(&payload[2..]).is_ok());
+    }
+
+    /// A server that, after a first non-final text frame, sends empty
+    /// continuation frames forever, and counts how often it was read.
+    #[derive(Debug, Default)]
+    struct EmptyFragments {
+        reads: usize,
+    }
+
+    impl Read for EmptyFragments {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.reads += 1;
+            // A runaway loop would read for ever; stop it as a failure.
+            assert!(self.reads < 100_000, "read_event does not return");
+            let mut written = 0;
+            if self.reads == 1 && buf.len() >= 2 {
+                buf[..2].copy_from_slice(&[0x01, 0x00]);
+                written = 2;
+            }
+            while written + 2 <= buf.len() {
+                buf[written..written + 2].copy_from_slice(&[0x00, 0x00]);
+                written += 2;
+            }
+            Ok(written)
+        }
+    }
+
+    impl Write for EmptyFragments {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_flood_of_empty_fragments_is_bounded() {
+        // Each call returns after a bounded amount of work; the flood ends in
+        // a typed error, never an endless call.
+        let mut client =
+            WsClient::upgraded(EmptyFragments::default(), WsLimits::default(), Vec::new());
+        let mut calls = 0;
+        let error = loop {
+            calls += 1;
+            assert!(calls < 1000, "the flood never ends in an error");
+            let reads_before = client.get_mut().reads;
+            match client.read_event() {
+                // Each call reads a bounded number of times, then returns.
+                Ok(None) => {
+                    assert!(client.get_mut().reads - reads_before <= MAX_FILLS_PER_READ);
+                }
+                Ok(Some(event)) => panic!("no event can complete: {event:?}"),
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(error, WsError::TooManyFragments);
+    }
+
+    #[test]
+    fn a_message_may_have_up_to_the_fragment_limit() {
+        let mut stream = frame(false, 2, b"a");
+        for _ in 0..MAX_FRAGMENTS - 2 {
+            stream.extend(frame(false, 0, b""));
+        }
+        stream.extend(frame(true, 0, b"b"));
+        let mut client = open([Step::Bytes(stream)]);
+        assert_eq!(
+            read_all(&mut client),
+            Ok(vec![WsEvent::Binary(b"ab".to_vec())])
+        );
+    }
+
+    // A refusal is reported by its status even when the server's other
+    // header lines are odd.
+    #[test]
+    fn a_refusal_is_its_status_whatever_its_headers() {
+        assert_eq!(
+            answer("HTTP/1.1 401 Unauthorized\r\nnot a header\r\n\r\n").unwrap_err(),
+            HandshakeError::Status(401)
+        );
+        assert_eq!(
+            answer("HTTP/1.1 101 Switching\r\nnot a header\r\n\r\n").unwrap_err(),
+            HandshakeError::Malformed
+        );
+    }
+
+    // With no practical limit a declared 2^62-byte frame just waits for its
+    // bytes; no length arithmetic may overflow.
+    #[test]
+    fn absurd_lengths_with_no_limit_do_not_overflow() {
+        let limits = WsLimits {
+            max_text_in: usize::MAX,
+            max_binary_in: usize::MAX,
+            ..WsLimits::default()
+        };
+        let mut header = vec![0x82, 127];
+        header.extend((1u64 << 62).to_be_bytes());
+        let mut client = WsClient::upgraded(Script::new([Step::Bytes(header)]), limits, Vec::new());
+        assert_eq!(client.read_event(), Ok(None));
     }
 }
