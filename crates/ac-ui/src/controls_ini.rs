@@ -11,7 +11,9 @@ use std::path::Path;
 use crate::draw::Color;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::{FileUiStorage, WriteMode};
-use crate::storage::{UiStorage, keys};
+use crate::storage::UiStorage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::keys;
 
 /// See the module documentation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
