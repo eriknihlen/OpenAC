@@ -1,0 +1,16 @@
+[package]
+name = "ac-ui-web"
+description = "The client's panels as a module for a web page: built for wasm32-unknown-unknown with no imports, it is handed the session's stream, input, time and data through its exports and hands back triangles, textures and commands."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# The module a page loads, and a library so the rules are tested natively.
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
