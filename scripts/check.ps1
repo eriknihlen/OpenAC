@@ -11,6 +11,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ((rustup target list --installed) -contains 'wasm32-unknown-unknown') {
     cargo build -p openac-plugin-compat --target wasm32-unknown-unknown
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # The panels are also a module for a web page: it must build for the web (its tests read the
+    # release build to check that it imports nothing).
+    cargo clippy -p ac-ui-web --target wasm32-unknown-unknown -- -D warnings
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    cargo build -p ac-ui-web --target wasm32-unknown-unknown --release
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
     Write-Host "wasm32-unknown-unknown not installed; skipping the plugin-crate WebAssembly build."
 }

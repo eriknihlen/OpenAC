@@ -125,6 +125,9 @@ pub struct ClientPanels {
     /// The empty picture shown while building went out.
     building_picture_sent: bool,
     scene: Option<Scene>,
+    /// The attach ended: the scene and the panels stand as they were until
+    /// the next attach's first frame replaces them.
+    attach_ended: bool,
     decode: Option<DecodeContext>,
     /// The game data the stream leaves out (the spell table, the skill
     /// formulas), read from the dats as the session reads them.
@@ -158,6 +161,21 @@ impl std::fmt::Debug for ClientPanels {
     }
 }
 
+impl ClientPanels {
+    /// A new attach begins: its snapshot replaces the scene, the stream is
+    /// decoded from its own first frame, and the panels are built again
+    /// (from the files already in) to show what it brings.
+    fn start_over(&mut self) {
+        self.scene = None;
+        self.decode = None;
+        if self.ui.take().is_some() {
+            self.ledger.lost_everything();
+            self.picture.owe();
+            self.cursor = None;
+        }
+    }
+}
+
 impl Default for ClientPanels {
     fn default() -> Self {
         Self::new()
@@ -186,6 +204,7 @@ impl ClientPanels {
             table_rounds: 0,
             building_picture_sent: false,
             scene: None,
+            attach_ended: false,
             decode: None,
             tables: Tables::Waiting,
             gameplay: GameplayInput::new(ac_ui::input::KeyBindings::retail_defaults()),
@@ -854,6 +873,9 @@ impl Panels for ClientPanels {
 
     fn stream(&mut self, frame: &[u8], now: f64) -> Result<(), String> {
         self.now_ms = now;
+        if std::mem::take(&mut self.attach_ended) {
+            self.start_over();
+        }
         if self.decode.is_none() {
             let (spells, formulas) = self.table_parts();
             self.decode = Some(DecodeContext::new(Instant::now(), spells, formulas));
@@ -870,17 +892,11 @@ impl Panels for ClientPanels {
     }
 
     fn detached(&mut self) {
-        self.scene = None;
-        self.decode = None;
         let tell = self.outbox.session().controlling;
         self.release_all(tell);
-        // The panels show what the next attach's snapshot brings: they are
-        // built again (from the files already in).
-        if self.ui.take().is_some() {
-            self.ledger.lost_everything();
-            self.picture.owe();
-            self.cursor = None;
-        }
+        // What is on show stands until the next attach speaks: a page that
+        // attaches again at once (to resynchronize) shows no gap.
+        self.attach_ended = true;
     }
 
     fn frame(&mut self, now: f64, out: &mut Outputs) {
@@ -1261,6 +1277,31 @@ mod tests {
             at += 4 + len;
         }
         found
+    }
+
+    /// Between an attach that ended and the next one's first frame the
+    /// last picture stands: the scene is replaced when the new stream
+    /// starts, not when the old one stops.
+    #[test]
+    fn a_detach_keeps_the_scene_until_the_next_attach_speaks() {
+        let mut panels = ClientPanels::new();
+        let epoch = Instant::now();
+        let frame = ac_remote_wire::encode_batch(
+            &[ac_runtime::session::PresentationEvent::StatusText(
+                "x".into(),
+            )],
+            &ac_remote_wire::EncodeContext::new(epoch),
+        )
+        .unwrap();
+        panels.stream(&frame, 1.0).unwrap();
+        assert!(panels.scene.is_some());
+        panels.detached();
+        assert!(panels.scene.is_some(), "the last picture stands");
+        assert!(panels.attach_ended);
+        // The next attach speaks: everything starts over from its frames.
+        panels.stream(&frame, 2.0).unwrap();
+        assert!(panels.scene.is_some());
+        assert!(!panels.attach_ended);
     }
 
     #[test]

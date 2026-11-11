@@ -628,3 +628,26 @@ fn a_large_world_is_split_into_frames_the_link_takes() {
         .collect();
     assert_eq!(frames_len, [36]);
 }
+
+/// The browser's copy of the world went stale: it is given the world's
+/// messages from the start again, on the attach it has, control kept.
+#[test]
+fn a_viewer_can_ask_for_the_world_again_without_attaching_again() {
+    let now = Instant::now();
+    let mut endpoint = watching_the_world(1024);
+    let again = RelayMessage::WorldSnapshot { request_id: 7 };
+    let actions = endpoint.relay(again.clone(), now);
+    assert!(matches!(actions[..], [Action::ListenWorld]), "{actions:?}");
+    assert!(endpoint.is_attached());
+    // Not for another request, and not for a viewer that never asked for
+    // the world.
+    assert!(
+        endpoint
+            .relay(RelayMessage::WorldSnapshot { request_id: 6 }, now)
+            .is_empty()
+    );
+    let (mut endpoint, now) = controlling(&[]);
+    assert!(endpoint.relay(again, now).is_empty());
+    // Control was not touched.
+    assert_eq!(endpoint.frame(&[KEYS], now).len(), 1);
+}
