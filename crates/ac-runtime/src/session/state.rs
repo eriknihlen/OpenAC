@@ -148,6 +148,8 @@ pub struct SessionState {
     pub frame_clock: crate::frame_clock::FrameClock,
     /// The physics, the local player's movement and other bodies.
     pub movement: Movement,
+    /// The world's own messages, kept for a viewer somewhere else.
+    pub world_tap: super::world_tap::WorldTap,
     /// The 25-second expiry of objects out of range.
     pub liveness: crate::world::liveness::LivenessController,
     /// Walks the client plans and walks, and moves asked for by chat.
@@ -205,6 +207,7 @@ impl SessionState {
             last_tick: None,
             frame_clock: crate::frame_clock::FrameClock::default(),
             movement: Movement::default(),
+            world_tap: super::world_tap::WorldTap::default(),
             liveness: crate::world::liveness::LivenessController::default(),
             navigation: Navigation::default(),
             host_events: Vec::new(),
@@ -801,6 +804,8 @@ impl SessionState {
     /// owners forget the server's state, the world empties and portal space
     /// resets.
     pub fn end_generation(&mut self, wall_unix_ms: i64) {
+        // The server's objects are forgotten with the stay.
+        self.world_tap.forget();
         self.login_commands.cancel(self.generation);
         self.options_seeder.reset_session();
         self.login_complete_seen = false;
@@ -1253,6 +1258,18 @@ impl SessionState {
             }
             SessionCommand::Movement(command) => {
                 self.movement.command(command, &self.world, outbox);
+            }
+            SessionCommand::WorldTap(command) => {
+                use super::world_tap::WorldTapCommand;
+                match command {
+                    WorldTapCommand::Keep(keeping) => self.world_tap.keep(keeping),
+                    WorldTapCommand::Listen(listener) => {
+                        let player = self.world.player_guid().unwrap_or(0);
+                        let world = &self.world;
+                        self.world_tap
+                            .listen(listener, player, |guid| world.object(guid).is_some());
+                    }
+                }
             }
             // The runner attaches it. What it replaces is not at the
             // movement keys any more.

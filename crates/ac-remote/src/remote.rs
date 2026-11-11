@@ -11,8 +11,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use ac_runtime::session::world_tap::{WorldTapBatch, WorldTapCommand};
 use ac_runtime::session::{PresentationEvent, SessionCommand};
 
 use crate::endpoint::{Action, Codec, Endpoint};
@@ -26,6 +27,8 @@ const MAX_FRAME: usize = 4 * 1024 * 1024;
 const ATTACHED_WAIT: Duration = Duration::from_millis(5);
 /// The same with nothing attached, when only the relay can start anything.
 const IDLE_WAIT: Duration = Duration::from_millis(50);
+/// The most batches of the world's messages taken in one pass.
+const WORLD_BATCHES_PER_PASS: usize = 64;
 /// The most events taken from the session in one pass, so a flood cannot
 /// keep the link's messages waiting.
 const EVENTS_PER_PASS: usize = 4096;
@@ -51,12 +54,18 @@ impl Remote {
         let (status, changes) = mpsc::channel();
         let (to_console, notes) = mpsc::channel();
         let link = Link::start(link)?;
+        // A session that offers itself keeps the world's own messages from
+        // its start, so a browser that comes later can be given the world
+        // as it stands.
+        let keep = WorldTapCommand::Keep(true);
+        let _ = commands.send(SessionCommand::WorldTap(keep));
         let mut worker = Worker {
             link,
             endpoint: Endpoint::new(codec, MAX_FRAME),
             commands,
             changes,
             presentation: None,
+            world: None,
             to_console,
             stop: Arc::clone(&stop),
         };
@@ -112,6 +121,9 @@ struct Worker<C> {
     changes: Receiver<Status>,
     /// The session's events while attached.
     presentation: Option<Receiver<PresentationEvent>>,
+    /// The world's own messages, while a browser that asked for them is
+    /// attached.
+    world: Option<Receiver<WorldTapBatch>>,
     /// Lines for the client's console.
     to_console: Sender<String>,
     stop: Arc<AtomicBool>,
@@ -141,6 +153,7 @@ impl<C: Codec> Worker<C> {
                 self.link.update_hello(|hello| change.apply_to(hello));
             }
             actions.extend(self.session_events());
+            actions.extend(self.world_messages());
             actions.extend(self.endpoint.tick(Instant::now()));
             self.carry_out(actions);
         }
@@ -186,6 +199,32 @@ impl<C: Codec> Worker<C> {
         actions
     }
 
+    /// The world's own messages the session tapped since the last pass.
+    fn world_messages(&mut self) -> Vec<Action> {
+        let Some(world) = &self.world else {
+            return Vec::new();
+        };
+        let epoch_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            });
+        let mut actions = Vec::new();
+        for _ in 0..WORLD_BATCHES_PER_PASS {
+            match world.try_recv() {
+                Ok(batch) => actions.extend(self.endpoint.world(&batch, epoch_ms)),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    // The session let the listener go (a new login starts
+                    // another with its snapshot).
+                    self.world = None;
+                    break;
+                }
+            }
+        }
+        actions
+    }
+
     fn carry_out(&mut self, mut actions: VecDeque<Action>) {
         while let Some(action) = actions.pop_front() {
             match action {
@@ -204,6 +243,10 @@ impl<C: Codec> Worker<C> {
                 Action::Detach => {
                     // Only what is still ours: a channel the session closed
                     // was replaced, and a detach would take its replacement.
+                    if self.world.take().is_some() {
+                        let stop = WorldTapCommand::Listen(None);
+                        let _ = self.commands.send(SessionCommand::WorldTap(stop));
+                    }
                     if let Some(presentation) = self.presentation.take()
                         && !matches!(presentation.try_recv(), Err(TryRecvError::Disconnected))
                     {
@@ -216,6 +259,13 @@ impl<C: Codec> Worker<C> {
                 Action::Control(message) => {
                     // A link that is down has nobody to tell.
                     let _ = self.link.send_control(message);
+                }
+                Action::ListenWorld => {
+                    let (to_viewer, world) = mpsc::channel();
+                    let listen = WorldTapCommand::Listen(Some(to_viewer));
+                    if self.commands.send(SessionCommand::WorldTap(listen)).is_ok() {
+                        self.world = Some(world);
+                    }
                 }
                 Action::Note(line) => {
                     let _ = self.to_console.send(line);

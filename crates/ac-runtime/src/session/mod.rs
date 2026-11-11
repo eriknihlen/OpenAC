@@ -17,6 +17,7 @@ mod routing_tests;
 mod runner;
 pub mod selection;
 mod state;
+pub mod world_tap;
 
 pub use chargen_table::project_chargen;
 pub use diagnostics::NetDiagnostics;

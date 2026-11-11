@@ -516,6 +516,9 @@ macro_rules! session_command {
                     return Err(EncodeError::NotAWireCommand("AttachRemote"));
                 }
                 SessionCommand::Detach => return Err(EncodeError::NotAWireCommand("Detach")),
+                SessionCommand::WorldTap(_) => {
+                    return Err(EncodeError::NotAWireCommand("WorldTap"));
+                }
                 SessionCommand::Shutdown => return Err(EncodeError::NotAWireCommand("Shutdown")),
             }
             Ok(())

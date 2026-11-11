@@ -12,7 +12,9 @@ use ac_remote::endpoint::{Codec, INPUT_SILENCE};
 use ac_remote::protocol::{SessionState, Status};
 use ac_remote::remote::Remote;
 use ac_runtime::movement::{MovementCommand, MovementKeys};
+use ac_runtime::session::world_tap::{TappedMessage, WorldTapBatch, WorldTapCommand};
 use ac_runtime::session::{Generation, PresentationEvent, SessionCommand};
+use ac_runtime::world::WorldSnapshot;
 use support::{PATIENCE, RelayConn, TestRelay, member};
 
 /// A frame of `E` bytes, one per event; any input frame is "hold forward",
@@ -51,9 +53,19 @@ struct Session {
 
 impl Session {
     fn next(&self) -> SessionCommand {
-        self.commands
-            .recv_timeout(PATIENCE)
-            .expect("a command for the session")
+        loop {
+            let command = self
+                .commands
+                .recv_timeout(PATIENCE)
+                .expect("a command for the session");
+            // Said once at the start; not what these tests are about.
+            if !matches!(
+                command,
+                SessionCommand::WorldTap(WorldTapCommand::Keep(true))
+            ) {
+                return command;
+            }
+        }
     }
 
     /// Nothing reaches the session within `wait`.
@@ -268,4 +280,67 @@ fn a_fault_that_ends_an_attach_leaves_a_line_for_the_console() {
     };
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].contains("no command"), "{notes:?}");
+}
+
+/// A session that may be viewed is told at its start to keep the world's
+/// messages; a browser that asks for them gets them from the start at every
+/// snapshot, in frames of their own, and a detach stops the listening.
+#[test]
+fn a_browser_that_asks_for_the_world_gets_its_messages_in_their_own_frames() {
+    let relay = TestRelay::start();
+    let (to_session, commands) = mpsc::channel();
+    let _remote = Remote::start(relay.config(), TestCodec, to_session).expect("remote");
+    match commands.recv_timeout(PATIENCE).expect("the first command") {
+        SessionCommand::WorldTap(WorldTapCommand::Keep(true)) => {}
+        other => panic!("expected the session told to keep the world, got {other:?}"),
+    }
+    let session = Session { commands };
+    let mut conn = connect(&relay);
+    conn.send_text(&ATTACH.replace(r#""objects":"all""#, r#""objects":"all","world":true"#));
+    let to_remote = session.expect_attach();
+    conn.read_text();
+    // The session answers an attach with its snapshot.
+    to_remote
+        .send(PresentationEvent::Snapshot(WorldSnapshot {
+            player_guid: None,
+            objects: Vec::new(),
+        }))
+        .unwrap();
+    let to_viewer = match session.next() {
+        SessionCommand::WorldTap(WorldTapCommand::Listen(Some(to_viewer))) => to_viewer,
+        other => panic!("expected the world listened to, got {other:?}"),
+    };
+    to_viewer
+        .send(WorldTapBatch {
+            player: 0x5000_000A,
+            messages: vec![TappedMessage {
+                client_to_server: false,
+                body: vec![0x45, 0xF7, 0, 0],
+            }],
+        })
+        .unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    let frame = loop {
+        assert!(
+            Instant::now() < deadline,
+            "no frame of the world's messages"
+        );
+        let frame = read_binary(&mut conn);
+        if frame.starts_with(b"ACRW") {
+            break frame;
+        }
+    };
+    assert_eq!(frame.len(), 12 + 16 + 4);
+    assert_eq!(&frame[28..], [0x45, 0xF7, 0, 0]);
+    // The browser leaves: the listening stops with the attach.
+    conn.send_text(r#"{"type":"detach","request_id":7}"#);
+    let mut stopped = false;
+    let mut detached = false;
+    while !(stopped && detached) {
+        match session.next() {
+            SessionCommand::WorldTap(WorldTapCommand::Listen(None)) => stopped = true,
+            SessionCommand::Detach => detached = true,
+            other => panic!("{other:?}"),
+        }
+    }
 }

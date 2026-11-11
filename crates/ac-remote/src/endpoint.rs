@@ -21,6 +21,7 @@
 use std::time::{Duration, Instant};
 
 use ac_runtime::movement::MovementCommand;
+use ac_runtime::session::world_tap::WorldTapBatch;
 use ac_runtime::session::{LifecycleCommand, PresentationEvent, SessionCommand};
 
 use crate::link::SendError;
@@ -28,6 +29,14 @@ use crate::protocol::{
     ControlReason, DetachReason, EndpointMessage, LifecyclePermission, Permissions, RelayMessage,
     Subscription,
 };
+
+/// What a frame of the world's own messages starts with. A stream frame
+/// starts with its format number, a small one, so the two never look alike.
+const WORLD_FRAME_MAGIC: &[u8; 4] = b"ACRW";
+/// The magic and the frame's time.
+const WORLD_FRAME_HEADER: usize = 12;
+/// What comes before a record's body.
+const WORLD_RECORD_HEADER: usize = 16;
 
 /// How long the browser keeps control without sending an input frame.
 pub const INPUT_SILENCE: Duration = Duration::from_secs(1);
@@ -56,6 +65,9 @@ pub enum Action {
     Binary(Vec<u8>),
     /// A line for the client's own console: why an attach ended by a fault.
     Note(String),
+    /// Listen to the session's world messages from the start (in place of
+    /// any earlier listening).
+    ListenWorld,
 }
 
 /// The request attached now.
@@ -184,8 +196,16 @@ impl<C: Codec> Endpoint<C> {
             return Vec::new();
         };
         let subscription = attached.subscription;
+        // A snapshot is a world that starts over.
+        let restart = subscription.world
+            && events
+                .iter()
+                .any(|event| matches!(event, PresentationEvent::Snapshot(_)));
         events.retain(|event| wanted(&subscription, event));
         let mut actions = Vec::new();
+        if restart {
+            actions.push(Action::ListenWorld);
+        }
         match self.encode(&events, &mut actions) {
             Ok(()) => actions,
             Err((reason, why)) => self.fault(reason, why),
@@ -221,6 +241,53 @@ impl<C: Codec> Endpoint<C> {
         let (first, second) = events.split_at(events.len() / 2);
         self.encode(first, frames)?;
         self.encode(second, frames)
+    }
+
+    /// The world's own messages since the last call, seen at `epoch_ms`
+    /// (milliseconds since the Unix epoch).
+    pub fn world(&mut self, batch: &WorldTapBatch, epoch_ms: u64) -> Vec<Action> {
+        let wanted = self
+            .attached
+            .as_ref()
+            .is_some_and(|attached| attached.accepted && attached.subscription.world);
+        if !wanted {
+            return Vec::new();
+        }
+        let mut frames = Vec::new();
+        let mut frame = Vec::new();
+        for message in &batch.messages {
+            let padded = message.body.len().next_multiple_of(4);
+            let record = WORLD_RECORD_HEADER + padded;
+            // A message no frame holds is left out: the viewer misses one
+            // object's news, not the world.
+            let (Ok(length), true) = (
+                u32::try_from(message.body.len()),
+                WORLD_FRAME_HEADER + record <= self.max_frame,
+            ) else {
+                continue;
+            };
+            if !frame.is_empty() && frame.len() + record > self.max_frame {
+                frames.push(Action::Binary(std::mem::take(&mut frame)));
+            }
+            if frame.is_empty() {
+                frame.extend_from_slice(WORLD_FRAME_MAGIC);
+                frame.extend_from_slice(&epoch_ms.to_le_bytes());
+            }
+            // The record: milliseconds since the frame's time, flags (bit
+            // 0: from the client), a reserved word, whose session saw it,
+            // the length, the body, zeros to a multiple of four.
+            frame.extend_from_slice(&0u32.to_le_bytes());
+            frame.extend_from_slice(&u16::from(message.client_to_server).to_le_bytes());
+            frame.extend_from_slice(&0u16.to_le_bytes());
+            frame.extend_from_slice(&batch.player.to_le_bytes());
+            frame.extend_from_slice(&length.to_le_bytes());
+            frame.extend_from_slice(&message.body);
+            frame.resize(frame.len() + padded - message.body.len(), 0);
+        }
+        if !frame.is_empty() {
+            frames.push(Action::Binary(frame));
+        }
+        frames
     }
 
     /// Time passed.
@@ -433,6 +500,7 @@ fn allowed(command: &SessionCommand, permissions: &Permissions) -> bool {
         SessionCommand::Attach(_)
         | SessionCommand::AttachRemote(_)
         | SessionCommand::Detach
+        | SessionCommand::WorldTap(_)
         | SessionCommand::Shutdown
         | SessionCommand::AtGeneration { .. } => false,
     }

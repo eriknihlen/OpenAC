@@ -75,6 +75,7 @@ const EVERYTHING: Subscription = Subscription {
     sound: true,
     effects: true,
     navigation: true,
+    world: false,
     objects: ObjectsFilter::All,
 };
 
@@ -208,6 +209,7 @@ fn the_subscription_leaves_out_what_the_browser_did_not_ask_for() {
         sound: false,
         effects: false,
         navigation: false,
+        world: false,
         objects: ObjectsFilter::All,
     };
     let mut endpoint = endpoint();
@@ -486,4 +488,143 @@ fn an_attach_that_ends_by_a_fault_says_why_on_the_console() {
     let (mut endpoint, now) = attached(&[]);
     let actions = endpoint.relay(RelayMessage::Detach { request_id: 7 }, now);
     assert!(notes(&actions).is_empty(), "{actions:?}");
+}
+
+// --- the world's own messages ---------------------------------------------
+
+use ac_runtime::session::world_tap::{TappedMessage, WorldTapBatch};
+use ac_runtime::world::WorldSnapshot;
+
+const WORLD: Subscription = Subscription {
+    world: true,
+    ..EVERYTHING
+};
+
+fn snapshot() -> PresentationEvent {
+    PresentationEvent::Snapshot(WorldSnapshot {
+        player_guid: None,
+        objects: Vec::new(),
+    })
+}
+
+fn watching_the_world(max_frame: usize) -> Endpoint<FakeCodec> {
+    let mut endpoint = Endpoint::new(FakeCodec::default(), max_frame);
+    endpoint.relay(attach(7, WORLD, permissions(false, &[])), Instant::now());
+    endpoint.attach_done(Ok(()));
+    endpoint
+}
+
+fn tapped(client_to_server: bool, body: &[u8]) -> TappedMessage {
+    TappedMessage {
+        client_to_server,
+        body: body.to_vec(),
+    }
+}
+
+fn binaries(actions: &[Action]) -> Vec<&[u8]> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Binary(bytes) => Some(bytes.as_slice()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every snapshot is a world that starts over (an attach, a new login): a
+/// viewer of the world's messages is given them from the start again.
+#[test]
+fn a_snapshot_starts_the_worlds_messages_over_for_a_viewer_that_asked() {
+    let mut endpoint = watching_the_world(1024);
+    let actions = endpoint.events(vec![snapshot(), text("x")]);
+    assert!(
+        actions.iter().any(|a| matches!(a, Action::ListenWorld)),
+        "{actions:?}"
+    );
+    // No snapshot, no restart.
+    let actions = endpoint.events(vec![text("y")]);
+    assert!(!actions.iter().any(|a| matches!(a, Action::ListenWorld)));
+    // A viewer that did not ask gets none.
+    let (mut endpoint, _) = attached(&[]);
+    let actions = endpoint.events(vec![snapshot()]);
+    assert!(!actions.iter().any(|a| matches!(a, Action::ListenWorld)));
+}
+
+#[test]
+fn the_worlds_messages_go_out_as_records_in_a_frame_of_their_own() {
+    let mut endpoint = watching_the_world(1024);
+    let batch = WorldTapBatch {
+        player: 0x5000_000A,
+        messages: vec![
+            tapped(false, &[1, 2, 3, 4, 5, 6, 7, 8]),
+            tapped(true, &[9, 9, 9, 9, 9]),
+        ],
+    };
+    let actions = endpoint.world(&batch, 0x0102_0304_0506);
+    let frames = binaries(&actions);
+    assert_eq!(frames.len(), 1, "{actions:?}");
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"ACRW");
+    expected.extend_from_slice(&0x0102_0304_0506_u64.to_le_bytes());
+    // Server to client: time 0, no flags, the player, the length, the body.
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(&0x5000_000A_u32.to_le_bytes());
+    expected.extend_from_slice(&8u32.to_le_bytes());
+    expected.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    // Client to server: flag bit 0, and the body padded to four bytes.
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    expected.extend_from_slice(&1u16.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(&0x5000_000A_u32.to_le_bytes());
+    expected.extend_from_slice(&5u32.to_le_bytes());
+    expected.extend_from_slice(&[9, 9, 9, 9, 9, 0, 0, 0]);
+    assert_eq!(frames[0], expected.as_slice());
+}
+
+#[test]
+fn the_worlds_messages_go_nowhere_unasked_or_unattached() {
+    let batch = WorldTapBatch {
+        player: 1,
+        messages: vec![tapped(false, &[1, 2, 3, 4])],
+    };
+    let (mut endpoint, _) = attached(&[]);
+    assert!(endpoint.world(&batch, 5).is_empty());
+    let mut unattached = Endpoint::new(FakeCodec::default(), 1024);
+    assert!(unattached.world(&batch, 5).is_empty());
+    // Nothing to say: no empty frame.
+    let empty = WorldTapBatch {
+        player: 1,
+        messages: Vec::new(),
+    };
+    assert!(watching_the_world(1024).world(&empty, 5).is_empty());
+}
+
+#[test]
+fn a_large_world_is_split_into_frames_the_link_takes() {
+    // 12 bytes of frame header, then 16 + 8 a record: two records a frame.
+    let mut endpoint = watching_the_world(12 + 2 * 24);
+    let batch = WorldTapBatch {
+        player: 1,
+        messages: (0..5).map(|n| tapped(false, &[n; 8])).collect(),
+    };
+    let actions = endpoint.world(&batch, 5);
+    let frames = binaries(&actions);
+    assert_eq!(
+        frames.iter().map(|f| f.len()).collect::<Vec<_>>(),
+        [60, 60, 36]
+    );
+    assert!(frames.iter().all(|f| f.starts_with(b"ACRW")));
+    // One message too large for any frame is left out; the rest goes.
+    let mut endpoint = watching_the_world(12 + 24);
+    let batch = WorldTapBatch {
+        player: 1,
+        messages: vec![tapped(false, &[0; 64]), tapped(false, &[7; 8])],
+    };
+    let frames_len: Vec<usize> = binaries(&endpoint.world(&batch, 5))
+        .iter()
+        .map(|f| f.len())
+        .collect();
+    assert_eq!(frames_len, [36]);
 }
