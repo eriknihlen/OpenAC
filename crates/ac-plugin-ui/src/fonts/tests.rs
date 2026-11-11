@@ -488,3 +488,24 @@ fn a_sharper_bake_that_does_not_fit_steps_down_or_is_left_out_and_reported() {
     assert_eq!(reports.len(), 1, "{reports:?}");
     assert!(reports[0].1.contains("less sharp"), "{reports:?}");
 }
+
+// What a bake is made of, read back, bakes the same again: a window's copy
+// of a plugin's fonts is baked from it.
+#[test]
+fn a_bake_tells_what_it_is_made_of_and_bakes_the_same_again() {
+    let ranges = [(0x41, 0x43), (0x30, 0x31)];
+    let bundled = bake_bundled(FontWeight::SemiBold, 14.0, &ranges).unwrap();
+    assert_eq!(bundled.source(), FontSource::Bundled(FontWeight::SemiBold));
+    assert_eq!(bundled.characters(), ['0', '1', 'A', 'B', 'C']);
+    let regular_bundled = bake_bundled(FontWeight::Regular, 14.0, &ranges).unwrap();
+    assert_eq!(
+        regular_bundled.source(),
+        FontSource::Bundled(FontWeight::Regular)
+    );
+    let own = bake(regular(), 14.0, &ranges, MAXIMUM_GLYPHS).unwrap();
+    assert!(matches!(own.source(), FontSource::Own(file) if file.as_slice() == NOTO_SANS_REGULAR));
+    // The bundled Regular weight and the same file handed over bake alike.
+    assert_eq!(own.coverage, regular_bundled.coverage);
+    assert_eq!(own.glyph('B'), regular_bundled.glyph('B'));
+    assert!(bake_bundled(FontWeight::Regular, f32::NAN, &ranges).is_err());
+}
