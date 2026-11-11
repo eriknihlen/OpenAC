@@ -45,10 +45,21 @@ else
     arch="$(uname -m)"
 fi
 case "$arch" in
-    aarch64 | arm64) rid=osx-arm64 ;;
-    x86_64) rid=osx-x64 ;;
+    aarch64 | arm64) rid=osx-arm64; program_arch=arm64 ;;
+    x86_64) rid=osx-x64; program_arch=x86_64 ;;
     *) echo "No macOS runtime identifier for $arch." >&2; exit 1 ;;
 esac
+
+# Whether this Mac can run the programs it builds: always its own architecture's, and Intel
+# programs on Apple silicon when Rosetta is installed. When it cannot, the bundle is built
+# untested: the programs' checks are skipped, and plugin-api.json comes from a helper built
+# for this Mac, which prints the same file.
+if [ "$program_arch" = "$(uname -m)" ] || arch "-$program_arch" /usr/bin/true > /dev/null 2>&1; then
+    can_run=1
+else
+    can_run=0
+    echo "warning: this Mac cannot run $program_arch programs (no Rosetta); $rid is built untested." >&2
+fi
 
 # The workspace version (the first `version` in Cargo.toml is [workspace.package]'s).
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
@@ -65,7 +76,13 @@ install -m 0755 "$bin/openac-launcher" "$bin/openac" "$bundle/Contents/MacOS/"
 cp LICENSE NOTICE.md "$bundle/Contents/Resources/"
 # The plugin API versions the bundled client loads, as it prints them: the launcher judges
 # plugins by this file (a data file, so in Resources, beside the bundle's other data).
-"$bin/openac" plugin-api > "$bundle/Contents/Resources/plugin-api.json"
+if [ "$can_run" -eq 1 ]; then
+    "$bin/openac" plugin-api > "$bundle/Contents/Resources/plugin-api.json"
+else
+    cargo run --release --locked -p ac-plugin-abi --example plugin-api-file \
+        > "$bundle/Contents/Resources/plugin-api.json"
+fi
+[ -s "$bundle/Contents/Resources/plugin-api.json" ] || { echo "plugin-api.json is empty." >&2; exit 1; }
 
 # The same license files as the other release zips: every crate compiled in, the bundled
 # Noto Sans font, and the launcher's fonts (their texts ship in the font crate).
@@ -133,8 +150,10 @@ done
 codesign --force --sign - --timestamp=none "$bundle"
 codesign --verify --deep --strict "$bundle"
 
-"$bundle/Contents/MacOS/openac-launcher" --verify-publish
-"$bundle/Contents/MacOS/openac" --help > /dev/null
+if [ "$can_run" -eq 1 ]; then
+    "$bundle/Contents/MacOS/openac-launcher" --verify-publish
+    "$bundle/Contents/MacOS/openac" --help > /dev/null
+fi
 
 # No resource forks or extended attributes (macOS stamps com.apple.provenance on every file):
 # the signatures live in the programs and _CodeSignature.

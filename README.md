@@ -68,8 +68,9 @@ reports are welcome.
 **Platforms.** Windows 10 and 11 (64-bit) is where it is played most. Linux
 (64-bit, X11 or Wayland) builds and runs, with less time in front of players.
 macOS (macOS 14 or later) runs on Metal on Apple silicon; it is the newest
-platform. Intel Macs get a build from 0.2.0 on, so far tested only by the
-release checks.
+platform. Intel Macs get a build from 0.2.0 on. It is built on Apple
+silicon, and its release checks run it through Rosetta when the build
+machine has it; nobody has tested it on an Intel Mac yet.
 
 **Found a bug?** Open a
 [GitHub issue](https://github.com/eriknihlen/OpenAC/issues) with the

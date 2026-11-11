@@ -360,11 +360,12 @@ jobs:
           - rid: osx-arm64
             os: macos-latest
             target: aarch64-apple-darwin
-          # An Intel image, so the Intel build is native and its checks run
-          # the programs as an Intel Mac does (an Apple-silicon image would
-          # run them only through Rosetta, if it has it).
+          # Built on Apple silicon too: the Intel images are few and slow
+          # (twice the time of every other build) and are being retired. Its
+          # checks run the Intel programs through Rosetta, and are skipped,
+          # with a warning, where the image cannot run them.
           - rid: osx-x64
-            os: macos-15-intel
+            os: macos-latest
             target: x86_64-apple-darwin
     # The bundle's minimum macOS is in scripts/bundle-macos.sh
     # (LSMinimumSystemVersion).
@@ -380,7 +381,24 @@ jobs:
         shell: bash
         run: |
           rustup toolchain install
+          rustup target add ${{ matrix.target }}
           rustup show
+
+      # An Intel build on Apple silicon runs its checks through Rosetta; an
+      # image without it gets it here when Apple's update service allows,
+      # else the Intel build is released untested.
+      - name: Make sure Rosetta can run Intel programs
+        if: matrix.target == 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          if ! arch -x86_64 /usr/bin/true > /dev/null 2>&1; then
+            sudo softwareupdate --install-rosetta --agree-to-license || true
+          fi
+          if arch -x86_64 /usr/bin/true > /dev/null 2>&1; then
+            echo "Rosetta runs Intel programs here: the Intel build is checked."
+          else
+            echo "::warning::No Rosetta on this image: the Intel Mac build is released untested."
+          fi
 
       - name: Install cargo-about
         shell: bash
@@ -439,16 +457,24 @@ jobs:
           test -x "$app/Contents/MacOS/openac-launcher"
           test -x "$app/Contents/MacOS/openac"
           codesign --verify --deep --strict "$app"
-          "$app/Contents/MacOS/openac-launcher" --verify-publish
           grep -a -q -F "$OPENAC_LAUNCHER_FINGERPRINT" "$app/Contents/MacOS/openac-launcher"
           test -x "$check/client/openac"
           test -s "$check/client/THIRD-PARTY-LICENSES.html"
+          test -s "$check/client/plugin-api.json"
+          cmp "$check/client/plugin-api.json" "$app/Contents/Resources/plugin-api.json"
           codesign --verify --strict "$check/client/openac"
-          "$check/client/openac" --help > /dev/null
-          # The plugin API file is the packaged program's own answer, in the
-          # client payload and in the bundle.
-          "$check/client/openac" plugin-api | cmp - "$check/client/plugin-api.json"
-          "$app/Contents/MacOS/openac" plugin-api | cmp - "$app/Contents/Resources/plugin-api.json"
+          # Running the programs needs a Mac that runs this build: an Intel
+          # build on Apple silicon without Rosetta is released untested.
+          if [ '${{ matrix.target }}' = aarch64-apple-darwin ] || arch -x86_64 /usr/bin/true > /dev/null 2>&1; then
+            "$app/Contents/MacOS/openac-launcher" --verify-publish
+            "$check/client/openac" --help > /dev/null
+            # The plugin API file is the packaged program's own answer, in the
+            # client payload and in the bundle.
+            "$check/client/openac" plugin-api | cmp - "$check/client/plugin-api.json"
+            "$app/Contents/MacOS/openac" plugin-api | cmp - "$app/Contents/Resources/plugin-api.json"
+          else
+            echo "::warning::The $rid programs were not run: this image cannot run them."
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
