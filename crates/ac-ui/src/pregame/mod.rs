@@ -245,6 +245,14 @@ impl PreGameScreens {
         }
     }
 
+    /// Forget what the creation screen's swatches found missing, and paint
+    /// them again (a host whose dats arrive while it runs).
+    pub fn forget_misses(&mut self) {
+        if let Some(creation) = self.creation.as_mut() {
+            creation.forget_misses();
+        }
+    }
+
     /// Import and bind every screen from the dats, hidden. A screen whose
     /// layout or strings cannot be read is left out and named in the
     /// notices. `version` is the client version line on the selection

@@ -301,6 +301,9 @@ pub trait SwatchTextures {
     fn grad_plug(&mut self) -> Option<TextureRef>;
     /// The spot painted in `rgb`.
     fn active_spot(&mut self, rgb: ChargenSwatchRgb) -> Option<TextureRef>;
+    /// Forget the art that was missing when asked for, so the next ask
+    /// reads it again (a host whose dats arrive while it runs).
+    fn forget_misses(&mut self) {}
 }
 
 /// The swatch colours of `part`: the hair colours' palette sets, the eye
@@ -388,6 +391,9 @@ pub trait SwatchSourcesDyn {
     fn direct(&self, palette: u32, sample: i32) -> Option<ChargenSwatchRgb>;
     /// The palette set a garment's dye shows.
     fn clothing_pal_set(&self, clothing_table: u32, template: u32) -> Option<u32>;
+    /// Forget what was missing when asked for (see
+    /// [`ChargenPalSetSource::forget_misses`]).
+    fn forget_misses(&self);
 }
 
 impl<T: SwatchSources> SwatchSourcesDyn for T {
@@ -401,6 +407,10 @@ impl<T: SwatchSources> SwatchSourcesDyn for T {
 
     fn clothing_pal_set(&self, clothing_table: u32, template: u32) -> Option<u32> {
         clothing_swatch_pal_set_id(self, clothing_table, template)
+    }
+
+    fn forget_misses(&self) {
+        ChargenPalSetSource::forget_misses(self);
     }
 }
 

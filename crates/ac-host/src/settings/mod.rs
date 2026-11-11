@@ -201,10 +201,39 @@ pub fn migrate_legacy_vertical_fov_degrees(legacy: f32) -> f32 {
     (legacy * (16.0 / 9.0 - 0.1)).clamp(10.0, 160.0)
 }
 
+/// Where a settings file's bytes are kept when they are not a file on disk
+/// (a browser's storage): read whole and written whole, exactly the bytes
+/// the file would hold.
+pub trait SettingsBytes: Send + Sync {
+    /// The bytes; `Ok(None)` when nothing is stored.
+    ///
+    /// # Errors
+    /// They are stored but cannot be read.
+    fn read(&self) -> std::io::Result<Option<Vec<u8>>>;
+
+    /// Store `bytes`, replacing what was stored.
+    ///
+    /// # Errors
+    /// They cannot be stored.
+    fn write(&self, bytes: &[u8]) -> std::io::Result<()>;
+}
+
 /// The settings file.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SettingsStore {
+    /// The file, or for kept bytes the name messages use.
     path: PathBuf,
+    /// The bytes, when they are kept somewhere other than the file.
+    bytes: Option<std::sync::Arc<dyn SettingsBytes>>,
+}
+
+impl std::fmt::Debug for SettingsStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SettingsStore")
+            .field("path", &self.path)
+            .field("kept_bytes", &self.bytes.is_some())
+            .finish()
+    }
 }
 
 /// A value that could not be read as its field's type.
@@ -279,19 +308,42 @@ impl SettingsStore {
     /// The store at `path`.
     #[must_use]
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self { path, bytes: None }
     }
 
-    /// Where the file is.
+    /// A store whose file is `bytes`, kept by its host (a page with no file
+    /// system); `name` stands for the file in messages. Read and written
+    /// exactly as the file is; clones share the bytes.
+    #[must_use]
+    pub fn with_bytes(name: impl Into<PathBuf>, bytes: std::sync::Arc<dyn SettingsBytes>) -> Self {
+        Self {
+            path: name.into(),
+            bytes: Some(bytes),
+        }
+    }
+
+    /// Where the file is (for kept bytes, their name).
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// The file's bytes; `Ok(None)` when there is no file.
+    fn read_bytes(&self) -> std::io::Result<Option<Vec<u8>>> {
+        if let Some(bytes) = &self.bytes {
+            return bytes.read();
+        }
+        match std::fs::read(&self.path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) fn read_root(&self) -> Result<Option<Vec<Member>>, String> {
-        let bytes = match std::fs::read(&self.path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        let bytes = match self.read_bytes() {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return Ok(None),
             Err(error) => return Err(error.to_string()),
         };
         let node = json::parse(&bytes).map_err(|e| e.to_string())?;
@@ -408,10 +460,8 @@ impl SettingsStore {
     /// # Errors
     /// The file exists but cannot be read.
     fn read_root_for_save(&self) -> std::io::Result<Option<Vec<Member>>> {
-        let bytes = match std::fs::read(&self.path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
+        let Some(bytes) = self.read_bytes()? else {
+            return Ok(None);
         };
         Ok(match json::parse(&bytes) {
             Ok(Node {
@@ -438,7 +488,11 @@ impl SettingsStore {
 
     /// Writes the whole file through a temporary file beside it, then a
     /// rename, so a save that fails part way leaves the old file whole.
+    /// Kept bytes are replaced whole.
     fn write(&self, text: &str) -> std::io::Result<()> {
+        if let Some(bytes) = &self.bytes {
+            return bytes.write(text.as_bytes());
+        }
         let dir = self
             .path
             .parent()
@@ -768,6 +822,47 @@ mod tests {
     fn a_missing_file_gives_the_defaults() {
         let t = Temp::new("missing");
         assert_eq!(t.store().load_display(), (DisplaySettings::default(), None));
+    }
+
+    /// Bytes kept in memory, as a browser's storage keeps them.
+    #[derive(Default)]
+    struct Kept(std::sync::Mutex<Option<Vec<u8>>>);
+
+    impl SettingsBytes for Kept {
+        fn read(&self) -> std::io::Result<Option<Vec<u8>>> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+        fn write(&self, bytes: &[u8]) -> std::io::Result<()> {
+            *self.0.lock().unwrap() = Some(bytes.to_vec());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_store_over_kept_bytes_reads_and_writes_what_the_file_holds() {
+        let t = Temp::new("kept");
+        let kept = std::sync::Arc::new(Kept::default());
+        let memory = SettingsStore::with_bytes("browser settings", kept.clone());
+        assert_eq!(memory.load_display(), (DisplaySettings::default(), None));
+        let scaled = DisplaySettings {
+            ui_scale_percent: 150,
+            ..DisplaySettings::default()
+        };
+        memory.save_display(&scaled).unwrap();
+        t.store().save_display(&scaled).unwrap();
+        let file = std::fs::read(&t.0).unwrap();
+        assert_eq!(
+            kept.0.lock().unwrap().as_deref(),
+            Some(file.as_slice()),
+            "the same bytes as the file"
+        );
+        assert_eq!(memory.load_display().0, scaled);
+        assert_eq!(
+            memory.clone().load_display().0,
+            scaled,
+            "a clone shares them"
+        );
+        assert_eq!(memory.path(), Path::new("browser settings"));
     }
 
     #[test]

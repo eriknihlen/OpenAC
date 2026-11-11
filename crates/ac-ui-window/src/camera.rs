@@ -114,7 +114,7 @@ impl Lens {
     }
 }
 
-pub use ac_ui_window::world::yaw_of;
+pub use crate::world::yaw_of;
 
 /// `angle` wrapped to (-π, π], radians.
 #[must_use]

@@ -122,6 +122,13 @@ impl StringResolver {
         }
     }
 
+    /// Forget the tables that were not there when asked for, so the next
+    /// ask loads them again: for a host whose dats arrive while it runs (a
+    /// page). Tables found are kept.
+    pub fn forget_misses(&self) {
+        self.tables.borrow_mut().retain(|_, table| table.is_some());
+    }
+
     fn table(&self, id: u32) -> Option<Arc<StringTable>> {
         if let Some(t) = self.tables.borrow().get(&id) {
             return t.clone();
@@ -234,6 +241,38 @@ mod tests {
             strings: vec![(compute_hash(key), entry)],
         };
         StringResolver::new(move |id| (id == TABLE_ID).then(|| table.clone()))
+    }
+
+    #[test]
+    fn a_missing_table_stays_missing_until_the_misses_are_forgotten() {
+        let entry = StringTableString {
+            data_id: 0,
+            strings: vec!["Hello".to_owned()],
+            variables: Vec::new(),
+            is_var_name_table_worth_packing: false,
+        };
+        let table = StringTable {
+            id: TABLE_ID,
+            language: 1,
+            strings: vec![(compute_hash("Hi"), entry)],
+        };
+        let present = std::rc::Rc::new(std::cell::Cell::new(false));
+        let loads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (p, l) = (present.clone(), loads.clone());
+        let strings = StringResolver::new(move |id| {
+            l.set(l.get() + 1);
+            (p.get() && id == TABLE_ID).then(|| table.clone())
+        });
+        let hello = || strings.resolve(TABLE_ID, compute_hash("Hi"), 0);
+        assert_eq!(hello(), None);
+        present.set(true);
+        assert_eq!(hello(), None, "the miss is remembered");
+        assert_eq!(loads.get(), 1);
+        strings.forget_misses();
+        assert_eq!(hello().as_deref(), Some("Hello"), "read again");
+        strings.forget_misses();
+        assert_eq!(hello().as_deref(), Some("Hello"));
+        assert_eq!(loads.get(), 2, "a table found is kept");
     }
 
     #[test]

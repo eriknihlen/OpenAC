@@ -83,6 +83,15 @@ impl UiViewports {
         }
     }
 
+    /// Forget what the creation tables' reads found missing, and the looks
+    /// composed from them, so the next frame composes again (a host whose
+    /// dats arrive while it runs).
+    pub fn forget_misses(&mut self) {
+        ac_core::chargen::ChargenPalSetSource::forget_misses(&self.catalog);
+        self.composed = None;
+        self.barber_composed = None;
+    }
+
     /// Flash the paperdoll figure (the selection changed): the whole
     /// figure, or the parts whose bits `part_mask` sets.
     pub fn flash_figure(&mut self, whole_figure: bool, part_mask: u32) {

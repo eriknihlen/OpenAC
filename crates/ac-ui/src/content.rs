@@ -2,7 +2,7 @@
 //! table), fonts, strings and sprite sizes, each loaded once.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -35,6 +35,9 @@ pub struct DatContent {
     layouts: RefCell<HashMap<u32, Option<Arc<LayoutDesc>>>>,
     fonts: RefCell<HashMap<u32, Option<Arc<UiFont>>>>,
     sprites: RefCell<HashMap<u32, Option<(u32, u32)>>>,
+    /// Fonts read while a sprite they name was missing: kept as read, and
+    /// read again when the misses are forgotten.
+    partial_fonts: RefCell<HashSet<u32>>,
     strings: StringResolver,
     errors: Rc<RefCell<Vec<ContentError>>>,
 }
@@ -86,6 +89,7 @@ impl DatContent {
             layouts: RefCell::default(),
             fonts: RefCell::default(),
             sprites: RefCell::default(),
+            partial_fonts: RefCell::default(),
             strings,
             errors,
         })
@@ -107,6 +111,20 @@ impl DatContent {
     #[must_use]
     pub fn strings(&self) -> &StringResolver {
         &self.strings
+    }
+
+    /// Forget the layouts, fonts, sprite sizes and string tables that were
+    /// not there when asked for, so the next ask reads them again: for a
+    /// host whose dats arrive while it runs (a page). What was found is
+    /// kept.
+    pub fn forget_misses(&self) {
+        self.layouts.borrow_mut().retain(|_, l| l.is_some());
+        let partial = std::mem::take(&mut *self.partial_fonts.borrow_mut());
+        self.fonts
+            .borrow_mut()
+            .retain(|id, f| f.is_some() && !partial.contains(id));
+        self.sprites.borrow_mut().retain(|_, s| s.is_some());
+        self.strings.forget_misses();
     }
 
     /// Reads that failed so far (missing objects are not errors), oldest
@@ -145,7 +163,20 @@ impl LayoutSource for DatContent {
             return f.clone();
         }
         let f = match self.dats.get::<Font>(id) {
-            Ok(Some(font)) => UiFont::from_dat(&font, |s| self.sprite_size(s)).map(Arc::new),
+            Ok(Some(font)) => {
+                let whole = std::cell::Cell::new(true);
+                let made = UiFont::from_dat(&font, |s| {
+                    let size = self.sprite_size(s);
+                    if s != 0 && size.is_none() {
+                        whole.set(false);
+                    }
+                    size
+                });
+                if !whole.get() {
+                    self.partial_fonts.borrow_mut().insert(id);
+                }
+                made.map(Arc::new)
+            }
             Ok(None) => None,
             Err(e) => {
                 self.record("font", id, &e);

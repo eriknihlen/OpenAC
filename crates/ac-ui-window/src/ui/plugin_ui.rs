@@ -204,6 +204,12 @@ pub struct PluginWindowUi {
 }
 
 impl PluginWindowUi {
+    /// Forget the setups whose shapes were missing when asked for, so the
+    /// next ask reads them again (a host whose dats arrive while it runs).
+    pub(super) fn forget_misses(&mut self) {
+        self.setup_shapes.retain(|_, shape| shape.is_some());
+    }
+
     /// Where `guid`'s markers hang this frame, kept once per frame.
     fn keep_anchor(
         &mut self,

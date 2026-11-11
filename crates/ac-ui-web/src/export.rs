@@ -10,15 +10,22 @@
 
 use std::cell::RefCell;
 
-use crate::host::{Modifiers, Module, NoPanels, Panels, Session};
+use crate::client::{ClientPanels, page_duration};
+use crate::host::{Modifiers, Module, Panels, Session};
 
 thread_local! {
     /// The one module of this instance. A page calls one export at a time.
-    static MODULE: RefCell<Module<NoPanels>> = RefCell::new(Module::new(NoPanels::default()));
+    static MODULE: RefCell<Module<ClientPanels>> = RefCell::new(Module::new(ClientPanels::new()));
 }
 
-fn with<R>(call: impl FnOnce(&mut Module<NoPanels>) -> R) -> R {
+fn with<R>(call: impl FnOnce(&mut Module<ClientPanels>) -> R) -> R {
     MODULE.with(|module| call(&mut module.borrow_mut()))
+}
+
+/// The page's time `now` (milliseconds since its time zero) is the clock's
+/// now: every export that carries the time hands it in first.
+fn clock(now: f64) {
+    ac_clock::set_now(page_duration(now));
 }
 
 /// The page's bytes at `ptr`.
@@ -80,6 +87,7 @@ pub extern "C" fn ui_shape() -> u32 {
 /// The canvas, once. Returns 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn ui_init(width: u32, height: u32, scale: f32, now: f64) -> u32 {
+    clock(now);
     with(|module| module.panels().init(width, height, scale, now));
     0
 }
@@ -100,6 +108,7 @@ pub extern "C" fn ui_session(generation: i64, controlling: u32, permissions: u32
 /// One stream frame. Returns 0, or 1 when it cannot be read.
 #[unsafe(no_mangle)]
 pub extern "C" fn ui_stream(ptr: u32, len: u32, now: f64) -> u32 {
+    clock(now);
     with(|module| u32::from(module.panels().stream(bytes(ptr, len), now).is_err()))
 }
 
@@ -112,6 +121,7 @@ pub extern "C" fn ui_detached() {
 /// One animation frame: the mask of the kinds that have something to take.
 #[unsafe(no_mangle)]
 pub extern "C" fn ui_frame(now: f64) -> u32 {
+    clock(now);
     with(|module| module.frame(now))
 }
 
@@ -137,6 +147,7 @@ pub extern "C" fn ui_key(
     repeat: u32,
     now: f64,
 ) -> u32 {
+    clock(now);
     let (code, modifiers) = (text(code_ptr, code_len), Modifiers::from_bits(modifiers));
     with(|module| {
         u32::from(
@@ -156,6 +167,7 @@ pub extern "C" fn ui_text(ptr: u32, len: u32) -> u32 {
 /// The pointer moved.
 #[unsafe(no_mangle)]
 pub extern "C" fn ui_pointer_move(x: f32, y: f32, now: f64) -> u32 {
+    clock(now);
     with(|module| u32::from(module.panels().pointer_move(x, y, now)))
 }
 
@@ -169,6 +181,7 @@ pub extern "C" fn ui_pointer_button(
     modifiers: u32,
     now: f64,
 ) -> u32 {
+    clock(now);
     let modifiers = Modifiers::from_bits(modifiers);
     with(|module| {
         u32::from(
@@ -225,4 +238,19 @@ pub extern "C" fn ui_dat_preload() -> u32 {
 pub extern "C" fn ui_storage(key_ptr: u32, key_len: u32, ptr: u32, len: u32, found: u32) {
     let value = (found != 0).then(|| bytes(ptr, len));
     with(|module| module.panels().storage(text(key_ptr, key_len), value));
+}
+
+/// The wall clock, as milliseconds since 1970-01-01 UTC (the page's
+/// `Date.now()`): before `ui_init` and about once a second.
+#[unsafe(no_mangle)]
+pub extern "C" fn ui_wall_clock(unix_ms: f64) {
+    // Whole milliseconds; a value past what an i64 holds saturates.
+    ac_clock::set_unix_millis(unix_ms as i64);
+}
+
+/// The page lost every texture (its GPU context): each texture in use is
+/// uploaded again, and the picture sent again, with the next frame.
+#[unsafe(no_mangle)]
+pub extern "C" fn ui_textures_lost() {
+    with(|module| module.panels().textures_lost());
 }

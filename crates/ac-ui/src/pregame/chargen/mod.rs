@@ -378,6 +378,18 @@ impl CreationScreen {
         self.refreshed = None;
     }
 
+    /// Forget the swatch sources' and art's misses and paint the swatches
+    /// again (a host whose dats arrive while it runs).
+    pub fn forget_misses(&mut self) {
+        if let Some(sources) = &self.swatch_sources {
+            sources.forget_misses();
+        }
+        if let Some(textures) = self.swatch_textures.as_mut() {
+            textures.forget_misses();
+        }
+        self.refreshed = None;
+    }
+
     /// Draw the random choices from `random` (tests).
     pub fn set_random(&mut self, random: Box<dyn ChargenRandom>) {
         self.random_source = random;

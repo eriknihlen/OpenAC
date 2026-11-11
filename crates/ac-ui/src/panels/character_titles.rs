@@ -265,6 +265,12 @@ impl TitleNames {
         }
     }
 
+    /// Forget the titles that had no name when asked for, so the next ask
+    /// resolves them again (a host whose dats arrive while it runs).
+    pub fn forget_misses(&mut self) {
+        self.cache.retain(|_, name| name.is_some());
+    }
+
     /// Title `id`'s text (`None` for 0 or an id with no name).
     pub fn resolve(&mut self, strings: &crate::strings::StringResolver, id: u32) -> Option<String> {
         if id == 0 {

@@ -10,7 +10,8 @@ use ac_ui::layout_persistence::LayoutStore;
 use super::WindowUi;
 
 /// The settings file as the control-state store's file.
-struct ControlStateSettings(SettingsStore);
+#[derive(Debug)]
+pub struct ControlStateSettings(pub SettingsStore);
 
 impl ControlStateFile for ControlStateSettings {
     fn load(&self, character: &str) -> Result<BTreeMap<ControlKey, String>, String> {

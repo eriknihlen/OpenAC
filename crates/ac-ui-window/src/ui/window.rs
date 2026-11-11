@@ -579,6 +579,18 @@ pub struct WindowUi {
     vitals_side_by_side: Option<VitalsSideBySide>,
     /// The barber window's swatch sources (`super::barber_window`).
     pub(super) barber: super::barber_window::BarberWindow,
+    /// The caches of dat reads the panels hold inside their own closures
+    /// (the chat's strings, the tooltips' content, the keyboard screen's
+    /// names), reached when the misses are forgotten.
+    pub(super) miss_caches: MissCaches,
+}
+
+/// Handles on caches of dat reads held elsewhere (see
+/// [`WindowUi::forget_misses`]); one that was dropped is skipped.
+#[derive(Debug, Default)]
+pub(super) struct MissCaches {
+    pub(super) strings: Vec<std::rc::Weak<StringResolver>>,
+    pub(super) contents: Vec<std::rc::Weak<DatContent>>,
 }
 
 impl std::fmt::Debug for WindowUi {
@@ -665,6 +677,7 @@ impl WindowUi {
             plugins: super::plugin_ui::PluginWindowUi::default(),
             vitals_side_by_side: None,
             barber: super::barber_window::BarberWindow::default(),
+            miss_caches: MissCaches::default(),
         };
         let pregame_dats = dats.clone();
         ui.load_tables(&dats);
@@ -702,6 +715,45 @@ impl WindowUi {
             return Err(ui.notices.join("; "));
         }
         Ok(ui)
+    }
+
+    /// Forget every dat read the panels' caches found missing (layouts,
+    /// fonts, sprite sizes, string tables, icons and the images they are
+    /// made of, title names, the creation tables, plugin shapes), and have
+    /// the item, character and magic panels read their facts again: for a
+    /// host whose dats arrive while it runs (a page), after files arrived,
+    /// so what waited for them is read and drawn. What was found stays
+    /// cached. The native window never calls it: its dats hold every file
+    /// from the start, and a miss there stays a miss.
+    pub fn forget_misses(&mut self) {
+        self.content.forget_misses();
+        self.icons.forget_misses();
+        self.character_pages.titles.forget_misses();
+        self.barber.forget_misses();
+        self.viewports.forget_misses();
+        if let Some(pregame) = self.pregame.as_mut() {
+            pregame.forget_misses();
+        }
+        self.plugins.forget_misses();
+        self.miss_caches
+            .strings
+            .retain(|strings| match strings.upgrade() {
+                Some(strings) => {
+                    strings.forget_misses();
+                    true
+                }
+                None => false,
+            });
+        self.miss_caches
+            .contents
+            .retain(|content| match content.upgrade() {
+                Some(content) => {
+                    content.forget_misses();
+                    true
+                }
+                None => false,
+            });
+        self.facts.reread();
     }
 
     /// The client settings in force in this window.
@@ -901,7 +953,10 @@ impl WindowUi {
     fn mount_chat(&mut self, dats: Arc<DatCollection>) -> Result<(), String> {
         let layout = self.import(chat::LAYOUT_ID)?;
         let font = self.content.font(DEFAULT_FONT_ID);
-        let resolver = StringResolver::new(move |id| dats.get(id).ok().flatten());
+        let resolver = std::rc::Rc::new(StringResolver::new(move |id| dats.get(id).ok().flatten()));
+        self.miss_caches
+            .strings
+            .push(std::rc::Rc::downgrade(&resolver));
         let strings: chat::StringLookup =
             Box::new(move |key| resolver.resolve(UI_STRING_TABLE, compute_hash(key), 0));
         let controller =
