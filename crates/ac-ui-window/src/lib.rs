@@ -22,8 +22,21 @@
 //! What the host draws for the world on the panels' behalf (plugin lines,
 //! triangles, ground shapes, icon probes, the 3-D viewports) is described
 //! by the plain types of [`world`], [`viewport`] and [`appearance`].
+//!
+//! What the panels leave of the input reaches the world input
+//! ([`gameplay_input`]: the key map's dispatcher and the routing of what it
+//! fires into movement, the camera and session commands), with the held
+//! keys and buttons kept honest by [`input`]; the cameras it turns are
+//! [`camera`]'s, which ask the host's collision through
+//! [`camera_collision`].
 
 pub mod appearance;
+pub mod camera;
+pub mod camera_collision;
+pub mod emotes;
+pub mod gameplay_input;
+pub mod input;
+pub mod lifetime;
 pub mod scene;
 pub mod setup_pose;
 pub mod ui;

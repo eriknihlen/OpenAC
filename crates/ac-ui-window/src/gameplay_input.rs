@@ -235,7 +235,10 @@ impl InputDevices for DeviceState<'_> {
 
 /// The window's bindings: the active retail `.keymap` profile over the
 /// player's bindings file (each optional; the retail key map without
-/// them). What could not be read is reported in `notices`.
+/// them). What could not be read is reported in `notices`. Not on
+/// WebAssembly, which has no files: a page's bindings come from its storage
+/// (`ac_ui::input::keymap_file::load_active`) into [`GameplayInput::new`].
+#[cfg(not(target_arch = "wasm32"))]
 #[must_use]
 pub fn load(
     bindings_file: Option<&std::path::Path>,

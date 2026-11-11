@@ -341,6 +341,7 @@ dependencies = [
  "ac-core",
  "ac-dat",
  "ac-host",
+ "ac-motion",
  "ac-physics",
  "ac-plugin-ui",
  "ac-proto",
