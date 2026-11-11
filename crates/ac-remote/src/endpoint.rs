@@ -134,6 +134,20 @@ impl<C: Codec> Endpoint<C> {
             }
             // The link answers the hello; another request's messages and
             // types this version does not know are not ours.
+            // The world's messages from the start again, for a viewer that
+            // asked for the world; the attach and its control stand.
+            RelayMessage::WorldSnapshot { request_id } => {
+                let listening = self.attached.as_ref().is_some_and(|attached| {
+                    attached.request_id == request_id
+                        && attached.accepted
+                        && attached.subscription.world
+                });
+                if listening {
+                    vec![Action::ListenWorld]
+                } else {
+                    Vec::new()
+                }
+            }
             RelayMessage::Detach { .. }
             | RelayMessage::Control { .. }
             | RelayMessage::HelloOk { .. }

@@ -459,6 +459,12 @@ pub enum RelayMessage {
         /// Taken or released.
         on: bool,
     },
+    /// The browser lost its copy of the world: send the world's messages
+    /// from the start again, on the attach as it is.
+    WorldSnapshot {
+        /// The relay's request id.
+        request_id: u64,
+    },
     /// A message type this version does not know; ignore it.
     Unknown {
         /// Its `type` (at most [`MAX_RELAY_WORD`] characters of it).
@@ -574,6 +580,9 @@ impl RelayMessage {
                     permissions: Permissions { control, lifecycle },
                 }
             }
+            "world_snapshot" => Self::WorldSnapshot {
+                request_id: Fields::new(members, "world_snapshot").u64("request_id")?,
+            },
             "detach" => Self::Detach {
                 request_id: Fields::new(members, "detach").u64("request_id")?,
             },
@@ -1110,5 +1119,14 @@ mod tests {
         assert_eq!(attach(r#","world":true"#), Ok(true));
         assert_eq!(attach(r#","world":false"#), Ok(false));
         assert!(attach(r#","world":"yes""#).is_err());
+    }
+
+    #[test]
+    fn the_relay_can_ask_for_the_world_again() {
+        assert_eq!(
+            RelayMessage::parse(r#"{"type":"world_snapshot","request_id":9}"#),
+            Ok(RelayMessage::WorldSnapshot { request_id: 9 })
+        );
+        assert!(RelayMessage::parse(r#"{"type":"world_snapshot"}"#).is_err());
     }
 }
