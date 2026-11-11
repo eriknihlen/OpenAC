@@ -26,7 +26,9 @@ use crate::inventory::{
 };
 use crate::world::{ItemChange, WorldChange};
 
+#[cfg(feature = "host")]
 mod feed;
+#[cfg(feature = "host")]
 pub(crate) use feed::InterfaceFeed;
 
 /// One message about the panels' facts.

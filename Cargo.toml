@@ -16,7 +16,9 @@ repository = "https://github.com/eriknihlen/OpenAC"
 # Internal crates.
 ac-bits = { path = "crates/ac-bits" }
 ac-proto = { path = "crates/ac-proto" }
-ac-runtime = { path = "crates/ac-runtime" }
+# Without its `host` feature: the view and command types a window draws from. A crate
+# that runs sessions asks for `features = ["host"]`.
+ac-runtime = { path = "crates/ac-runtime", default-features = false }
 ac-dat = { path = "crates/ac-dat" }
 ac-core = { path = "crates/ac-core" }
 ac-net = { path = "crates/ac-net" }

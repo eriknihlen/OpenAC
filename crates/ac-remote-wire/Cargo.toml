@@ -9,8 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-# The stream's and the commands' types. They move to a lighter crate later;
-# until then the encoding names them where the runtime defines them.
+# The stream's and the commands' types, without the session runner (no `host`
+# feature), so the encoding builds for the browser too.
 ac-runtime.workspace = true
 # The compass heading of an orientation, for the development codec.
 ac-motion.workspace = true
