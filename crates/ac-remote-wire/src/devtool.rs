@@ -8,13 +8,102 @@
 //! never sent to a relay.
 
 use ac_host_core::json::{self, Member, Node, Value};
+use ac_proto::Position;
 use ac_runtime::movement::{MovementCommand, MovementKeys};
 use ac_runtime::session::{Generation, LifecycleCommand, PresentationEvent, SessionCommand};
-use ac_runtime::world::VitalReading;
+use ac_runtime::world::{ObjectDelta, VitalReading};
 
-/// One line of JSON saying what `events` hold.
+/// Follows one stream and says what its events hold, with where the
+/// player stands whenever that changed enough to show on a map.
+#[derive(Debug, Default)]
+pub struct Summarizer {
+    /// The player's object, from the snapshot.
+    player: Option<u32>,
+    /// The place last told.
+    told: Option<Position>,
+}
+
+impl Summarizer {
+    /// A summarizer for a stream from its start.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// One line of JSON saying what `events` hold.
+    pub fn summarize(&mut self, events: &[PresentationEvent]) -> String {
+        // Where the batch leaves the player, if it says.
+        let mut place = None;
+        for event in events {
+            match event {
+                PresentationEvent::Snapshot(snapshot) => {
+                    self.player = snapshot.player_guid;
+                    self.told = None;
+                    place = snapshot
+                        .objects
+                        .iter()
+                        .find(|object| Some(object.guid) == self.player)
+                        .and_then(|object| object.position);
+                }
+                PresentationEvent::Deltas(deltas) => {
+                    for delta in deltas {
+                        if let ObjectDelta::Upsert(object) = delta
+                            && Some(object.guid) == self.player
+                            && object.position.is_some()
+                        {
+                            place = object.position;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let tail = place
+            .filter(|place| self.told.is_none_or(|told| shows(&told, place)))
+            .map(|place| {
+                self.told = Some(place);
+                format!(
+                    r#"{{"kind":"position","cell":{},"x":{:.3},"y":{:.3},"z":{:.3},"heading":{:.1}}}"#,
+                    place.cell_id,
+                    place.origin.x,
+                    place.origin.y,
+                    place.origin.z,
+                    heading(&place)
+                )
+            });
+        render(events, tail)
+    }
+}
+
+/// Metres the player moves before a new place is told.
+const TOLD_DISTANCE: f32 = 0.5;
+/// Degrees the player turns before a new place is told.
+const TOLD_TURN: f32 = 5.0;
+
+/// Compass degrees a position faces: north 0, east 90.
+fn heading(place: &Position) -> f32 {
+    let q = place.orientation;
+    ac_motion::get_heading(glam::Quat::from_xyzw(q.x, q.y, q.z, q.w))
+}
+
+/// Whether `now` is far enough from `told` to show on a map.
+fn shows(told: &Position, now: &Position) -> bool {
+    let (a, b) = (told.origin, now.origin);
+    let moved = ((a.x - b.x).powi(2) + (a.y - b.y).powi(2) + (a.z - b.z).powi(2)).sqrt();
+    let turned = (heading(told) - heading(now)).abs();
+    told.cell_id != now.cell_id || moved >= TOLD_DISTANCE || turned.min(360.0 - turned) >= TOLD_TURN
+}
+
+/// One line of JSON saying what `events` hold, without following the
+/// player.
 #[must_use]
 pub fn summarize(events: &[PresentationEvent]) -> String {
+    render(events, None)
+}
+
+/// The summary line, with `tail` (one more event, already JSON) after the
+/// events' own.
+fn render(events: &[PresentationEvent], tail: Option<String>) -> String {
     let mut out = String::from(r#"{"type":"events","events":["#);
     let mut first = true;
     let mut next = |out: &mut String| {
@@ -63,6 +152,10 @@ pub fn summarize(events: &[PresentationEvent]) -> String {
                 ));
             }
         }
+    }
+    if let Some(tail) = tail {
+        next(&mut out);
+        out.push_str(&tail);
     }
     out.push_str("]}");
     out
@@ -287,6 +380,110 @@ mod tests {
         assert_eq!(text_of(member(&events[4], "name")), "GameTime");
         assert_eq!(text_of(member(&events[5], "name")), "Deltas");
         assert_eq!(text_of(member(&events[5], "count")), "0");
+    }
+
+    use ac_proto::{Quaternion, Vector3};
+    use ac_runtime::world::{ObjectDelta, WorldSnapshot};
+
+    const PLAYER: u32 = 0x5000_000A;
+
+    /// The player at (`x`, 80, 42) in one cell, facing north or east.
+    fn player_at(x: f32, east: bool) -> ac_runtime::world::ObjectView {
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        let mut view = crate::tests::object_view(1);
+        view.guid = PLAYER;
+        view.position = Some(Position {
+            cell_id: 0xC6A9_001C,
+            origin: Vector3 {
+                x,
+                y: 80.0,
+                z: 42.0,
+            },
+            orientation: if east {
+                Quaternion {
+                    w: half,
+                    x: 0.0,
+                    y: 0.0,
+                    z: -half,
+                }
+            } else {
+                Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }
+            },
+        });
+        view
+    }
+
+    fn moved(view: ac_runtime::world::ObjectView) -> PresentationEvent {
+        PresentationEvent::Deltas(vec![ObjectDelta::Upsert(Box::new(view))])
+    }
+
+    fn positions(line: &str) -> Vec<Vec<Member>> {
+        events_of(line)
+            .into_iter()
+            .filter(|e| text_of(member(e, "kind")) == "position")
+            .collect()
+    }
+
+    fn number_of(members: &[Member], name: &str) -> f64 {
+        text_of(member(members, name)).parse().unwrap()
+    }
+
+    #[test]
+    fn the_snapshot_says_where_the_player_stands() {
+        let mut summary = Summarizer::new();
+        let snapshot = PresentationEvent::Snapshot(WorldSnapshot {
+            player_guid: Some(PLAYER),
+            objects: vec![crate::tests::object_view(2), player_at(77.5, true)],
+        });
+        let line = summary.summarize(&[snapshot]);
+        let told = positions(&line);
+        assert_eq!(told.len(), 1, "{line}");
+        assert_eq!(number_of(&told[0], "cell"), f64::from(0xC6A9_001C_u32));
+        assert_eq!(number_of(&told[0], "x"), 77.5);
+        assert_eq!(number_of(&told[0], "y"), 80.0);
+        assert_eq!(number_of(&told[0], "z"), 42.0);
+        // Compass degrees: north 0, east 90.
+        assert!(
+            (number_of(&told[0], "heading") - 90.0).abs() < 0.01,
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn the_player_moving_or_turning_is_told_and_a_shuffle_or_another_object_is_not() {
+        let mut summary = Summarizer::new();
+        let snapshot = PresentationEvent::Snapshot(WorldSnapshot {
+            player_guid: Some(PLAYER),
+            objects: vec![player_at(77.5, false)],
+        });
+        assert_eq!(positions(&summary.summarize(&[snapshot])).len(), 1);
+        // A few centimetres: not worth a line.
+        assert!(positions(&summary.summarize(&[moved(player_at(77.6, false))])).is_empty());
+        // Another object moving is not the player.
+        let mut other = player_at(90.0, false);
+        other.guid = 0x8000_0001;
+        assert!(positions(&summary.summarize(&[moved(other)])).is_empty());
+        // Far enough.
+        let told = positions(&summary.summarize(&[moved(player_at(78.2, false))]));
+        assert_eq!(told.len(), 1);
+        assert_eq!(number_of(&told[0], "x"), 78.2);
+        assert!(number_of(&told[0], "heading").abs() < 0.01);
+        // A turn on the spot.
+        let told = positions(&summary.summarize(&[moved(player_at(78.2, true))]));
+        assert_eq!(told.len(), 1);
+        // Two moves in one batch: the last place, once.
+        let both = PresentationEvent::Deltas(vec![
+            ObjectDelta::Upsert(Box::new(player_at(80.0, true))),
+            ObjectDelta::Upsert(Box::new(player_at(82.0, true))),
+        ]);
+        let told = positions(&summary.summarize(&[both]));
+        assert_eq!(told.len(), 1);
+        assert_eq!(number_of(&told[0], "x"), 82.0);
     }
 
     #[test]

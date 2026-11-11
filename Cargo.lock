@@ -241,6 +241,7 @@ version = "0.2.6"
 dependencies = [
  "ac-core",
  "ac-host-core",
+ "ac-motion",
  "ac-nav",
  "ac-physics",
  "ac-plugin-abi",

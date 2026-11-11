@@ -146,7 +146,7 @@ fn motion(serial: u32) -> MotionView {
     }
 }
 
-fn object_view(n: u32) -> ObjectView {
+pub(crate) fn object_view(n: u32) -> ObjectView {
     ObjectView {
         key: ObjectKey {
             local_id: n,

@@ -9,7 +9,7 @@
 use std::io::{self, BufWriter, Read, Write};
 use std::time::Instant;
 
-use ac_remote_wire::devtool::{command_from_json, command_reply, error_reply, summarize};
+use ac_remote_wire::devtool::{Summarizer, command_from_json, command_reply, error_reply};
 use ac_remote_wire::{DecodeContext, EncodeContext, decode_batch, encode_command};
 
 /// One stream frame from the relay.
@@ -19,10 +19,16 @@ const COMMAND: u8 = 2;
 /// The largest record taken: above the largest frame a relay delivers.
 const MAX_RECORD: usize = 8 * 1024 * 1024;
 
-fn answer(kind: u8, payload: &[u8], encode: &EncodeContext, decode: &DecodeContext) -> String {
+fn answer(
+    kind: u8,
+    payload: &[u8],
+    encode: &EncodeContext,
+    decode: &DecodeContext,
+    summary: &mut Summarizer,
+) -> String {
     match kind {
         FRAME => match decode_batch(payload, decode) {
-            Ok(events) => summarize(&events),
+            Ok(events) => summary.summarize(&events),
             Err(error) => error_reply(None, &error.to_string()),
         },
         COMMAND => {
@@ -46,6 +52,7 @@ fn main() -> io::Result<()> {
     let encode = EncodeContext::new(epoch);
     // No spell table and no skill formulas: the summary reads neither.
     let decode = DecodeContext::new(epoch, None, None);
+    let mut summary = Summarizer::new();
     let mut input = io::stdin().lock();
     let mut output = BufWriter::new(io::stdout().lock());
     loop {
@@ -65,7 +72,7 @@ fn main() -> io::Result<()> {
         }
         let mut payload = vec![0u8; length];
         input.read_exact(&mut payload)?;
-        let line = answer(header[0], &payload, &encode, &decode);
+        let line = answer(header[0], &payload, &encode, &decode, &mut summary);
         writeln!(output, "{line}")?;
         output.flush()?;
     }
