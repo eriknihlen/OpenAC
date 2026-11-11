@@ -6,7 +6,9 @@
 //! builds them without the session runner.
 
 use std::sync::mpsc::Sender;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use ac_clock::Instant;
 
 use super::CharacterSelector;
 use super::creation::CreationCommand;

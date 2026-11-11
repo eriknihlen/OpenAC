@@ -34,7 +34,7 @@
 //! Integers and floats are little-endian (floats bit-exact, NaN payloads
 //! included), maps and sets go out in key order, an `Arc` or `Box` by value
 //! (decoded into a fresh one), a [`std::time::Duration`] exactly, and a
-//! [`std::time::Instant`] as signed microseconds from the stream's epoch:
+//! [`Instant`] (`ac_clock`'s: the standard one natively) as signed microseconds from the stream's epoch:
 //! the encoder's [`EncodeContext`] names the sender's epoch, the decoder's
 //! [`DecodeContext`] the receiver's instant for the same moment (taken when
 //! the stream starts).
@@ -81,7 +81,7 @@ pub use codec::{
 };
 pub use subscription::{Objects, Subscription};
 
-use std::time::Instant;
+use ac_clock::Instant;
 
 use ac_proto::effects::{PlayScript, PlayScriptType, SoundEvent};
 use ac_runtime::communication::{ChatLine, WindowRequest};

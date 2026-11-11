@@ -19,7 +19,6 @@
 //! [`VERTEX_BUDGET`]. When the shapes in range and in view would, the nearest
 //! are drawn and the farthest are left out.
 
-use ac_plugin_ui::GroundShape;
 use glam::{Vec2, Vec3};
 
 use crate::frustum::FrustumPlanes;
@@ -63,80 +62,7 @@ pub const LAND_CELL_METRES: f32 = 24.0;
 /// A line this near a piece's corner does not split it, metres.
 const SPLIT_TOLERANCE_METRES: f32 = 0.001;
 
-/// How far above the land its anchor may be for a shape to follow it, metres
-/// (at or below the land counts).
-pub const ON_THE_LAND_METRES: f32 = 1.0;
-
-/// Where a shape's anchor is this frame.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ShapeAnchor {
-    /// Its base, drawing frame.
-    pub centre: Vec3,
-    /// The way it faces, as a compass bearing in degrees.
-    pub heading_degrees: f32,
-    /// On the landscape, not inside a building or dungeon.
-    pub is_outdoor: bool,
-}
-
-/// A plugin's ground shape placed in the drawing frame.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PlacedShape {
-    /// Its centre, drawing frame.
-    pub centre: Vec3,
-    /// The bearing its arc starts at, the object's heading already added.
-    pub start_degrees: f32,
-    /// Each point lies on the land under it, rather than flat at the
-    /// centre's height.
-    pub follow_terrain: bool,
-    /// The land's height at the centre when it follows the land, else the
-    /// centre's height.
-    pub ground_z: f32,
-    /// The outer radius, metres.
-    pub radius: f32,
-    /// How wide a band is, metres, inward from the radius.
-    pub width: f32,
-    /// How far round it goes, clockwise from its start, degrees.
-    pub sweep_degrees: f32,
-    /// Filled from the centre, rather than a band.
-    pub filled: bool,
-    /// Red, green, blue, alpha, 0..1.
-    pub color: [f32; 4],
-}
-
-/// Where `shape` lies around `at`, or `None` when the anchor is not a finite
-/// position. `ground` is the land's height at a drawing-frame (x, y), where
-/// it is known.
-#[must_use]
-pub fn place(
-    shape: &GroundShape,
-    at: ShapeAnchor,
-    ground: impl Fn(f32, f32) -> Option<f32>,
-) -> Option<PlacedShape> {
-    if !at.centre.is_finite() {
-        return None;
-    }
-    let land = ground(at.centre.x, at.centre.y)
-        .filter(|z| at.is_outdoor && at.centre.z - z <= ON_THE_LAND_METRES);
-    let start_degrees = if shape.faces_object {
-        shape.start_degrees + at.heading_degrees
-    } else {
-        shape.start_degrees
-    };
-    Some(PlacedShape {
-        centre: at.centre,
-        start_degrees,
-        follow_terrain: land.is_some(),
-        ground_z: land.unwrap_or(at.centre.z),
-        radius: shape.radius,
-        width: shape.width,
-        sweep_degrees: shape.sweep_degrees,
-        filled: shape.filled,
-        color: shape
-            .color_rgba
-            .to_be_bytes()
-            .map(|channel| f32::from(channel) / 255.0),
-    })
-}
+pub use ac_ui_window::world::{ON_THE_LAND_METRES, PlacedShape, ShapeAnchor, place_shape as place};
 
 /// How many pieces an edge of `radius` metres is cut into over
 /// `sweep_degrees`: about every half metre, between [`MINIMUM_SEGMENTS`] and

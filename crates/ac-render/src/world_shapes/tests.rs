@@ -1,4 +1,4 @@
-use ac_plugin_ui::{GroundShapeKind, MarkerAnchor};
+use ac_plugin_ui::{GroundShape, GroundShapeKind, MarkerAnchor};
 
 use super::*;
 

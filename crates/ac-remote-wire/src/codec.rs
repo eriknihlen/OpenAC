@@ -11,8 +11,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use ac_clock::Instant;
 use ac_core::player::SkillFormulaBonusResolver;
 use ac_core::spells::SpellTable;
 

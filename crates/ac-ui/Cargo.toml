@@ -9,6 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The clock: std's natively, the page's in a browser.
+ac-clock.workspace = true
 ac-core.workspace = true
 ac-dat.workspace = true
 ac-host.workspace = true

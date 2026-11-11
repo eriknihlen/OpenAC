@@ -8,8 +8,8 @@
 //! from them. Nothing here touches the network.
 
 use std::sync::Arc;
-use std::time::Instant;
 
+use ac_clock::Instant;
 use ac_core::chargen::ChargenOptions;
 
 use super::creation::{CharacterCreation, CreationSnapshot};

@@ -1,0 +1,30 @@
+[package]
+name = "ac-ui-window"
+description = "The game window's UI without a GPU or a window: the session's presentation stream as a scene, the retail panels mounted and fed from it, input routed UI first, and the frame's triangles and the textures they need. Builds natively and for the browser (wasm32-unknown-unknown)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The clock: std's natively, the page's in a browser.
+ac-clock.workspace = true
+ac-core.workspace = true
+ac-dat.workspace = true
+# The player's settings (data only; files are handed in through the stores).
+ac-host.workspace = true
+# Ground shapes' facing.
+ac-physics.workspace = true
+ac-plugin-ui.workspace = true
+ac-proto.workspace = true
+# The view and command types, without the session runner.
+ac-runtime.workspace = true
+ac-ui.workspace = true
+glam.workspace = true
+# The UI's vertices are plain data, uploaded as they are.
+bytemuck.workspace = true
+
+[lints]
+workspace = true

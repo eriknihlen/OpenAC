@@ -10,124 +10,21 @@
 //! not hold draws as the 1 x 1 magenta placeholder (named once); a runtime
 //! texture nobody assigned draws nothing.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use ac_dat::texture::DecodedTexture;
 use ac_ui::draw::{Filter, TextureRef};
+use ac_ui_window::ui::textures::TextureLedger;
+pub use ac_ui_window::ui::textures::{UiPixels, UiTextureSource};
 
 use super::batch::{UiBatch, UiTexture, UiTextureKey};
 
-/// Where the UI's texture pixels come from.
-pub trait UiTextureSource {
-    /// The pixels of `texture`, `None` when there are none.
-    fn decode(&mut self, texture: TextureRef) -> Option<UiPixels>;
-
-    /// Textures their owner let go of since the last call, to drop from
-    /// the GPU.
-    fn released(&mut self) -> Vec<TextureRef> {
-        Vec::new()
-    }
-}
-
-/// A UI texture's pixels as they are uploaded.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UiPixels {
-    /// 8-bit RGBA.
-    Rgba(DecodedTexture),
-    /// One byte a texel, drawn as white with that alpha (a font's glyphs):
-    /// exactly what the four-channel image (255, 255, 255, value) draws, at
-    /// a quarter of the memory.
-    Coverage {
-        /// Width in texels.
-        width: u32,
-        /// Height in texels.
-        height: u32,
-        /// The alpha of each texel, rows top to bottom.
-        alpha: Vec<u8>,
-    },
-    /// A plugin's own 8-bit RGBA image, with its smaller levels (mipmaps)
-    /// when it has them, the image first: sampled linearly between
-    /// levels too (trilinear), so a large image drawn small shrinks
-    /// smoothly, and clamped at its edges, so a part cut from the edge of a
-    /// sheet does not pick up the opposite edge.
-    Plugin(Vec<DecodedTexture>),
-}
-
-/// One level of a texture: its width, height and bytes.
-type Level<'a> = (u32, u32, &'a [u8]);
-
-impl UiPixels {
-    /// Width and height in texels.
-    #[must_use]
-    pub fn size(&self) -> (u32, u32) {
-        match self {
-            Self::Rgba(t) => (t.width, t.height),
-            Self::Coverage { width, height, .. } => (*width, *height),
-            Self::Plugin(levels) => levels.first().map_or((0, 0), |t| (t.width, t.height)),
-        }
-    }
-
-    /// Each level's size and bytes, the image first; bytes a texel and the
-    /// texture format they upload as.
-    fn levels(&self) -> (Vec<Level<'_>>, u32, wgpu::TextureFormat) {
-        match self {
-            Self::Rgba(t) => (
-                vec![(t.width, t.height, t.rgba.as_slice())],
-                4,
-                wgpu::TextureFormat::Rgba8Unorm,
-            ),
-            Self::Coverage {
-                width,
-                height,
-                alpha,
-            } => (
-                vec![(*width, *height, alpha.as_slice())],
-                1,
-                wgpu::TextureFormat::R8Unorm,
-            ),
-            Self::Plugin(levels) => (
-                levels
-                    .iter()
-                    .map(|t| (t.width, t.height, t.rgba.as_slice()))
-                    .collect(),
-                4,
-                wgpu::TextureFormat::Rgba8Unorm,
-            ),
-        }
-    }
-
-    /// Every level's bytes fill its size, and each level is half the one
-    /// above (rounded down, at least 1), the way the GPU sizes them.
-    #[must_use]
-    pub fn is_whole(&self) -> bool {
-        let (levels, per_texel, _) = self.levels();
-        let Some(&(w, h, _)) = levels.first() else {
-            return false;
-        };
-        let max_levels = 32 - w.max(h).leading_zeros();
-        w > 0
-            && h > 0
-            && levels.len() as u32 <= max_levels
-            && levels.iter().enumerate().all(|(i, (lw, lh, bytes))| {
-                *lw == (w >> i).max(1)
-                    && *lh == (h >> i).max(1)
-                    && bytes.len() as u64 == u64::from(per_texel) * u64::from(*lw) * u64::from(*lh)
-            })
-    }
-
-    /// The GPU memory it takes once uploaded, bytes: every level counted.
-    #[must_use]
-    pub fn gpu_bytes(&self) -> u64 {
-        let (levels, per_texel, _) = self.levels();
-        levels
-            .iter()
-            .map(|(w, h, _)| u64::from(per_texel) * u64::from(*w) * u64::from(*h))
-            .sum()
-    }
-
-    /// Sampled clamped and between levels (a plugin's own image).
-    fn clamped(&self) -> bool {
-        matches!(self, Self::Plugin(_))
+/// The texture format `pixels` upload as: one byte a texel for coverage,
+/// else 8-bit RGBA.
+fn format_of(pixels: &UiPixels) -> wgpu::TextureFormat {
+    match pixels {
+        UiPixels::Coverage { .. } => wgpu::TextureFormat::R8Unorm,
+        UiPixels::Rgba(_) | UiPixels::Plugin(_) => wgpu::TextureFormat::Rgba8Unorm,
     }
 }
 
@@ -178,8 +75,8 @@ pub struct UiRenderer {
     /// Textures drawn from a view the renderer draws into, by the view's
     /// generation.
     views: HashMap<TextureRef, u64>,
-    missing: HashSet<u32>,
-    new_missing: Vec<u32>,
+    /// Which textures are on the GPU, and so which a frame owes it.
+    ledger: TextureLedger,
     prepared: Vec<PreparedRun>,
 }
 
@@ -187,19 +84,10 @@ impl std::fmt::Debug for UiRenderer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UiRenderer")
             .field("textures", &self.textures.len())
-            .field("missing", &self.missing.len())
+            .field("held", &self.ledger.held_count())
             .field("runs", &self.prepared.len())
             .finish_non_exhaustive()
     }
-}
-
-/// The magenta placeholder of a surface that cannot be read.
-fn magenta() -> UiPixels {
-    UiPixels::Rgba(DecodedTexture {
-        width: 1,
-        height: 1,
-        rgba: vec![0xFF, 0x00, 0xFF, 0xFF],
-    })
 }
 
 fn sampler(
@@ -387,8 +275,7 @@ impl UiRenderer {
             white,
             textures: HashMap::new(),
             views: HashMap::new(),
-            missing: HashSet::new(),
-            new_missing: Vec::new(),
+            ledger: TextureLedger::new(),
             prepared: Vec::new(),
         }
     }
@@ -403,8 +290,9 @@ impl UiRenderer {
         size: (u32, u32),
         source: &mut dyn UiTextureSource,
     ) {
-        for texture in source.released() {
-            self.release(texture);
+        let plan = self.ledger.plan(batch, size, source);
+        for texture in plan.releases {
+            self.drop_texture(texture);
         }
         self.prepared.clear();
         if batch.is_empty() || size.0 == 0 || size.1 == 0 {
@@ -423,19 +311,15 @@ impl UiRenderer {
             );
         }
         queue.write_buffer(&self.vertices, 0, bytes);
-        for run in &batch.runs {
-            let ready = match run.key.texture {
-                UiTexture::White => true,
-                UiTexture::Named(texture) => self.ensure(device, queue, texture, source),
-            };
-            if ready {
-                self.prepared.push(PreparedRun {
-                    key: run.key,
-                    first: run.first,
-                    count: run.count,
-                });
-            }
+        for (texture, pixels) in plan.uploads {
+            self.upload_texture(device, queue, texture, &pixels);
         }
+        self.prepared
+            .extend(plan.runs.iter().map(|run| PreparedRun {
+                key: run.key,
+                first: run.first,
+                count: run.count,
+            }));
     }
 
     /// Draw `texture` from `view`, a texture the renderer draws into (a 3-D
@@ -464,11 +348,18 @@ impl UiRenderer {
         );
         self.textures.insert(texture, gpu);
         self.views.insert(texture, generation);
+        self.ledger.hold(texture);
     }
 
     /// Gives back a texture its owner let go of (a plugin's image): the GPU
     /// copy goes, and its memory with it. False for one not uploaded.
     pub fn release(&mut self, texture: TextureRef) -> bool {
+        self.ledger.release(texture);
+        self.drop_texture(texture)
+    }
+
+    /// Drop the GPU copy of `texture`; false for one not uploaded.
+    fn drop_texture(&mut self, texture: TextureRef) -> bool {
         self.views.remove(&texture);
         match self.textures.remove(&texture) {
             Some(gpu) => {
@@ -489,7 +380,7 @@ impl UiRenderer {
     /// Render surfaces the dats could not give since the last call (each
     /// named once per window).
     pub fn take_missing(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.new_missing)
+        self.ledger.take_missing()
     }
 
     /// How many textures are on the GPU.
@@ -541,28 +432,14 @@ impl UiRenderer {
         }
     }
 
-    /// Make sure `texture` is on the GPU; false when it draws nothing.
-    fn ensure(
+    /// Put `texture`'s `pixels` on the GPU, as the ledger owes it.
+    fn upload_texture(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         texture: TextureRef,
-        source: &mut dyn UiTextureSource,
-    ) -> bool {
-        if self.textures.contains_key(&texture) {
-            return true;
-        }
-        let pixels = match (source.decode(texture), texture) {
-            (Some(pixels), _) => pixels,
-            (None, TextureRef::Surface(id)) => {
-                if self.missing.insert(id) {
-                    self.new_missing.push(id);
-                }
-                magenta()
-            }
-            // A runtime texture nobody has assigned yet: nothing to draw.
-            (None, TextureRef::Runtime(_)) => return false,
-        };
+        pixels: &UiPixels,
+    ) {
         let label = match texture {
             TextureRef::Surface(id) => format!("ui surface {id:#010x}"),
             TextureRef::Runtime(h) => format!("ui runtime {h}"),
@@ -573,11 +450,10 @@ impl UiRenderer {
             &self.texture_layout,
             &self.samplers,
             &label,
-            &pixels,
+            pixels,
         );
         self.texture_bytes += gpu.bytes;
         self.textures.insert(texture, gpu);
-        true
     }
 }
 
@@ -597,11 +473,12 @@ fn upload(
     let pixels = if pixels.is_whole() {
         pixels
     } else {
-        fallback = magenta();
+        fallback = UiPixels::magenta();
         &fallback
     };
     let (width, height) = pixels.size();
-    let (levels, per_texel, format) = pixels.levels();
+    let (levels, per_texel) = pixels.levels();
+    let format = format_of(pixels);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {

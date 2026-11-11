@@ -15,6 +15,8 @@ repository = "https://github.com/eriknihlen/OpenAC"
 [workspace.dependencies]
 # Internal crates.
 ac-bits = { path = "crates/ac-bits" }
+# The clock: std's natively, the page's in a browser.
+ac-clock = { path = "crates/ac-clock" }
 ac-proto = { path = "crates/ac-proto" }
 # Without its `host` feature: the view and command types a window draws from. A crate
 # that runs sessions asks for `features = ["host"]`.
@@ -32,6 +34,7 @@ ac-physics = { path = "crates/ac-physics" }
 ac-motion = { path = "crates/ac-motion" }
 ac-audio = { path = "crates/ac-audio" }
 ac-ui = { path = "crates/ac-ui" }
+ac-ui-window = { path = "crates/ac-ui-window" }
 ac-vfx = { path = "crates/ac-vfx" }
 ac-nav = { path = "crates/ac-nav" }
 ac-plugin-version = { path = "crates/ac-plugin-version" }

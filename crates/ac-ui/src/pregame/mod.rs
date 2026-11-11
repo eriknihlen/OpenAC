@@ -16,8 +16,8 @@ pub mod rich_text;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
+use ac_clock::Instant;
 use ac_core::chargen::ChargenOptions;
 use ac_dat::DatCollection;
 use ac_runtime::session::creation::CreationSnapshot;

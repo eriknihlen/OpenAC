@@ -3,8 +3,7 @@
 //! slot 0x1000018C at (240, 160), main panel 16, F10), fed the in-game
 //! date, the player's cell and the house every frame it shows.
 
-use std::time::Instant;
-
+use ac_clock::Instant;
 use ac_core::world::CalendarDate;
 use ac_ui::font::DEFAULT_FONT_ID;
 use ac_ui::geometry::AnchorEdges;

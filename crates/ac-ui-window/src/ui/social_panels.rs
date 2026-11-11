@@ -5,8 +5,6 @@
 //! copy of the session's facts every frame, and the social panel's keys
 //! (`OpenSocialPanel`).
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use ac_ui::element_info::ElementInfo;
 use ac_ui::font::DEFAULT_FONT_ID;
 use ac_ui::geometry::{AnchorEdges, ResizeEdges};
@@ -467,9 +465,7 @@ impl WindowUi {
         if let Some(tracker) = &facts.contracts
             && (dirty.contracts || shown(host, JOURNAL_WINDOW))
         {
-            let now_unix_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+            let now_unix_ms = ac_clock::unix_millis();
             let contracts = ContractsView {
                 contracts: &tracker.contracts,
                 display_contract_id: tracker.display_contract_id,

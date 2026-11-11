@@ -4,8 +4,6 @@
 //! when the journal is hidden (OpenAC `JournalPanelController`'s
 //! `OnHidden` on leaving the notes tab and on disposal).
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use ac_ui::font::DEFAULT_FONT_ID;
 use ac_ui::import::LayoutSource;
 use ac_ui::panels::DatRowTemplates;
@@ -31,9 +29,7 @@ impl WindowUi {
             .object_by_guid(player)
             .and_then(|o| o.position.as_ref())
             .map_or(0, |p| p.cell_id);
-        let now_unix_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        let now_unix_ms = ac_clock::unix_millis();
         let Self { host, content, .. } = self;
         let mut rows = DatRowTemplates::new(&*content, content.font(DEFAULT_FONT_ID));
         host.with_controller::<JournalPanelController, _>(JOURNAL_WINDOW, |c, ui| {

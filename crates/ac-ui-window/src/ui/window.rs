@@ -13,8 +13,8 @@
 //! the session.
 
 use std::sync::Arc;
-use std::time::Instant;
 
+use ac_clock::Instant;
 use ac_core::spells::SpellMetadata;
 use ac_dat::DatCollection;
 use ac_dat::objects::{Palette, PixelFormat, RenderSurface, SkillTable, SpellComponentTable};
@@ -57,15 +57,15 @@ use ac_ui::windows::WindowEvent;
 use ac_ui::{DatContent, UiHost};
 use glam::{Quat, Vec3};
 
-use super::clipboard::SystemClipboard;
+use super::clipboard::{Clipboard, NoClipboard};
 use super::facts::{Dirty, InterfaceFacts};
-use super::gpu::{UiPixels, UiTextureSource};
 use super::icons::RuntimeImages;
 use super::input::{self as ui_input, Routed, WorldInput};
 pub use super::mount::{Chrome, MountOptions, mount_window};
 pub use super::social_panels::{
     HOUSE_PURCHASE_WINDOW, JOURNAL_WINDOW, SOCIAL_WINDOW, SocialPage, TRADE_WINDOW, VENDOR_WINDOW,
 };
+use super::textures::{UiPixels, UiTextureSource};
 use crate::scene::Scene;
 
 /// The main chat window's name.
@@ -149,7 +149,7 @@ pub fn radar_scene(
             guid: p.guid,
             position: world_meters(&position),
             rotation,
-            yaw_radians: crate::camera::yaw_of(rotation),
+            yaw_radians: crate::world::yaw_of(rotation),
             cell_id: position.cell_id,
             item_type: p.radar.item_type,
             pwd_bitfield: p.radar.public_weenie_bitfield,
@@ -490,6 +490,16 @@ fn coverage_pixels(surface: &RenderSurface) -> Option<UiPixels> {
     })
 }
 
+/// Where the operating system's key names come from: each call makes a
+/// namer for a key's scan code and extended flag, `None` where the system
+/// names none.
+pub type OsKeyNames = fn() -> Option<Box<ac_ui::input::key_names::OsKeyName>>;
+
+/// No key names from the operating system.
+fn no_os_key_names() -> Option<Box<ac_ui::input::key_names::OsKeyName>> {
+    None
+}
+
 /// The UI of one window. See the module documentation.
 pub struct WindowUi {
     pub(super) host: UiHost,
@@ -498,7 +508,11 @@ pub struct WindowUi {
     last_tick: Option<Instant>,
     context: ChatContext,
     pub(super) player_view: Option<PlayerView>,
-    pub(super) clipboard: SystemClipboard,
+    /// The clipboard behind the text fields (none until the host hands
+    /// one in).
+    pub(super) clipboard: Box<dyn Clipboard>,
+    /// The operating system's names of keys the dats do not name.
+    pub(super) os_key_names: OsKeyNames,
     pub(super) notices: Vec<String>,
     /// Plugins asked the window to minimize (`true`) or restore.
     pub(super) minimize_requests: Vec<bool>,
@@ -616,7 +630,8 @@ impl WindowUi {
             last_tick: None,
             context: ChatContext::default(),
             player_view: None,
-            clipboard: SystemClipboard::new(),
+            clipboard: Box::new(NoClipboard),
+            os_key_names: no_os_key_names,
             minimize_requests: Vec::new(),
             notices: Vec::new(),
             mounted: Vec::new(),
@@ -693,6 +708,20 @@ impl WindowUi {
     #[must_use]
     pub fn settings(&self) -> &PlayerSettings {
         &self.settings
+    }
+
+    /// The clipboard behind the text fields, from now on (the window has
+    /// none until one is handed in).
+    pub fn set_clipboard(&mut self, clipboard: Box<dyn Clipboard>) {
+        self.clipboard = clipboard;
+    }
+
+    /// Where the operating system's names of keys the dats do not name come
+    /// from (none until handed in). Hand it in before the key bindings
+    /// ([`WindowUi::attach_key_bindings`]): the keyboard screen names its
+    /// keys when it is built.
+    pub fn set_os_key_names(&mut self, names: OsKeyNames) {
+        self.os_key_names = names;
     }
 
     /// The sections changed since the last call, each with whether to save

@@ -12,12 +12,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use ac_clock::Instant;
 use ac_dat::DatCollection;
 use ac_dat::objects::{BspNode, GfxObj, Setup};
-use ac_host::settings::{MarkupControlKey, SettingsStore};
-use ac_plugin_ui::control_state::{ControlKey, ControlStateFile, ControlStateStore};
+use ac_plugin_ui::control_state::{ControlStateFile, ControlStateStore};
 use ac_plugin_ui::{
     ClientWindow, ClientWindowAction, ImageSource, MapPoint, MarkerAnchor, PanelView, ThemeKind,
     UiInput, WorldIconEntry,
@@ -50,13 +50,12 @@ use super::options::OPTIONS_WINDOW;
 use super::overlays::Placement;
 use super::social_panels::{JOURNAL_WINDOW, SOCIAL_WINDOW};
 use super::window::{CHARACTER_WINDOW, INVENTORY_WINDOW, RADAR_WINDOW, SPELLBOOK_WINDOW, WindowUi};
-use crate::meshing::flatten_setup;
-use crate::renderer::WorldRenderer;
-use crate::renderer::icon_probes::{IconProbe, IconProbeKey};
 use crate::scene::Scene;
-use crate::world_lines::PlacedLine;
-use crate::world_shapes::{self, PlacedShape, ShapeAnchor};
-use crate::world_triangles::PlacedTriangle;
+use crate::setup_pose::flatten_setup;
+use crate::world::{
+    IconProbe, IconProbeKey, PlacedLine, PlacedShape, PlacedTriangle, ShapeAnchor, WorldFrame,
+    place_shape,
+};
 
 /// How long a set of projectile markers shows after it arrives.
 pub const PROJECTILE_SAMPLES_SHOWN: Duration = Duration::from_millis(350);
@@ -204,40 +203,11 @@ pub struct PluginWindowUi {
     dialogs: ac_ui::plugin::dialog::DialogPresenter,
 }
 
-/// The settings file as the control-state store's file.
-struct ControlStateSettings(SettingsStore);
-
-impl ControlStateFile for ControlStateSettings {
-    fn load(&self, character: &str) -> Result<BTreeMap<ControlKey, String>, String> {
-        Ok(self
-            .0
-            .try_load_markup_control_state(character)?
-            .into_iter()
-            .map(|(k, v)| (ControlKey::new(&k.window, &k.control, &k.kind), v))
-            .collect())
-    }
-
-    fn save(&self, character: &str, values: &BTreeMap<ControlKey, String>) -> Result<(), String> {
-        let values = values
-            .iter()
-            .map(|(k, v)| {
-                (
-                    MarkupControlKey::new(&k.window, &k.control, &k.kind),
-                    v.clone(),
-                )
-            })
-            .collect();
-        self.0
-            .save_markup_control_state(character, &values)
-            .map_err(|e| e.to_string())
-    }
-}
-
 impl PluginWindowUi {
     /// Where `guid`'s markers hang this frame, kept once per frame.
     fn keep_anchor(
         &mut self,
-        world: &WorldRenderer,
+        world: &dyn WorldFrame,
         scene: &Scene,
         dats: &DatCollection,
         guid: u32,
@@ -266,12 +236,11 @@ impl PluginWindowUi {
         Rc::clone(store)
     }
 
-    /// Where the remembered control values are kept.
-    pub fn set_control_state_file(&mut self, store: Option<SettingsStore>) {
+    /// Where the remembered control values are kept (none: they last the
+    /// session).
+    pub fn set_control_state_file(&mut self, file: Option<Box<dyn ControlStateFile>>) {
         let shared = self.control_state();
-        shared.borrow_mut().set_file(
-            store.map(|s| Box::new(ControlStateSettings(s)) as Box<dyn ControlStateFile>),
-        );
+        shared.borrow_mut().set_file(file);
     }
 
     /// The character the controls remember for (`default` before one is
@@ -1484,25 +1453,25 @@ impl WindowUi {
 
     /// The plugins' world lines placed in the drawing frame this frame (the
     /// world renderer draws them in the scene).
-    pub(crate) fn plugin_world_lines(&self) -> &[PlacedLine] {
+    pub fn plugin_world_lines(&self) -> &[PlacedLine] {
         &self.plugins.world_lines
     }
 
     /// The plugins' world triangles placed in the drawing frame this frame
     /// (the world renderer draws them in the scene).
-    pub(crate) fn plugin_world_triangles(&self) -> &[PlacedTriangle] {
+    pub fn plugin_world_triangles(&self) -> &[PlacedTriangle] {
         &self.plugins.world_triangles
     }
 
     /// The anchors of the plugins' icons that hide behind the world, to test
     /// in the world pass this frame.
-    pub(crate) fn plugin_icon_probes(&self) -> &[IconProbe] {
+    pub fn plugin_icon_probes(&self) -> &[IconProbe] {
         &self.plugins.icon_probes
     }
 
     /// The plugins' ground shapes placed in the drawing frame this frame
     /// (the world renderer draws them in the scene).
-    pub(crate) fn plugin_world_shapes(&self) -> &[PlacedShape] {
+    pub fn plugin_world_shapes(&self) -> &[PlacedShape] {
         &self.plugins.world_shapes
     }
 
@@ -1510,11 +1479,7 @@ impl WindowUi {
     /// projectile markers placed in the drawing frame from the world as last
     /// drawn (none without a world, and no labels or icons in the portal
     /// view).
-    pub(crate) fn set_plugin_world(
-        &mut self,
-        world: Option<&WorldRenderer>,
-        scene: Option<&Scene>,
-    ) {
+    pub fn set_plugin_world(&mut self, world: Option<&dyn WorldFrame>, scene: Option<&Scene>) {
         let dats = self.content.dats().clone();
         let view = &self.facts.plugin_ui;
         let plugins = &mut self.plugins;
@@ -1607,7 +1572,7 @@ impl WindowUi {
         }
         for shape in view.shapes.iter() {
             if let Some(placed) = shape_anchor(world, scene, shape.anchor)
-                .and_then(|at| world_shapes::place(shape, at, |x, y| world.sample_terrain_z(x, y)))
+                .and_then(|at| place_shape(shape, at, |x, y| world.sample_terrain_z(x, y)))
             {
                 plugins.world_shapes.push(placed);
             }
@@ -1691,7 +1656,7 @@ impl WindowUi {
         });
         let names = ac_ui::input::key_names::RetailKeyNames::new(
             Box::new(move |table, hash| strings.resolve(table, hash, 0)),
-            crate::platform::key_name_provider(),
+            (self.os_key_names)(),
         );
         format!(
             "Plugin dock hidden. Press {} to show it again.",
@@ -1786,7 +1751,7 @@ fn rgba_color(rgba: u32) -> Color {
 
 /// A map point in the drawing frame: its landblock placed by the world's
 /// floating origin.
-fn map_point_in_frame(world: &WorldRenderer, point: MapPoint) -> Option<Vec3> {
+fn map_point_in_frame(world: &dyn WorldFrame, point: MapPoint) -> Option<Vec3> {
     let (x, y, lx, ly, z) = point.to_landblock()?;
     let cell = (u32::from(x) << 24) | (u32::from(y) << 16) | 1;
     world.frame_position(cell, Vec3::new(lx, ly, z))
@@ -1796,7 +1761,11 @@ fn map_point_in_frame(world: &WorldRenderer, point: MapPoint) -> Option<Vec3> {
 /// way it faces, a held object's from the pose its holder's hand gives it,
 /// or a fixed position. An object with no cell yet counts as outdoors, so
 /// the height rule alone decides.
-fn shape_anchor(world: &WorldRenderer, scene: &Scene, anchor: MarkerAnchor) -> Option<ShapeAnchor> {
+fn shape_anchor(
+    world: &dyn WorldFrame,
+    scene: &Scene,
+    anchor: MarkerAnchor,
+) -> Option<ShapeAnchor> {
     match anchor {
         MarkerAnchor::None => None,
         MarkerAnchor::Object(guid) => {
@@ -1829,7 +1798,7 @@ fn shape_anchor(world: &WorldRenderer, scene: &Scene, anchor: MarkerAnchor) -> O
 /// 1.1 m. An object carried by another hangs from the root pose its
 /// holder's hand gives it, as last published.
 fn label_anchor(
-    world: &WorldRenderer,
+    world: &dyn WorldFrame,
     scene: &Scene,
     dats: &DatCollection,
     shapes: &mut HashMap<u32, Option<SetupShape>>,

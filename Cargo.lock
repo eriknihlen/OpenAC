@@ -38,6 +38,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac-clock"
+version = "0.2.6"
+
+[[package]]
 name = "ac-core"
 version = "0.2.6"
 dependencies = [
@@ -239,6 +243,7 @@ dependencies = [
 name = "ac-remote-wire"
 version = "0.2.6"
 dependencies = [
+ "ac-clock",
  "ac-core",
  "ac-host-core",
  "ac-motion",
@@ -269,6 +274,7 @@ dependencies = [
  "ac-proto",
  "ac-runtime",
  "ac-ui",
+ "ac-ui-window",
  "ac-vfx",
  "arboard",
  "bytemuck",
@@ -288,6 +294,7 @@ name = "ac-runtime"
 version = "0.2.6"
 dependencies = [
  "ac-bits",
+ "ac-clock",
  "ac-core",
  "ac-dat",
  "ac-host",
@@ -309,6 +316,7 @@ dependencies = [
 name = "ac-ui"
 version = "0.2.6"
 dependencies = [
+ "ac-clock",
  "ac-core",
  "ac-dat",
  "ac-host",
@@ -324,6 +332,23 @@ dependencies = [
 [[package]]
 name = "ac-ui-web"
 version = "0.2.6"
+
+[[package]]
+name = "ac-ui-window"
+version = "0.2.6"
+dependencies = [
+ "ac-clock",
+ "ac-core",
+ "ac-dat",
+ "ac-host",
+ "ac-physics",
+ "ac-plugin-ui",
+ "ac-proto",
+ "ac-runtime",
+ "ac-ui",
+ "bytemuck",
+ "glam",
+]
 
 [[package]]
 name = "ac-vfx"

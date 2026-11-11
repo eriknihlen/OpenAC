@@ -47,27 +47,7 @@ const WAITING: u8 = 1;
 const READY: u8 = 2;
 const FAILED: u8 = 3;
 
-/// Which anchor a probe answers for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum IconProbeKey {
-    /// An object, whichever of its icons asked.
-    Object(u32),
-    /// A fixed position, by the bits of its map coordinates (east-west,
-    /// north-south, elevation): every icon there shares the answer, and an
-    /// icon put somewhere else, even in the place of one taken away, starts
-    /// with none.
-    Position([u64; 3]),
-}
-
-/// An anchor to test this frame.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct IconProbe {
-    /// What the answer is kept under.
-    pub(crate) key: IconProbeKey,
-    /// The anchor, drawing frame.
-    pub(crate) anchor: Vec3,
-}
-
+pub(crate) use ac_ui_window::world::{IconProbe, IconProbeKey};
 /// Where the probe of `anchor` sits, seen from `eye`.
 #[must_use]
 pub(crate) fn probe_point(anchor: Vec3, eye: Vec3) -> Vec3 {

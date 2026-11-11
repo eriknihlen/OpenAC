@@ -8,7 +8,9 @@
 //! attempt waits another interval; an account with no character to enter,
 //! or one the server boots or bans, ends the recovery.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use ac_clock::Instant;
 
 use super::SessionError;
 

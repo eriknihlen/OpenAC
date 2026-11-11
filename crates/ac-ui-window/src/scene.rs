@@ -3,8 +3,8 @@
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
-use std::time::Instant;
 
+use ac_clock::Instant;
 use ac_runtime::communication::{ChatLine, WindowRequest};
 use ac_runtime::navigation::NavigationView;
 use ac_runtime::session::interface::InterfaceEvent;

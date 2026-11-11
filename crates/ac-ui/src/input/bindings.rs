@@ -9,9 +9,11 @@ use std::path::Path;
 use ac_host::json::{self, Node, Value};
 
 use crate::event::{Key, Modifiers};
+use crate::storage::UiStorage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::keys;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::{FileUiStorage, WriteMode};
-use crate::storage::{UiStorage, keys};
 
 use super::action::InputAction;
 use super::chord::{
