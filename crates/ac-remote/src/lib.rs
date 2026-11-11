@@ -24,6 +24,7 @@ pub mod endpoint;
 pub mod link;
 mod net;
 pub mod protocol;
+pub mod remote;
 mod secret;
 mod sha1;
 pub mod url;
