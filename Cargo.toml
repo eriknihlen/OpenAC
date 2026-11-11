@@ -45,6 +45,7 @@ ac-plugin-ui = { path = "crates/ac-plugin-ui" }
 ac-plugin-net = { path = "crates/ac-plugin-net" }
 ac-remote = { path = "crates/ac-remote" }
 ac-remote-wire = { path = "crates/ac-remote-wire" }
+ac-ui-web = { path = "crates/ac-ui-web" }
 
 # Third-party crates: pure Rust only, each justified in the commit that adds it.
 thiserror = "2.0"
