@@ -12,5 +12,27 @@ publish.workspace = true
 # The module a page loads, and a library so the rules are tested natively.
 crate-type = ["cdylib", "rlib"]
 
+[dependencies]
+# The page's time, handed in with every export that carries it.
+ac-clock.workspace = true
+# The dats as packs the page fills.
+ac-dat.workspace = true
+# The settings file's format, kept in the page's storage.
+ac-host.workspace = true
+# The panels' stores and key names.
+ac-ui.workspace = true
+# The panels, their feeding and input routing, and the world input.
+ac-ui-window.workspace = true
+# The plugin windows' remembered control values.
+ac-plugin-ui.workspace = true
+# The stream and the commands, and their encoding.
+ac-remote-wire.workspace = true
+ac-runtime.workspace = true
+
+[dev-dependencies]
+# The stream a test session sends.
+ac-core.workspace = true
+ac-proto.workspace = true
+
 [lints]
 workspace = true

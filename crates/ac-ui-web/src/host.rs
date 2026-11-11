@@ -105,8 +105,11 @@ pub trait Panels {
     /// A stored setting (`None`: nothing is stored under the key).
     fn storage(&mut self, key: &str, value: Option<&[u8]>);
     /// The dat files worth handing in before [`Panels::init`], as
-    /// `(source, id)`.
-    fn dat_preload(&self) -> Vec<(u32, u32)>;
+    /// `(source, id)`; what is listed here counts as asked for.
+    fn dat_preload(&mut self) -> Vec<(u32, u32)>;
+    /// The page lost every texture it held: each is owed again, and the
+    /// picture with them.
+    fn textures_lost(&mut self);
 }
 
 /// The module: the panels and what they have handed out.
@@ -238,8 +241,12 @@ impl Panels for NoPanels {
 
     fn storage(&mut self, _key: &str, _value: Option<&[u8]>) {}
 
-    fn dat_preload(&self) -> Vec<(u32, u32)> {
+    fn dat_preload(&mut self) -> Vec<(u32, u32)> {
         Vec::new()
+    }
+
+    fn textures_lost(&mut self) {
+        self.stale = true;
     }
 }
 

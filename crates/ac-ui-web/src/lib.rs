@@ -10,13 +10,20 @@
 //!
 //! [`output`] is what a frame hands back and how it is laid out in bytes;
 //! [`host`] is the module behind the exports, with the panels behind
-//! [`host::Panels`]. Both are plain Rust and tested natively; the exports
-//! themselves are a thin layer built only for the web.
+//! [`host::Panels`]: [`client::ClientPanels`], the client's own panels
+//! ([`keys`] names the page's keys, [`commands`] is what goes to the
+//! session, [`page`] what the page keeps for the panels). All of it is
+//! plain Rust and tested natively; the exports themselves are a thin layer
+//! built only for the web.
 
+pub mod client;
+pub mod commands;
 #[cfg(target_arch = "wasm32")]
 mod export;
 pub mod host;
+pub mod keys;
 pub mod output;
+pub mod page;
 
 /// The number of the interface this module speaks.
 pub const INTERFACE_VERSION: u32 = 1;

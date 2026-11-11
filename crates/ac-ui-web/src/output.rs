@@ -31,6 +31,9 @@ pub mod kind {
     pub const LAST: u32 = VIEWPORTS;
 }
 
+/// The value length of a storage record that removes its key.
+pub const REMOVED: u32 = 0xFFFF_FFFF;
+
 /// One corner: canvas pixels from the top left, texture coordinate, colour
 /// (straight alpha, 0 to 1).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -227,6 +230,14 @@ impl Outputs {
         put_bytes(bytes, value);
     }
 
+    /// What is stored under `key` is to be removed: the key, then the
+    /// reserved value length [`REMOVED`] and no bytes.
+    pub fn storage_remove(&mut self, key: &str) {
+        let bytes = self.of(kind::STORAGE_WRITES);
+        put_bytes(bytes, key.as_bytes());
+        put(bytes, &[REMOVED]);
+    }
+
     /// Text for the clipboard (the last one of a frame wins).
     pub fn clipboard_copy(&mut self, text: &str) {
         let bytes = self.of(kind::CLIPBOARD_COPY);
@@ -411,6 +422,16 @@ mod tests {
         write.extend_from_slice(&words(&[2]));
         write.extend_from_slice(&[7, 7]);
         assert_eq!(out.take(kind::STORAGE_WRITES), write);
+
+        // A removal: the key, then the reserved length and no bytes.
+        out.storage_remove("keymaps/old.keymap");
+        out.storage_write("k", &[]);
+        let mut removal = words(&[18]);
+        removal.extend_from_slice(b"keymaps/old.keymap");
+        removal.extend_from_slice(&words(&[0xFFFF_FFFF, 1]));
+        removal.extend_from_slice(b"k");
+        removal.extend_from_slice(&words(&[0]));
+        assert_eq!(out.take(kind::STORAGE_WRITES), removal);
 
         out.clipboard_copy("first");
         out.clipboard_copy("last");

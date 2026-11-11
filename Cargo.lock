@@ -332,6 +332,18 @@ dependencies = [
 [[package]]
 name = "ac-ui-web"
 version = "0.2.6"
+dependencies = [
+ "ac-clock",
+ "ac-core",
+ "ac-dat",
+ "ac-host",
+ "ac-plugin-ui",
+ "ac-proto",
+ "ac-remote-wire",
+ "ac-runtime",
+ "ac-ui",
+ "ac-ui-window",
+]
 
 [[package]]
 name = "ac-ui-window"
