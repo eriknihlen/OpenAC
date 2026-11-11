@@ -8,7 +8,7 @@
 
 use super::SessionEvent;
 use super::generation::{Generation, LifecycleState};
-use super::runner::{HostEvent, LifecycleCommand, Recall, SessionCommand};
+use super::{HostEvent, LifecycleCommand, Recall, SessionCommand};
 use crate::world::transit::PortalKind;
 
 #[path = "movement_policies.rs"]
