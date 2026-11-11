@@ -29,6 +29,7 @@ mod secret;
 mod sha1;
 pub mod status;
 pub mod url;
+pub mod wire;
 pub mod ws;
 
 pub use link::{Inbound, Link, LinkConfig, LinkLoss, SendError, Timing};
