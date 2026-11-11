@@ -9,6 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ac_clock::Instant;
+use ac_core::player::SkillFormulaBonusResolver;
+use ac_core::spells::SpellTable;
 use ac_dat::{DatCollection, DatFile, DatHeader, DatSource};
 use ac_host::settings::{PlayerSettings, SettingsStore};
 use ac_remote_wire::{DecodeContext, EncodeContext};
@@ -81,6 +83,20 @@ enum Build {
     Failed,
 }
 
+/// Where the stream's left-out game data stands.
+enum Tables {
+    /// Not read yet: each attempt reads them and, if files were missing,
+    /// asks for those and tries again once they are in.
+    Waiting,
+    /// Read.
+    Loaded {
+        spells: Arc<SpellTable>,
+        formulas: Option<SkillFormulaBonusResolver>,
+    },
+    /// Every file was there and they could not be read.
+    Failed,
+}
+
 /// The client's panels, built for a page. See the module documentation.
 pub struct ClientPanels {
     canvas: Option<Canvas>,
@@ -104,10 +120,15 @@ pub struct ClientPanels {
     ui: Option<WindowUi>,
     build: Build,
     rounds: u32,
+    /// Rounds the game tables took.
+    table_rounds: u32,
     /// The empty picture shown while building went out.
     building_picture_sent: bool,
     scene: Option<Scene>,
     decode: Option<DecodeContext>,
+    /// The game data the stream leaves out (the spell table, the skill
+    /// formulas), read from the dats as the session reads them.
+    tables: Tables,
     gameplay: GameplayInput,
     held: InputState<&'static str>,
     gameplay_tick: Option<f64>,
@@ -162,9 +183,11 @@ impl ClientPanels {
             ui: None,
             build: Build::Waiting,
             rounds: 0,
+            table_rounds: 0,
             building_picture_sent: false,
             scene: None,
             decode: None,
+            tables: Tables::Waiting,
             gameplay: GameplayInput::new(ac_ui::input::KeyBindings::retail_defaults()),
             held: InputState::new(),
             gameplay_tick: None,
@@ -198,6 +221,62 @@ impl ClientPanels {
     #[must_use]
     pub fn dats(&self) -> Option<&Arc<DatCollection>> {
         self.dats.as_ref()
+    }
+
+    /// The stream's decoder while attached: its epoch, and the spell table
+    /// and skill formulas once read.
+    #[must_use]
+    pub fn decode_context(&self) -> Option<&DecodeContext> {
+        self.decode.as_ref()
+    }
+
+    /// The spell table and the skill formulas, as the decoder takes them.
+    fn table_parts(&self) -> (Option<Arc<SpellTable>>, Option<SkillFormulaBonusResolver>) {
+        match &self.tables {
+            Tables::Loaded { spells, formulas } => (Some(Arc::clone(spells)), formulas.clone()),
+            Tables::Waiting | Tables::Failed => (None, None),
+        }
+    }
+
+    /// Read the game tables the stream leaves out, once every file asked
+    /// for is in; files they lack are asked for and the read is tried
+    /// again. Once read they are the decoder's from then on (events decoded
+    /// before keep what they had).
+    fn try_tables(&mut self, out: &mut Outputs) {
+        let Some(dats) = self.dats.clone() else {
+            return;
+        };
+        if !matches!(self.tables, Tables::Waiting) || !self.in_flight.is_empty() {
+            return;
+        }
+        let read = ac_runtime::gameplay::GameTables::load(&dats);
+        let wanted = dats.take_wanted();
+        if !wanted.is_empty() {
+            self.table_rounds += 1;
+            self.request(wanted, out);
+            return;
+        }
+        match read {
+            Ok(tables) => {
+                self.log.push(format!(
+                    "ui: the game tables are in after {} rounds",
+                    self.table_rounds
+                ));
+                self.tables = Tables::Loaded {
+                    spells: Arc::clone(tables.spells()),
+                    formulas: tables.skill_formula_resolver(),
+                };
+                let (spells, formulas) = self.table_parts();
+                if let Some(cx) = self.decode.as_mut() {
+                    cx.spell_table = spells;
+                    cx.skill_formula_bonus_resolver = formulas;
+                }
+            }
+            Err(error) => {
+                self.log.push(format!("ui: no game tables: {error}"));
+                self.tables = Tables::Failed;
+            }
+        }
     }
 
     fn encode_context(&self) -> EncodeContext {
@@ -775,9 +854,13 @@ impl Panels for ClientPanels {
 
     fn stream(&mut self, frame: &[u8], now: f64) -> Result<(), String> {
         self.now_ms = now;
-        let cx = self
-            .decode
-            .get_or_insert_with(|| DecodeContext::new(Instant::now(), None, None));
+        if self.decode.is_none() {
+            let (spells, formulas) = self.table_parts();
+            self.decode = Some(DecodeContext::new(Instant::now(), spells, formulas));
+        }
+        let Some(cx) = self.decode.as_ref() else {
+            return Ok(());
+        };
         let events = ac_remote_wire::decode_batch(frame, cx).map_err(|e| e.to_string())?;
         let scene = self.scene.get_or_insert_with(Scene::default);
         for event in events {
@@ -816,6 +899,7 @@ impl Panels for ClientPanels {
         }
         if self.ui.is_some() {
             self.draw(canvas, out);
+            self.try_tables(out);
         }
         self.hand_over(out);
     }

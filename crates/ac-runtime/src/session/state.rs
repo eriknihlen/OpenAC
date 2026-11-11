@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use ac_core::combat::CombatMode;
 use ac_core::items::PublicWeenieFlags;
-use ac_core::player::{LiveSkillCreditResolver, SkillFormulaBonusResolver};
 use ac_core::properties::{PropertyBool, PropertyInt};
 use ac_proto::appraise::IdentifyObjectResponse;
 use ac_proto::social::{ConfirmationDone, ConfirmationRequest};
@@ -851,10 +850,7 @@ impl SessionState {
     /// spell table and the skill formulas, and the quest tracker the
     /// contract table.
     pub fn install_tables(&mut self, tables: Arc<GameTables>, account: &str) {
-        let skills = LiveSkillCreditResolver::new(tables.skills().clone());
-        let resolver: SkillFormulaBonusResolver =
-            Arc::new(move |skill, class, attributes| skills.resolve(skill, class, attributes));
-        let resolver = (!tables.skills().is_empty()).then_some(resolver);
+        let resolver = tables.skill_formula_resolver();
         self.world
             .install_player_rules(Arc::clone(tables.spells()), resolver);
         self.communication

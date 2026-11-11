@@ -552,3 +552,75 @@ fn a_frame_of_the_module_is_the_native_window_uis_frame() {
     assert_eq!(page.vertices.len() / 32, vertices);
     assert_eq!(page.runs, runs);
 }
+
+#[test]
+#[ignore = "reads the installed dats"]
+fn once_its_tables_are_in_the_module_decodes_spellbooks_and_skills_with_them() {
+    use ac_core::player::LocalPlayerState;
+    use ac_core::spells::{ActiveEnchantmentRecord, EnchantmentTypeFlags, Spellbook};
+    use ac_runtime::session::interface::{InterfaceEvent, PlayerFacts};
+
+    let mut page = Page::open();
+    build(&mut page);
+    let e = EncodeContext::new(Instant::now());
+    let batch = ac_remote_wire::encode_batch(&stream(), &e).unwrap();
+    page.module.panels().stream(&batch, page.now).unwrap();
+    page.settle(200);
+    let answered: usize = page.answered.values().map(|a| a.files).sum();
+    println!("with the tables: {answered} files");
+
+    // The sender: the session's own tables, a spellbook and a blessing
+    // that adds 9 to every attribute, so the skill formulas matter.
+    let tables =
+        ac_runtime::gameplay::GameTables::load(&DatCollection::open(&page.dir).unwrap()).unwrap();
+    let spell = tables.spells().spell_ids().next().expect("a spell");
+    let mut book = Spellbook::new(Some(Arc::clone(tables.spells())));
+    book.on_enchantment_added(ActiveEnchantmentRecord {
+        stat_mod_type: Some(
+            (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::MULTIPLE_STAT).0 | 0x8000,
+        ),
+        stat_mod_key: Some(0),
+        stat_mod_value: Some(9.0),
+        bucket: 2,
+        spell_category: 2,
+        ..ActiveEnchantmentRecord::new(2, 2, 60.0, 0)
+    });
+    let mut numbers = LocalPlayerState::new(Some(book));
+    numbers.set_skill_formula_bonus_resolver(tables.skill_formula_resolver());
+    numbers.on_attribute_update(2, 0, 200, 0);
+    numbers.on_skill_update(24, 0, 2, 0, 0, 0, 0.0, 100);
+    let term = numbers.attribute_enchantment_skill_delta(24);
+    assert_ne!(term, 0, "the blessing changes the skill");
+    let expected = numbers.get_skill_value(24, None);
+    let name = tables.spells().get(spell).map(|s| s.name.clone());
+    let event = PresentationEvent::Interface(InterfaceEvent::Player(Box::new(PlayerFacts {
+        revision: 1,
+        numbers,
+        session_seconds: 0.0,
+    })));
+    let bytes = ac_remote_wire::encode_batch(&[event], &e).unwrap();
+
+    let cx = page
+        .module
+        .panels()
+        .decode_context()
+        .expect("attached")
+        .clone();
+    assert!(
+        cx.spell_table.is_some(),
+        "the spell table is in the context"
+    );
+    assert!(
+        cx.skill_formula_bonus_resolver.is_some(),
+        "and the formulas"
+    );
+    let back = ac_remote_wire::decode_batch(&bytes, &cx).unwrap();
+    let [PresentationEvent::Interface(InterfaceEvent::Player(facts))] = &back[..] else {
+        panic!("{back:?}");
+    };
+    let book = facts.numbers.spellbook().expect("a spellbook");
+    assert_eq!(book.try_get_metadata(spell).map(|s| s.name.clone()), name);
+    assert_eq!(facts.numbers.attribute_enchantment_skill_delta(24), term);
+    assert_eq!(facts.numbers.get_skill_value(24, None), expected);
+    page.module.panels().stream(&bytes, page.now).unwrap();
+}

@@ -15,6 +15,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # The page's time, handed in with every export that carries it.
 ac-clock.workspace = true
+# The spell table and skill formulas the decoder takes.
+ac-core.workspace = true
 # The dats as packs the page fills.
 ac-dat.workspace = true
 # The settings file's format, kept in the page's storage.
@@ -31,7 +33,6 @@ ac-runtime.workspace = true
 
 [dev-dependencies]
 # The stream a test session sends.
-ac-core.workspace = true
 ac-proto.workspace = true
 
 [lints]
