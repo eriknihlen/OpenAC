@@ -42,6 +42,12 @@ impl DatChargenCatalog {
 }
 
 impl ChargenPalSetSource for DatChargenCatalog {
+    fn forget_misses(&self) {
+        self.pal_sets.borrow_mut().retain(|_, s| s.is_some());
+        self.tables.borrow_mut().retain(|_, t| t.is_some());
+        self.palettes.borrow_mut().retain(|_, p| p.is_some());
+    }
+
     fn pal_set(&self, pal_set_id: u32) -> Option<Arc<ChargenPalSet>> {
         self.pal_sets
             .borrow_mut()

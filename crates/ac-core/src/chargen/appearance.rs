@@ -180,6 +180,11 @@ pub struct ChargenSwatchRgb {
 pub trait ChargenPalSetSource {
     /// A palette set, `None` when the dat has none with this id.
     fn pal_set(&self, pal_set_id: u32) -> Option<Arc<ChargenPalSet>>;
+
+    /// Forget what was missing when asked for, so the next ask reads it
+    /// again: for a host whose dats arrive while it runs. A source that
+    /// keeps nothing does nothing.
+    fn forget_misses(&self) {}
 }
 
 /// Clothing tables by id (from the dat).

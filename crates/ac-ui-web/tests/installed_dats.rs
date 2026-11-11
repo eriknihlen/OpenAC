@@ -62,7 +62,6 @@ struct Page {
     /// Command frames taken since the last look.
     commands: Vec<Vec<u8>>,
     log: String,
-    requested: Vec<(u32, u32)>,
 }
 
 impl Page {
@@ -80,7 +79,6 @@ impl Page {
             runs: Vec::new(),
             commands: Vec::new(),
             log: String::new(),
-            requested: Vec::new(),
         }
     }
 
@@ -168,8 +166,6 @@ impl Page {
             self.module.take(k);
         }
         let requests = words(self.module.take(kind::DAT_REQUESTS));
-        self.requested
-            .extend(requests.chunks_exact(2).map(|p| (p[0], p[1])));
         for pair in requests.chunks_exact(2) {
             self.answer(pair[0], pair[1]);
         }
@@ -494,10 +490,6 @@ fn native_frame(
     (batch.vertices.len(), runs)
 }
 
-fn textures(runs: &[[u32; 5]]) -> std::collections::BTreeSet<(u32, u32)> {
-    runs.iter().map(|r| (r[0], r[1])).collect()
-}
-
 #[test]
 #[ignore = "reads the installed dats"]
 fn a_frame_of_the_module_is_the_native_window_uis_frame() {
@@ -520,33 +512,21 @@ fn a_frame_of_the_module_is_the_native_window_uis_frame() {
     assert_eq!(page.vertices.len() / 32, vertices);
     assert_eq!(page.runs, runs);
 
-    // After the stream the in-game windows show. What they read first now
-    // was not in the dats when they read it, and the UI content's caches
-    // keep that answer: those surfaces never draw. Pinned here so a fix of
-    // the caches shows as this gap closing.
+    // After the stream the in-game windows show and read what they need
+    // first now; once it has arrived they draw what the native UI draws.
     let epoch = Instant::now();
     let events = stream();
     let batch = ac_remote_wire::encode_batch(&events, &EncodeContext::new(epoch)).unwrap();
-    page.requested.clear();
     page.module.panels().stream(&batch, page.now).unwrap();
     page.settle(200);
     page.frame();
     let (vertices, runs) = native_frame(&page.dir, Some(events));
-    let (module_textures, native_textures) = (textures(&page.runs), textures(&runs));
-    let only_native: Vec<_> = native_textures.difference(&module_textures).collect();
     println!(
-        "after the stream: module {} vertices, {} runs; native {vertices} vertices, {} runs; \
-         drawn only natively: {only_native:x?}",
+        "after the stream: module {} vertices, {} runs; native {vertices} vertices, {} runs",
         page.vertices.len() / 32,
         page.runs.len(),
         runs.len()
     );
-    assert!(module_textures.is_subset(&native_textures));
-    for (texture_kind, id) in &only_native {
-        assert_eq!(*texture_kind, 1, "a dat surface");
-        assert!(
-            page.requested.contains(&(0, *id)),
-            "{id:#010x} was first read after the build"
-        );
-    }
+    assert_eq!(page.vertices.len() / 32, vertices);
+    assert_eq!(page.runs, runs);
 }

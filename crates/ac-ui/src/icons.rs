@@ -8,7 +8,7 @@
 //! cache) once and remembers the texture it got back, so the panels only
 //! ever see [`TextureRef`]s.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use ac_core::items::ItemType;
@@ -217,6 +217,17 @@ pub struct IconComposer {
     spells: HashMap<u32, Option<TextureRef>>,
     components: HashMap<u32, Option<TextureRef>>,
     spell_table: Option<Option<SpellTable>>,
+    /// Icons composed while a layer they name was missing: kept as made,
+    /// and made again when the misses are forgotten.
+    partial: Partial,
+}
+
+/// The cache keys of icons composed with a layer missing.
+#[derive(Debug, Default)]
+struct Partial {
+    composed: HashSet<(u32, u32, u32, u32, u32)>,
+    drag: HashSet<(u32, u32, u32)>,
+    spells: HashSet<u32>,
 }
 
 impl std::fmt::Debug for IconComposer {
@@ -242,7 +253,48 @@ impl IconComposer {
             spells: HashMap::new(),
             components: HashMap::new(),
             spell_table: None,
+            partial: Partial::default(),
         }
+    }
+
+    /// Forget what was missing when asked for (enum maps, surfaces, the
+    /// spell table, icons that could not be made) and the icons made while
+    /// a layer was missing, so the next ask reads and composes them again:
+    /// for a host whose dats arrive while it runs (a page). What was found
+    /// is kept.
+    pub fn forget_misses(&mut self) {
+        self.sub_maps.retain(|_, m| m.is_some());
+        self.surfaces.retain(|_, s| s.is_some());
+        let partial = std::mem::take(&mut self.partial);
+        self.composed
+            .retain(|key, t| t.is_some() && !partial.composed.contains(key));
+        self.drag
+            .retain(|key, d| d.is_some() && !partial.drag.contains(key));
+        self.spells
+            .retain(|key, t| t.is_some() && !partial.spells.contains(key));
+        self.components.retain(|_, t| t.is_some());
+        if matches!(self.spell_table, Some(None)) {
+            self.spell_table = None;
+        }
+    }
+
+    /// The surfaces of the layers `ids` (0: no layer), and whether every
+    /// layer named was there.
+    fn layers(&mut self, ids: &[u32]) -> (Vec<Arc<Rgba>>, bool) {
+        let mut whole = true;
+        let mut layers = Vec::new();
+        for &id in ids.iter().filter(|&&id| id != 0) {
+            match self.surface(id) {
+                Some(s) => layers.push(s),
+                None => whole = false,
+            }
+        }
+        (layers, whole)
+    }
+
+    /// Whether the enum map of master slot `category` was read as missing.
+    fn map_missing(&self, category: u32) -> bool {
+        matches!(self.sub_maps.get(&category), Some(None))
     }
 
     /// The dat id stored at `index` of the enum map in master slot
@@ -317,21 +369,25 @@ impl IconComposer {
         if let Some(d) = self.drag.get(&key) {
             return d.clone();
         }
-        let layers: Vec<Arc<Rgba>> = [icon, overlay]
-            .into_iter()
-            .filter_map(|id| self.surface(id))
-            .collect();
+        let (layers, mut whole) = self.layers(&[icon, overlay]);
         let made = if layers.is_empty() {
             None
         } else {
             let refs: Vec<&Rgba> = layers.iter().map(Arc::as_ref).collect();
             let mut composed = compose(&refs);
-            if let Some(tile) = self.effect_tile(effects) {
-                replace_white_from_surface(&mut composed, &tile);
+            let tile = self.resolve_effect(effects);
+            match self.surface(tile) {
+                Some(tile) => replace_white_from_surface(&mut composed, &tile),
+                // No tile named: whole unless its map was missing.
+                None if tile == 0 => whole &= !self.map_missing(EFFECT_ENUM_CATEGORY),
+                None => whole = false,
             }
             let texture = self.uploader.upload(&composed);
             Some((Arc::new(composed), texture))
         };
+        if !whole {
+            self.partial.drag.insert(key);
+        }
         self.drag.insert(key, made.clone());
         made
     }
@@ -364,12 +420,12 @@ impl IconSource for IconComposer {
             return *t;
         }
         let drag = self.drag_image(icon, overlay, effects);
-        let mut layers: Vec<Arc<Rgba>> = [type_underlay, underlay]
-            .into_iter()
-            .filter_map(|id| self.surface(id))
-            .collect();
-        if let Some((image, _)) = drag {
-            layers.push(image);
+        let (mut layers, mut whole) = self.layers(&[type_underlay, underlay]);
+        whole &= !self.map_missing(UNDERLAY_ENUM_CATEGORY)
+            && !self.partial.drag.contains(&(icon, overlay, effects));
+        match drag {
+            Some((image, _)) => layers.push(image),
+            None => whole = false,
         }
         let texture = if layers.is_empty() {
             None
@@ -377,6 +433,9 @@ impl IconSource for IconComposer {
             let refs: Vec<&Rgba> = layers.iter().map(Arc::as_ref).collect();
             Some(self.uploader.upload(&compose(&refs)))
         };
+        if !whole {
+            self.partial.composed.insert(key);
+        }
         self.composed.insert(key, texture);
         texture
     }
@@ -413,10 +472,8 @@ impl IconSource for IconComposer {
             .first()
             .map_or(0, |&c| determine_power_level_of_component(c));
         let backing = self.resolve_enum(SPELL_POWER_ENUM_CATEGORY, power);
-        let layers: Vec<Arc<Rgba>> = [backing, art]
-            .into_iter()
-            .filter_map(|id| self.surface(id))
-            .collect();
+        let (layers, mut whole) = self.layers(&[backing, art]);
+        whole &= !self.map_missing(SPELL_POWER_ENUM_CATEGORY);
         if layers.is_empty() {
             self.spells.insert(spell_id, None);
             return None;
@@ -425,8 +482,9 @@ impl IconSource for IconComposer {
         let mut composed = compose(&refs);
         let tint_index = if bitfield & SPELL_REVERSED != 0 { 1 } else { 2 };
         let tint = self.resolve_enum(SPELL_TINT_ENUM_CATEGORY, tint_index);
-        if let Some(tint) = self.surface(tint) {
-            replace_white_from_surface(&mut composed, &tint);
+        match self.surface(tint) {
+            Some(tint) => replace_white_from_surface(&mut composed, &tint),
+            None => whole &= tint == 0,
         }
         let overlay_index = if bitfield & SPELL_FELLOWSHIP != 0 {
             4
@@ -437,9 +495,13 @@ impl IconSource for IconComposer {
         };
         if overlay_index != 0 {
             let did = self.resolve_enum(SPELL_TINT_ENUM_CATEGORY, overlay_index);
-            if let Some(overlay) = self.surface(did) {
-                composed = compose(&[&composed, &overlay]);
+            match self.surface(did) {
+                Some(overlay) => composed = compose(&[&composed, &overlay]),
+                None => whole &= did == 0,
             }
+        }
+        if !whole || self.map_missing(SPELL_TINT_ENUM_CATEGORY) {
+            self.partial.spells.insert(spell_id);
         }
         let texture = self.uploader.upload(&composed);
         self.spells.insert(spell_id, Some(texture));

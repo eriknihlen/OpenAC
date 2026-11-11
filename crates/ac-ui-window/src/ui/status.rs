@@ -218,9 +218,13 @@ impl WindowUi {
         match ac_ui::content::DatContent::new(self.content.dats().clone()) {
             Ok(popups) => {
                 let font = popups.font(DEFAULT_FONT_ID);
+                let popups = std::rc::Rc::new(popups);
+                self.miss_caches
+                    .contents
+                    .push(std::rc::Rc::downgrade(&popups));
                 let presenter =
                     ac_ui::tooltip::TooltipPresenter::new(Box::new(move |ui, layout, root| {
-                        import_rooted(ui, &popups, layout, root, font.clone())
+                        import_rooted(ui, &*popups, layout, root, font.clone())
                     }));
                 self.host.set_tooltips(presenter);
                 self.apply_tooltip_settings();

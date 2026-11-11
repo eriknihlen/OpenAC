@@ -102,6 +102,17 @@ impl DatSwatchTextures {
 }
 
 impl SwatchTextures for DatSwatchTextures {
+    fn forget_misses(&mut self) {
+        for slot in [&mut self.blank, &mut self.disk, &mut self.plug] {
+            if matches!(slot, Some(None)) {
+                *slot = None;
+            }
+        }
+        if matches!(self.spot, Some(None)) {
+            self.spot = None;
+        }
+    }
+
     fn blank_spot(&mut self) -> Option<TextureRef> {
         self.uploaded(BLANK_ENUM, |s| &mut s.blank)
     }

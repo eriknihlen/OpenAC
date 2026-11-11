@@ -27,6 +27,17 @@ pub struct BarberWindow {
     swatches: Option<(DatChargenCatalog, DatSwatchTextures)>,
 }
 
+impl BarberWindow {
+    /// Forget what the swatches found missing (a host whose dats arrive
+    /// while it runs): the next paint reads it again.
+    pub(super) fn forget_misses(&mut self) {
+        if let Some((catalog, textures)) = self.swatches.as_mut() {
+            ac_core::chargen::ChargenPalSetSource::forget_misses(catalog);
+            ac_ui::pregame::chargen::appearance::SwatchTextures::forget_misses(textures);
+        }
+    }
+}
+
 impl std::fmt::Debug for BarberWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BarberWindow").finish_non_exhaustive()

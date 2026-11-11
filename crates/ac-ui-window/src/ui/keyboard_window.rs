@@ -161,11 +161,18 @@ impl WindowUi {
         )
         .ok_or("layout 0x21000009 did not build")?;
         let dats = self.content.dats().clone();
-        let template_strings =
-            StringResolver::new(move |id| dats.get::<StringTable>(id).ok().flatten());
+        let template_strings = std::rc::Rc::new(StringResolver::new(move |id| {
+            dats.get::<StringTable>(id).ok().flatten()
+        }));
         let dats = self.content.dats().clone();
-        let name_strings =
-            StringResolver::new(move |id| dats.get::<StringTable>(id).ok().flatten());
+        let name_strings = std::rc::Rc::new(StringResolver::new(move |id| {
+            dats.get::<StringTable>(id).ok().flatten()
+        }));
+        for strings in [&template_strings, &name_strings] {
+            self.miss_caches
+                .strings
+                .push(std::rc::Rc::downgrade(strings));
+        }
         let names = RetailKeyNames::new(
             Box::new(move |table, hash| name_strings.resolve(table, hash, 0)),
             (self.os_key_names)(),

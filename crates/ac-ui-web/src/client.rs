@@ -96,6 +96,8 @@ pub struct ClientPanels {
     in_flight: HashSet<(DatSource, u32)>,
     /// Textures drawn while their files were missing, to read again.
     waiting_textures: HashSet<TextureRef>,
+    /// Dat files arrived since the panels last forgot their misses.
+    arrived: bool,
     storage: PageStorage,
     clipboard: PageClipboard,
     settings: PlayerSettings,
@@ -153,6 +155,7 @@ impl ClientPanels {
             early_files: Vec::new(),
             in_flight: HashSet::new(),
             waiting_textures: HashSet::new(),
+            arrived: false,
             storage: PageStorage::default(),
             clipboard: PageClipboard::default(),
             settings: PlayerSettings::default(),
@@ -588,6 +591,11 @@ impl ClientPanels {
         let Some(dats) = self.dats.clone() else {
             return;
         };
+        // Files arrived: what the panels read and did not find is read
+        // again, and they redraw with it.
+        if std::mem::take(&mut self.arrived) {
+            ui.forget_misses();
+        }
         if let Some(scene) = self.scene.as_mut() {
             scene.present_at(Instant::now());
             ui.feed(scene);
@@ -983,6 +991,7 @@ impl Panels for ClientPanels {
         }
         self.in_flight.remove(&(dat, id));
         let bytes = bytes.map(<[u8]>::to_vec);
+        self.arrived = true;
         match &self.dats {
             Some(dats) => fill(dats, dat, id, bytes),
             None => self.early_files.push((dat, id, bytes)),

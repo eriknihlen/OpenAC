@@ -50,6 +50,18 @@ pub struct Dirty {
     pub barber: bool,
 }
 
+impl InterfaceFacts {
+    /// The item, character and magic panels and the titles read their
+    /// facts again on the next feed (their icons and names come from caches
+    /// that may have forgotten a miss).
+    pub fn reread(&mut self) {
+        self.dirty.items = true;
+        self.dirty.player = true;
+        self.dirty.state = true;
+        self.dirty.titles = true;
+    }
+}
+
 impl Dirty {
     /// The item table, the player or the interaction facts (what the item,
     /// character and magic panels show).
