@@ -41,24 +41,26 @@
 //!
 //! # What does not cross
 //!
-//! - A spellbook's spell table is the game's data, which the receiver has:
-//!   it is left out, and a decoded book refers to the
-//!   [`DecodeContext::spell_table`].
-//! - The function the session installs to recompute skill formula terms has
-//!   no encoding; a decoded copy of the player's numbers has none (its
-//!   skills carry the terms already computed).
-//! - A plugin's baked font ([`ac_plugin_ui::UiChange::FontAdded`]) is
-//!   compared by the identity of its bake, so no copy could stand for it:
-//!   encoding one is [`EncodeError::Unsupported`].
+//! - A spellbook's spell table and the skill formulas are game data the
+//!   receiver has: they are left out, and a decoded book and decoded player
+//!   numbers get the receiver's own ([`DecodeContext::spell_table`],
+//!   [`DecodeContext::skill_formula_bonus_resolver`]). A book whose
+//!   receiver has no table gets none installed, so one can be later.
+//! - A plugin's baked font goes as what it was baked from (the bundled
+//!   weight, or the plugin's file; the size; the characters) and is baked
+//!   again on arrival with the same baker: a window tells fonts apart by
+//!   the identity of their bake, so the copy is a new font that draws and
+//!   measures the same.
 //! - An instant keeps whole microseconds; a path that is not Unicode cannot
 //!   be sent.
 //!
 //! # Versioning
 //!
-//! [`shape`] hashes the layout of everything in both directions. Both ends
-//! must be built from the same layout: compare it before any data (the
-//! recorder writes it into its header). A deliberate change of layout
-//! changes the shape and bumps [`STREAM_FORMAT`].
+//! [`shape`] hashes the layout of everything in both directions: field and
+//! variant names, field order and types, and tags. Both ends must be built
+//! from the same layout: compare it before any data (the recorder writes it
+//! into its header). A deliberate change of layout changes the shape and
+//! bumps [`STREAM_FORMAT`].
 
 pub mod codec;
 mod commands;
@@ -161,13 +163,14 @@ fn unframed<'a>(bytes: &'a [u8]) -> Result<Reader<'a>, DecodeError> {
 /// One batch of events in one buffer.
 ///
 /// # Errors
-/// An event with no faithful encoding ([`EncodeError::Unsupported`]).
+/// A path that is not Unicode ([`EncodeError::Unsupported`]); a list longer
+/// than a count can say ([`EncodeError::CountTooLarge`]).
 pub fn encode_batch(
     events: &[PresentationEvent],
     cx: &EncodeContext,
 ) -> Result<Vec<u8>, EncodeError> {
     framed(|w| {
-        w.put_count(events.len());
+        codec::put_count(w, events.len())?;
         for event in events {
             event.encode(w, cx)?;
         }

@@ -470,11 +470,15 @@ macro_rules! session_command {
             const SHAPE: u64 = Shape::new("union")
                 $(
                     .tag($tag)
+                    .name(stringify!($variant))
                     $( $( .of(<$at as Wire>::SHAPE) )* )?
-                    $( $( .of(<$ft as Wire>::SHAPE) )* )?
+                    $( $( .name(stringify!($f)).of(<$ft as Wire>::SHAPE) )* )?
                 )+
                 .tag(AT_GENERATION as u64)
+                .name("AtGeneration")
+                .name("generation")
                 .of(<Generation as Wire>::SHAPE)
+                .name("command")
                 .name("one command of this union, not stamped")
                 .finish();
             fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {

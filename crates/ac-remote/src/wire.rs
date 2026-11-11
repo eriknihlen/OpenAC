@@ -23,7 +23,9 @@ impl WireCodec {
         let epoch = Instant::now();
         Self {
             encode: EncodeContext::new(epoch),
-            decode: DecodeContext::new(epoch),
+            // Commands carry no spellbook and no player numbers, so the
+            // tables those are decoded against are not needed here.
+            decode: DecodeContext::new(epoch, None, None),
         }
     }
 

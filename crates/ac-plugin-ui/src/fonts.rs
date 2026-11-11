@@ -203,7 +203,43 @@ impl fmt::Debug for FontBake {
     }
 }
 
+/// What a font's outlines come from: the bundled font in a weight, or a
+/// file a plugin handed over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FontSource {
+    /// The bundled Noto Sans in this weight.
+    Bundled(FontWeight),
+    /// A plugin's own TrueType or OpenType file.
+    Own(Arc<Vec<u8>>),
+}
+
 impl FontBake {
+    /// What the font was baked from. With [`Self::pixel_size`] and
+    /// [`Self::characters`] it is all a bake is made of: baking the same
+    /// again ([`bake`], [`bake_bundled`]) gives the same atlas and metrics.
+    #[must_use]
+    pub fn source(&self) -> FontSource {
+        match &self.file {
+            // Only the two weights' files are ever bundled.
+            FontFile::Bundled(bytes) => {
+                FontSource::Bundled(if std::ptr::eq(*bytes, NOTO_SANS_SEMIBOLD) {
+                    FontWeight::SemiBold
+                } else {
+                    FontWeight::Regular
+                })
+            }
+            FontFile::Own(bytes) => FontSource::Own(Arc::clone(bytes)),
+        }
+    }
+
+    /// The characters baked, in order.
+    #[must_use]
+    pub fn characters(&self) -> Vec<char> {
+        let mut characters: Vec<char> = self.glyphs.keys().copied().collect();
+        characters.sort_unstable();
+        characters
+    }
+
     /// The glyph for a character, or the font's `?` when it lacks one and `?`
     /// was baked. Control characters have none.
     #[must_use]
@@ -624,6 +660,30 @@ pub fn bake(
         pixel_size,
         ranges,
         maximum_glyphs,
+        u64::MAX,
+        None,
+    )
+}
+
+/// Bakes the bundled font in `weight` at `pixel_size`, the characters
+/// `ranges` names that it has, as the session bakes the plugins' bundled
+/// fonts (its kerning read from those characters).
+///
+/// # Errors
+/// Why it cannot be baked, never a panic.
+pub fn bake_bundled(
+    weight: FontWeight,
+    pixel_size: f32,
+    ranges: &[(u32, u32)],
+) -> Result<FontBake, String> {
+    if !pixel_size.is_finite() || pixel_size <= 0.0 {
+        return Err("the size is not a positive number".to_owned());
+    }
+    bake_guarded(
+        FontFile::Bundled(weight.file()),
+        pixel_size,
+        ranges,
+        MAXIMUM_GLYPHS,
         u64::MAX,
         None,
     )

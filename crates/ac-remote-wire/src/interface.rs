@@ -801,19 +801,62 @@ union! {
     }
 }
 
-/// The player's numbers. What recomputes skill formula terms is a function
-/// the session installs; it has no encoding, and a decoded copy has none
-/// (its skills carry the terms already computed).
+/// What crosses of the player's numbers: every field but the function that
+/// recomputes skill formula terms, which the receiver supplies
+/// ([`DecodeContext::skill_formula_bonus_resolver`]). One definition gives
+/// the layout, the shape and the types read.
+struct PlayerNumbersOnWire {
+    health: Option<VitalSnapshot>,
+    stamina: Option<VitalSnapshot>,
+    mana: Option<VitalSnapshot>,
+    attributes: [Option<AttributeSnapshot>; 6],
+    skills: BTreeMap<u32, SkillSnapshot>,
+    int_properties: BTreeMap<u32, i32>,
+    spellbook: Option<Spellbook>,
+}
+
+/// What crosses of a spellbook: every field but its spell table, which the
+/// receiver supplies ([`DecodeContext::spell_table`]).
+struct SpellbookOnWire {
+    learned: BTreeMap<u32, f32>,
+    active: Vec<ActiveEnchantmentRecord>,
+    order_by_bucket: BTreeMap<u32, Vec<u32>>,
+    favorites: [Vec<u32>; FAVORITE_BAR_COUNT],
+    desired_components: BTreeMap<u32, u32>,
+    metadata_installed: bool,
+    filters: u32,
+    spellbook_revision: u64,
+    enchantment_revision: u64,
+    desired_components_revision: u64,
+}
+
+record! {
+    PlayerNumbersOnWire {
+        health: Option<VitalSnapshot>,
+        stamina: Option<VitalSnapshot>,
+        mana: Option<VitalSnapshot>,
+        attributes: [Option<AttributeSnapshot>; 6],
+        skills: BTreeMap<u32, SkillSnapshot>,
+        int_properties: BTreeMap<u32, i32>,
+        spellbook: Option<Spellbook>,
+    }
+    SpellbookOnWire {
+        learned: BTreeMap<u32, f32>,
+        active: Vec<ActiveEnchantmentRecord>,
+        order_by_bucket: BTreeMap<u32, Vec<u32>>,
+        favorites: [Vec<u32>; FAVORITE_BAR_COUNT],
+        desired_components: BTreeMap<u32, u32>,
+        metadata_installed: bool,
+        filters: u32,
+        spellbook_revision: u64,
+        enchantment_revision: u64,
+        desired_components_revision: u64,
+    }
+}
+
+/// The player's numbers, with the receiver's skill formulas.
 impl Wire for LocalPlayerState {
-    const SHAPE: u64 = Shape::new("record")
-        .of(<Option<VitalSnapshot>>::SHAPE)
-        .of(<Option<VitalSnapshot>>::SHAPE)
-        .of(<Option<VitalSnapshot>>::SHAPE)
-        .of(<[Option<AttributeSnapshot>; 6]>::SHAPE)
-        .of(<BTreeMap<u32, SkillSnapshot>>::SHAPE)
-        .of(<BTreeMap<u32, i32>>::SHAPE)
-        .of(<Option<Spellbook>>::SHAPE)
-        .finish();
+    const SHAPE: u64 = <PlayerNumbersOnWire as Wire>::SHAPE;
     fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
         let LocalPlayerStateParts {
             health,
@@ -825,44 +868,47 @@ impl Wire for LocalPlayerState {
             spellbook,
             skill_formula_bonus_resolver: _,
         } = LocalPlayerStateParts::from(self.clone());
-        health.encode(w, cx)?;
-        stamina.encode(w, cx)?;
-        mana.encode(w, cx)?;
-        attributes.encode(w, cx)?;
-        skills.encode(w, cx)?;
-        int_properties.encode(w, cx)?;
-        spellbook.encode(w, cx)
+        PlayerNumbersOnWire {
+            health,
+            stamina,
+            mana,
+            attributes,
+            skills,
+            int_properties,
+            spellbook,
+        }
+        .encode(w, cx)
     }
     fn decode(r: &mut Reader<'_>, cx: &DecodeContext) -> Result<Self, DecodeError> {
+        let PlayerNumbersOnWire {
+            health,
+            stamina,
+            mana,
+            attributes,
+            skills,
+            int_properties,
+            spellbook,
+        } = PlayerNumbersOnWire::decode(r, cx)?;
         Ok(LocalPlayerStateParts {
-            health: Wire::decode(r, cx)?,
-            stamina: Wire::decode(r, cx)?,
-            mana: Wire::decode(r, cx)?,
-            attributes: Wire::decode(r, cx)?,
-            skills: Wire::decode(r, cx)?,
-            int_properties: Wire::decode(r, cx)?,
-            spellbook: Wire::decode(r, cx)?,
-            skill_formula_bonus_resolver: None,
+            health,
+            stamina,
+            mana,
+            attributes,
+            skills,
+            int_properties,
+            spellbook,
+            skill_formula_bonus_resolver: cx.skill_formula_bonus_resolver.clone(),
         }
         .into())
     }
 }
 
-/// A spellbook without its spell table (the game's data, which the
-/// receiver has): a decoded book refers to the decoder's table.
+/// A spellbook, with the receiver's spell table. A book the sender had a
+/// table for is installed with the receiver's when it has one; otherwise
+/// it has none installed (and an empty one), so the receiver can install
+/// its own later instead of being refused.
 impl Wire for Spellbook {
-    const SHAPE: u64 = Shape::new("record")
-        .of(<BTreeMap<u32, f32>>::SHAPE)
-        .of(<Vec<ActiveEnchantmentRecord>>::SHAPE)
-        .of(<BTreeMap<u32, Vec<u32>>>::SHAPE)
-        .of(<[Vec<u32>; FAVORITE_BAR_COUNT]>::SHAPE)
-        .of(<BTreeMap<u32, u32>>::SHAPE)
-        .of(bool::SHAPE)
-        .of(u32::SHAPE)
-        .of(u64::SHAPE)
-        .of(u64::SHAPE)
-        .of(u64::SHAPE)
-        .finish();
+    const SHAPE: u64 = <SpellbookOnWire as Wire>::SHAPE;
     fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
         let SpellbookParts {
             learned,
@@ -877,45 +923,63 @@ impl Wire for Spellbook {
             enchantment_revision,
             desired_components_revision,
         } = SpellbookParts::from(self.clone());
-        learned.encode(w, cx)?;
-        active.encode(w, cx)?;
-        order_by_bucket.encode(w, cx)?;
-        favorites.encode(w, cx)?;
-        desired_components.encode(w, cx)?;
-        metadata_installed.encode(w, cx)?;
-        filters.encode(w, cx)?;
-        spellbook_revision.encode(w, cx)?;
-        enchantment_revision.encode(w, cx)?;
-        desired_components_revision.encode(w, cx)
+        SpellbookOnWire {
+            learned,
+            active,
+            order_by_bucket,
+            favorites,
+            desired_components,
+            metadata_installed,
+            filters,
+            spellbook_revision,
+            enchantment_revision,
+            desired_components_revision,
+        }
+        .encode(w, cx)
     }
     fn decode(r: &mut Reader<'_>, cx: &DecodeContext) -> Result<Self, DecodeError> {
+        let SpellbookOnWire {
+            learned,
+            active,
+            order_by_bucket,
+            favorites,
+            desired_components,
+            metadata_installed,
+            filters,
+            spellbook_revision,
+            enchantment_revision,
+            desired_components_revision,
+        } = SpellbookOnWire::decode(r, cx)?;
+        let table = cx.spell_table.as_ref().filter(|_| metadata_installed);
         Ok(SpellbookParts {
-            learned: Wire::decode(r, cx)?,
-            active: Wire::decode(r, cx)?,
-            order_by_bucket: Wire::decode(r, cx)?,
-            favorites: Wire::decode(r, cx)?,
-            desired_components: Wire::decode(r, cx)?,
-            table: Arc::clone(&cx.spell_table),
-            metadata_installed: Wire::decode(r, cx)?,
-            filters: Wire::decode(r, cx)?,
-            spellbook_revision: Wire::decode(r, cx)?,
-            enchantment_revision: Wire::decode(r, cx)?,
-            desired_components_revision: Wire::decode(r, cx)?,
+            learned,
+            active,
+            order_by_bucket,
+            favorites,
+            desired_components,
+            table: table.map_or_else(Arc::default, Arc::clone),
+            metadata_installed: table.is_some(),
+            filters,
+            spellbook_revision,
+            enchantment_revision,
+            desired_components_revision,
         }
         .into())
     }
 }
-
 /// The contract catalog is its one table of entries.
 impl Wire for ContractCatalog {
     const SHAPE: u64 = Shape::new("record")
-        .of(<HashMap<u32, ContractEntry>>::SHAPE)
+        .name("contracts")
+        .of(<HashMap<u32, ContractEntry> as Wire>::SHAPE)
         .finish();
     const MIN_SIZE: usize = 4;
     fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
-        self.contracts().encode(w, cx)
+        <HashMap<u32, ContractEntry> as Wire>::encode(self.contracts(), w, cx)
     }
     fn decode(r: &mut Reader<'_>, cx: &DecodeContext) -> Result<Self, DecodeError> {
-        Ok(ContractCatalog::new(Wire::decode(r, cx)?))
+        Ok(ContractCatalog::new(
+            <HashMap<u32, ContractEntry> as Wire>::decode(r, cx)?,
+        ))
     }
 }

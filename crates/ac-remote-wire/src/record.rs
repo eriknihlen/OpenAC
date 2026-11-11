@@ -10,7 +10,7 @@
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::{DecodeContext, DecodeError, PresentationEvent, STREAM_FORMAT, decode_batch, shape};
 
@@ -48,6 +48,17 @@ pub enum RecordError {
     /// A record's batch does not decode.
     #[error("a recorded batch does not decode: {0}")]
     Decode(#[from] DecodeError),
+    /// A record holds no batch: no recorder writes one, so the file is
+    /// damaged.
+    #[error("an empty record")]
+    EmptyRecord,
+    /// An empty batch was handed to the recorder: every batch holds at
+    /// least its format byte and count.
+    #[error("an empty batch cannot be recorded")]
+    EmptyBatch,
+    /// A batch longer than a record's `u32` length can say.
+    #[error("a batch of {0} bytes is longer than a record can hold")]
+    BatchTooLong(usize),
 }
 
 /// The header's length: the magic, the format byte, the shape.
@@ -88,18 +99,18 @@ impl<W: Write> Recorder<W> {
     /// microsecond).
     ///
     /// # Errors
-    /// `out` cannot be written; a batch longer than `u32::MAX` bytes.
-    pub fn append(&mut self, at: Duration, batch: &[u8]) -> io::Result<()> {
-        let len = u32::try_from(batch.len()).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "a batch longer than u32::MAX bytes",
-            )
-        })?;
+    /// [`RecordError::EmptyBatch`], [`RecordError::BatchTooLong`] (nothing
+    /// is written for either); `out` cannot be written.
+    pub fn append(&mut self, at: Duration, batch: &[u8]) -> Result<(), RecordError> {
+        if batch.is_empty() {
+            return Err(RecordError::EmptyBatch);
+        }
+        let len = u32::try_from(batch.len()).map_err(|_| RecordError::BatchTooLong(batch.len()))?;
         let micros = u64::try_from(at.as_micros()).unwrap_or(u64::MAX);
         self.out.write_all(&micros.to_le_bytes())?;
         self.out.write_all(&len.to_le_bytes())?;
-        self.out.write_all(batch)
+        self.out.write_all(batch)?;
+        Ok(())
     }
 
     /// Flushes and hands back the writer.
@@ -121,15 +132,14 @@ pub struct Replay<R: Read> {
 }
 
 impl Replay<BufReader<File>> {
-    /// The recording at `path`, its instants decoded against now.
+    /// The recording at `path`, decoded with `cx` (its epoch stands for
+    /// the recording's: the replay's instants land at the recorded offsets
+    /// from it).
     ///
     /// # Errors
     /// The file cannot be read; [`RecordError`] for its header.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, RecordError> {
-        Self::from_reader(
-            BufReader::new(File::open(path)?),
-            DecodeContext::new(Instant::now()),
-        )
+    pub fn open(path: impl AsRef<Path>, cx: DecodeContext) -> Result<Self, RecordError> {
+        Self::from_reader(BufReader::new(File::open(path)?), cx)
     }
 }
 
@@ -197,6 +207,9 @@ impl<R: Read> Replay<R> {
         len_bytes.copy_from_slice(len);
         let at = Duration::from_micros(u64::from_le_bytes(micros_bytes));
         let len = u64::from(u32::from_le_bytes(len_bytes));
+        if len == 0 {
+            return Err(RecordError::EmptyRecord);
+        }
         // Read what is there rather than allocating what the length says:
         // a damaged length meets the end of the file, not a huge buffer.
         let mut batch = Vec::new();
@@ -225,6 +238,8 @@ impl<R: Read> Iterator for Replay<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+
     use crate::{EncodeContext, encode_batch};
 
     fn batch(e: &EncodeContext, text: &str) -> Vec<u8> {
@@ -248,7 +263,8 @@ mod tests {
         let e = EncodeContext::new(epoch);
         let bytes = recording(&e);
         assert_eq!(&bytes[..4], b"OARW");
-        let replay = Replay::from_reader(bytes.as_slice(), DecodeContext::new(epoch)).unwrap();
+        let replay =
+            Replay::from_reader(bytes.as_slice(), DecodeContext::new(epoch, None, None)).unwrap();
         let records: Vec<_> = replay.map(Result::unwrap).collect();
         assert_eq!(
             records,
@@ -275,7 +291,10 @@ mod tests {
         let mut recorder = Recorder::create(&path).unwrap();
         recorder.append(Duration::ZERO, &batch(&e, "disk")).unwrap();
         drop(recorder.finish().unwrap());
-        let records: Vec<_> = Replay::open(&path).unwrap().map(Result::unwrap).collect();
+        let records: Vec<_> = Replay::open(&path, DecodeContext::new(Instant::now(), None, None))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
         assert_eq!(
             records,
             [(
@@ -291,7 +310,7 @@ mod tests {
         let e = EncodeContext::new(Instant::now());
         let mut bytes = recording(&e);
         bytes[5] ^= 0xFF;
-        let d = DecodeContext::new(Instant::now());
+        let d = DecodeContext::new(Instant::now(), None, None);
         assert!(matches!(
             Replay::from_reader(bytes.as_slice(), d.clone()),
             Err(RecordError::Shape { expected, .. }) if expected == shape()
@@ -315,7 +334,7 @@ mod tests {
         let header = 4 + 1 + 8;
         let first = 12 + batch(&e, "one").len();
         for end in 0..bytes.len() {
-            let d = DecodeContext::new(Instant::now());
+            let d = DecodeContext::new(Instant::now(), None, None);
             match Replay::from_reader(&bytes[..end], d) {
                 Err(error) => {
                     assert!(end < header, "{end}: {error}");
@@ -341,12 +360,31 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_batch_is_refused_and_an_empty_record_is_an_error() {
+        let mut recorder = Recorder::new(Vec::new()).unwrap();
+        assert!(matches!(
+            recorder.append(Duration::ZERO, &[]),
+            Err(RecordError::EmptyBatch)
+        ));
+        let mut bytes = recorder.finish().unwrap();
+        assert_eq!(bytes.len(), HEADER_LEN, "nothing was written for it");
+        bytes.extend_from_slice(&5u64.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        let d = DecodeContext::new(Instant::now(), None, None);
+        let results: Vec<_> = Replay::from_reader(bytes.as_slice(), d).unwrap().collect();
+        assert!(
+            matches!(&results[..], [Err(RecordError::EmptyRecord)]),
+            "{results:?}"
+        );
+    }
+
+    #[test]
     fn a_lying_length_allocates_nothing() {
         let mut bytes = Recorder::new(Vec::new()).unwrap().finish().unwrap();
         bytes.extend_from_slice(&0u64.to_le_bytes());
         bytes.extend_from_slice(&u32::MAX.to_le_bytes());
         bytes.extend_from_slice(&[1, 2, 3]);
-        let d = DecodeContext::new(Instant::now());
+        let d = DecodeContext::new(Instant::now(), None, None);
         let results: Vec<_> = Replay::from_reader(bytes.as_slice(), d).unwrap().collect();
         assert!(matches!(results[..], [Err(RecordError::Truncated)]));
     }

@@ -101,7 +101,13 @@ use crate::{
 /// A sender and a receiver whose epochs stand for the same moment.
 fn contexts() -> (EncodeContext, DecodeContext) {
     let epoch = Instant::now();
-    (EncodeContext::new(epoch), DecodeContext::new(epoch))
+    // The samples' spellbooks have an empty table installed: so does the
+    // receiver's copy, by name.
+    let table = Some(Arc::new(ac_core::spells::SpellTable::empty()));
+    (
+        EncodeContext::new(epoch),
+        DecodeContext::new(epoch, table, None),
+    )
 }
 
 fn v3(x: f32) -> Vector3 {
@@ -1663,7 +1669,7 @@ fn every_event_round_trips() {
 #[test]
 fn instants_land_at_the_same_offset_from_the_receivers_epoch() {
     let (e, _) = contexts();
-    let receiver = DecodeContext::new(e.epoch + Duration::from_secs(60));
+    let receiver = DecodeContext::new(e.epoch + Duration::from_secs(60), None, None);
     let sent = PresentationEvent::SessionClock(e.epoch + Duration::from_millis(1500));
     let bytes = encode_batch(std::slice::from_ref(&sent), &e).unwrap();
     let back = decode_batch(&bytes, &receiver).unwrap();
@@ -1675,20 +1681,117 @@ fn instants_land_at_the_same_offset_from_the_receivers_epoch() {
     );
 }
 
-#[test]
-fn a_decoded_spellbook_refers_to_the_receivers_spell_table() {
-    let (e, d) = contexts();
-    let table = Arc::new(ac_core::spells::SpellTable::empty());
-    let d = d.with_spell_table(Arc::clone(&table));
-    let event = PresentationEvent::Interface(InterfaceEvent::Player(Box::new(player_facts())));
-    let back = decode_batch(&encode_batch(&[event], &e).unwrap(), &d).unwrap();
-    let PresentationEvent::Interface(InterfaceEvent::Player(facts)) = &back[0] else {
-        panic!("{back:?}");
-    };
-    let book = facts.numbers.spellbook().expect("a spellbook");
-    assert!(Arc::ptr_eq(book.metadata(), &table));
+/// A small spell table with names, as the receiver's game data has it.
+fn named_table() -> Arc<ac_core::spells::SpellTable> {
+    use ac_core::spells::{SpellMetadata, SpellTable};
+    Arc::new(
+        SpellTable::create([
+            SpellMetadata::new(1, "Flame Bolt I", 0),
+            SpellMetadata::new(2, "Strength Self I", 0),
+        ])
+        .expect("unique ids"),
+    )
 }
 
+/// The player's facts with this spellbook, through the wire with `d`.
+fn book_through(book: ac_core::spells::Spellbook, d: &DecodeContext) -> ac_core::spells::Spellbook {
+    let (e, _) = contexts();
+    let facts = PlayerFacts {
+        revision: 1,
+        numbers: ac_core::player::LocalPlayerState::new(Some(book)),
+        session_seconds: 0.0,
+    };
+    let event = PresentationEvent::Interface(InterfaceEvent::Player(Box::new(facts)));
+    let back = decode_batch(&encode_batch(&[event], &e).unwrap(), d).unwrap();
+    let [PresentationEvent::Interface(InterfaceEvent::Player(facts))] = &back[..] else {
+        panic!("{back:?}");
+    };
+    facts.numbers.spellbook().expect("a spellbook").clone()
+}
+
+/// A receiver with no spell table yet gets a book with none installed, so
+/// installing its table later is not refused (and the spells get their
+/// names); a receiver with one gets its own table, names and all.
+#[test]
+fn a_decoded_spellbook_has_the_receivers_table_or_none() {
+    let sender_table = named_table();
+    let book = ac_core::spells::Spellbook::new(Some(Arc::clone(&sender_table)));
+    assert_eq!(
+        book.try_get_metadata(1).map(|s| s.name.as_str()),
+        Some("Flame Bolt I")
+    );
+    let epoch = Instant::now();
+
+    let mut none = book_through(book.clone(), &DecodeContext::new(epoch, None, None));
+    assert!(none.try_get_metadata(1).is_none());
+    let receiver_table = named_table();
+    none.install_metadata(Arc::clone(&receiver_table))
+        .expect("a book with no table takes one");
+    assert_eq!(
+        none.try_get_metadata(1).map(|s| s.name.as_str()),
+        Some("Flame Bolt I")
+    );
+
+    let given = DecodeContext::new(epoch, Some(Arc::clone(&receiver_table)), None);
+    let mut with = book_through(book, &given);
+    assert!(Arc::ptr_eq(with.metadata(), &receiver_table));
+    assert_eq!(
+        with.try_get_metadata(2).map(|s| s.name.as_str()),
+        Some("Strength Self I")
+    );
+    with.install_metadata(Arc::clone(&receiver_table))
+        .expect("installing the same table again is no change");
+
+    // A book the sender had no table for stays without one.
+    let bare = book_through(ac_core::spells::Spellbook::new(None), &given);
+    assert!(bare.try_get_metadata(1).is_none());
+}
+
+/// The skill formulas are the receiver's: decoded numbers score a skill
+/// from buffed attributes as the session does.
+#[test]
+fn decoded_numbers_score_buffed_skills_with_the_receivers_formulas() {
+    use ac_core::player::{LocalPlayerState, SkillFormulaBonusResolver};
+    use ac_core::spells::{EnchantmentTypeFlags, Spellbook};
+    let mut book = Spellbook::new(None);
+    // A blessing adding 9 to every attribute.
+    book.on_enchantment_added(ActiveEnchantmentRecord {
+        stat_mod_type: Some(
+            (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::MULTIPLE_STAT).0 | 0x8000,
+        ),
+        stat_mod_key: Some(0),
+        stat_mod_value: Some(9.0),
+        bucket: 2,
+        spell_category: 2,
+        ..ActiveEnchantmentRecord::new(2, 2, 60.0, 0)
+    });
+    // Half the endurance (attribute 2), the shape of a skill formula.
+    let formulas: SkillFormulaBonusResolver =
+        Arc::new(|_, _, attributes| attributes.get(&2).copied().unwrap_or(0) / 2);
+    let mut state = LocalPlayerState::new(Some(book));
+    state.set_skill_formula_bonus_resolver(Some(Arc::clone(&formulas)));
+    state.on_attribute_update(2, 0, 200, 0);
+    state.on_skill_update(24, 0, 2, 0, 0, 0, 0.0, 100);
+    let term = state.attribute_enchantment_skill_delta(24);
+    assert_ne!(term, 0, "the buff changes the skill");
+    let expected = state.get_skill_value(24, None);
+
+    let (e, _) = contexts();
+    let facts = PlayerFacts {
+        revision: 1,
+        numbers: state,
+        session_seconds: 0.0,
+    };
+    let event = PresentationEvent::Interface(InterfaceEvent::Player(Box::new(facts)));
+    let bytes = encode_batch(&[event], &e).unwrap();
+    let d = DecodeContext::new(e.epoch, None, Some(formulas));
+    let back = decode_batch(&bytes, &d).unwrap();
+    let [PresentationEvent::Interface(InterfaceEvent::Player(facts))] = &back[..] else {
+        panic!("{back:?}");
+    };
+    assert_eq!(facts.numbers.attribute_enchantment_skill_delta(24), term);
+    assert_eq!(facts.numbers.get_skill_value(24, None), expected);
+}
 fn every_command() -> Vec<SessionCommand> {
     use SessionCommand as C;
     let g = ObjectRef::Guid(0x8000_0001);
@@ -1899,6 +2002,25 @@ fn every_command() -> Vec<SessionCommand> {
         LifecycleCommand::Create(CreationCommand::Finish {
             confirm_unspent_credits: true,
         }),
+        LifecycleCommand::Create(CreationCommand::Show),
+        LifecycleCommand::Create(CreationCommand::SelectHeritage(1)),
+        LifecycleCommand::Create(CreationCommand::SelectGender(2)),
+        LifecycleCommand::Create(CreationCommand::SelectTemplate(3)),
+        LifecycleCommand::Create(CreationCommand::SetAttributeLock(
+            ChargenAttribute::Focus,
+            true,
+        )),
+        LifecycleCommand::Create(CreationCommand::TrainSkill(6)),
+        LifecycleCommand::Create(CreationCommand::SpecializeSkill(7)),
+        LifecycleCommand::Create(CreationCommand::UntrainSkill(8)),
+        LifecycleCommand::Create(CreationCommand::SetShade(ShadeSlot::Skin, 0.25)),
+        LifecycleCommand::Create(CreationCommand::SelectStartArea(2)),
+        LifecycleCommand::Create(CreationCommand::SetName("Newbie".into())),
+        LifecycleCommand::Create(CreationCommand::SetSlot(4)),
+        LifecycleCommand::Create(CreationCommand::AcknowledgeRejection),
+        LifecycleCommand::Create(CreationCommand::RandomizeCharacter),
+        LifecycleCommand::Create(CreationCommand::RandomizeAppearance),
+        LifecycleCommand::Create(CreationCommand::RandomizeClothing),
     ];
     let movement = [
         MovementCommand::Keys(MovementKeys {
@@ -2068,6 +2190,25 @@ fn every_command() -> Vec<SessionCommand> {
             attribute: 1,
             xp: u64::MAX,
         }),
+        C::Character(CharacterCommand::RaiseVital { vital: 2, xp: 3 }),
+        C::Character(CharacterCommand::RaiseSkill { skill: 4, xp: 5 }),
+        C::ChatEntry(ChatEntryCommand::SetDraft("dra".into())),
+        C::ChatEntry(ChatEntryCommand::Compose("/vt nav".into())),
+        C::ChatEntry(ChatEntryCommand::SetChannel(ChatChannelKind::Society)),
+        C::ChatEntry(ChatEntryCommand::RecallPrevious),
+        C::ChatEntry(ChatEntryCommand::RecallNext),
+        C::ChatEntry(ChatEntryCommand::ResetRecall),
+        C::ChatEntry(ChatEntryCommand::Clear),
+        C::Journal(JournalCommand::NewPage),
+        C::Journal(JournalCommand::GotoPage(2)),
+        C::Journal(JournalCommand::Edit {
+            label: "l".into(),
+            title: "t".into(),
+            notes: "n".into(),
+        }),
+        C::Journal(JournalCommand::RecordLocation { x: 1.5, y: -2.5 }),
+        C::Journal(JournalCommand::StartTimer),
+        C::Journal(JournalCommand::ResetTimer),
         C::Ping,
         C::ShowLinkStatus,
         C::DismissGhost(0x8000_0009),
@@ -2274,13 +2415,34 @@ fn unknown_tags_and_formats_are_errors() {
             expected: STREAM_FORMAT
         }
     );
-    // A plugin font is never on the wire: an interface event carrying one
-    // (plugin UI changes, one change, tag 25) is refused.
-    let font = [STREAM_FORMAT, 1, 0, 0, 0, 10, 18, 1, 0, 0, 0, 25];
-    assert_eq!(
-        decode_batch(&font, &d).unwrap_err(),
-        DecodeError::Unsupported("a plugin font")
+    // A plugin font that cannot be baked again: an interface event (tag
+    // 10) of plugin UI changes (18) with one font (25) owned by "x", handle
+    // 1, from its own file (source 1) of four bytes that are no font.
+    let font = |file: &[u8], size: f32| {
+        let mut bytes = vec![STREAM_FORMAT, 1, 0, 0, 0, 10, 18, 1, 0, 0, 0, 25];
+        bytes.extend_from_slice(&[1, 0, 0, 0, b'x', 1, 0, 0, 0, 1]);
+        bytes.extend_from_slice(&(file.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(file);
+        bytes.extend_from_slice(&size.to_le_bytes());
+        // One run of characters, 'A' to 'C'; no sharper bake.
+        bytes.extend_from_slice(&[1, 0, 0, 0, 0x41, 0, 0, 0, 0x43, 0, 0, 0, 0]);
+        bytes
+    };
+    assert!(matches!(
+        decode_batch(&font(b"junk", 12.0), &d).unwrap_err(),
+        DecodeError::Font(_)
+    ));
+    let noto = ac_plugin_ui::fonts::NOTO_SANS_REGULAR;
+    assert!(
+        decode_batch(&font(noto, 12.0), &d).is_ok(),
+        "the real file bakes"
     );
+    for size in [0.0, -1.0, f32::NAN, 1.0e9] {
+        assert_eq!(
+            decode_batch(&font(noto, size), &d).unwrap_err(),
+            DecodeError::OutOfRange("font size")
+        );
+    }
     // Trailing bytes.
     assert_eq!(
         decode_batch(&[STREAM_FORMAT, 0, 0, 0, 0, 9], &d).unwrap_err(),
@@ -2299,9 +2461,14 @@ fn every_strict_prefix_of_a_batch_is_an_error() {
             bytes.len()
         );
     }
-    let command = encode_command(&every_command()[1], &e).unwrap();
-    for end in 0..command.len() {
-        assert!(decode_command(&command[..end], &d).is_err());
+    for command in every_command() {
+        let bytes = encode_command(&command, &e).unwrap();
+        for end in 0..bytes.len() {
+            assert!(
+                decode_command(&bytes[..end], &d).is_err(),
+                "{command:?} cut at {end} decoded"
+            );
+        }
     }
 }
 
@@ -2330,6 +2497,7 @@ fn flipped_bytes_never_panic() {
         .map(|c| encode_command(c, &e).unwrap())
         .collect();
     let mut noise = Noise(0x9E37_79B9_7F4A_7C15);
+    let mut decoded = 0;
     for round in 0..4000 {
         let source = if round % 2 == 0 {
             &batches[round / 2 % batches.len()]
@@ -2346,10 +2514,18 @@ fn flipped_bytes_never_panic() {
                 bytes[at] = noise.next() as u8;
             }
         }
-        // Whatever comes back, it comes back.
-        let _ = decode_batch(&bytes, &d);
-        let _ = decode_command(&bytes, &d);
+        // Whatever comes back is a value that encodes again.
+        if let Ok(events) = decode_batch(&bytes, &d) {
+            encode_batch(&events, &e).expect("a decoded batch encodes");
+            decoded += 1;
+        }
+        if let Ok(command) = decode_command(&bytes, &d) {
+            encode_command(&command, &e).expect("a decoded command encodes");
+            decoded += 1;
+        }
     }
+    // Flips into names, numbers and padding leave values that still read.
+    assert!(decoded > 100, "only {decoded} flipped inputs decoded");
 }
 
 #[test]
@@ -2403,6 +2579,83 @@ fn deeply_nested_values_are_refused() {
     }
     bytes.extend_from_slice(&[0, 1]);
     assert_eq!(decode_batch(&bytes, &d).unwrap_err(), DecodeError::TooDeep);
+}
+
+/// What a baked font is made of and measures, compared field by field (a
+/// font compares equal only to the very same bake).
+fn same_bake(a: &ac_plugin_ui::fonts::FontBake, b: &ac_plugin_ui::fonts::FontBake) {
+    assert_eq!(a.pixel_size.to_bits(), b.pixel_size.to_bits());
+    assert_eq!(a.line_height.to_bits(), b.line_height.to_bits());
+    assert_eq!(a.ascent.to_bits(), b.ascent.to_bits());
+    assert_eq!(
+        (a.atlas_width, a.atlas_height),
+        (b.atlas_width, b.atlas_height)
+    );
+    assert!(a.coverage == b.coverage, "the atlases differ");
+    assert_eq!(a.glyph_count(), b.glyph_count());
+    for c in (0x20..0x250).filter_map(char::from_u32) {
+        assert_eq!(a.glyph(c), b.glyph(c), "{c:?}");
+    }
+    assert_eq!(a.measure_width("AVAWA To"), b.measure_width("AVAWA To"));
+}
+
+fn same_font(a: &ac_plugin_ui::fonts::FontView, b: &ac_plugin_ui::fonts::FontView) {
+    assert_eq!((&a.owner, a.handle), (&b.owner, b.handle));
+    same_bake(&a.font, &b.font);
+    match (&a.sharp, &b.sharp) {
+        (Some(x), Some(y)) => {
+            assert_eq!(x.scale.to_bits(), y.scale.to_bits());
+            same_bake(&x.font, &y.font);
+        }
+        (None, None) => {}
+        _ => panic!("one has a sharper bake, the other not"),
+    }
+}
+
+/// The fonts a session holds, as a window attaching sees them and as a
+/// density change re-bakes them: each one crosses and is baked again the
+/// same on the far side.
+#[test]
+fn plugin_fonts_cross_and_are_baked_again() {
+    let (e, d) = contexts();
+    let mut ui = ac_plugin_ui::PluginUi::new();
+    let bundled = ui.font_bundled("example", 12.0, ac_plugin_ui::fonts::FontWeight::SemiBold);
+    assert!(bundled.handle != 0, "the bundled font bakes");
+    let own = ui.font_load(
+        "example",
+        "digits.ttf",
+        ac_plugin_ui::fonts::NOTO_SANS_REGULAR,
+        16.0,
+        &[(0x30, 0x39), (0x41, 0x43)],
+    );
+    assert!(own.handle != 0, "the plugin's own font bakes");
+    ui.input(UiInput::DisplayDensity(2.0));
+    let mut changes = ui.snapshot();
+    changes.extend(ui.take_changes());
+    let fonts: Vec<_> = changes
+        .iter()
+        .filter(|c| matches!(c, UiChange::FontAdded(_)))
+        .cloned()
+        .collect();
+    assert!(fonts.len() >= 4, "{} font changes", fonts.len());
+    let event = PresentationEvent::Interface(InterfaceEvent::PluginUi(fonts.clone()));
+    let bytes = encode_batch(std::slice::from_ref(&event), &e).expect("fonts encode");
+    let back = decode_batch(&bytes, &d).expect("fonts decode");
+    let [PresentationEvent::Interface(InterfaceEvent::PluginUi(received))] = &back[..] else {
+        panic!("{back:?}");
+    };
+    assert_eq!(received.len(), fonts.len());
+    let mut sharp = 0;
+    for (sent, received) in fonts.iter().zip(received) {
+        let (UiChange::FontAdded(sent), UiChange::FontAdded(received)) = (sent, received) else {
+            panic!("not a font");
+        };
+        same_font(sent, received);
+        sharp += usize::from(sent.sharp.is_some());
+    }
+    assert!(sharp > 0, "the density gave sharper bakes");
+    // The copy goes out as the same bytes again.
+    assert_eq!(encode_batch(&back, &e).unwrap(), bytes);
 }
 
 /// A decimal's arithmetic assumes at most 96 bits and 28 places: one past
@@ -2481,7 +2734,7 @@ fn the_subscription_filters_the_stateless_kinds() {
 /// a link must be built from the same layout).
 #[test]
 fn the_shape_is_pinned() {
-    assert_eq!(shape_hex(), "5bd9aec3dfb4e7f0", "{:#x}", shape());
+    assert_eq!(shape_hex(), "a5d6f5fd8af69fd7", "{:#x}", shape());
 }
 
 /// The size of a representative attach: a snapshot of a busy spot, a full
@@ -2513,4 +2766,183 @@ fn a_representative_attach_is_measured() {
         i / 200
     );
     assert!(s > 0 && i > 0 && c > 0);
+}
+
+/// Each enum's variant names, matched with no wildcard: a variant added to
+/// one of these breaks this test's build until it has a sample.
+macro_rules! variants {
+    ($( $name:ident, $all:ident : $ty:ident { $($v:ident),+ $(,)? } )*) => {$(
+        fn $name(value: &$ty) -> &'static str {
+            match value {
+                $( $ty::$v { .. } => stringify!($v), )+
+            }
+        }
+        const $all: &[&str] = &[$( stringify!($v) ),+];
+    )*};
+}
+
+variants! {
+    item_variant, ITEM: ItemCommand {
+        Use, UseWorldObject, UseOn, PickUp, PlaceInPack, PickUpToMainPack, SetOpenPack,
+        MoveToContainer, Merge, Drop, Give, Wield, WieldSecondary, Unwield, Appraise,
+        StopViewing, Buy, Sell, Vendor, OpenTrade, AddToTrade, AcceptTrade, DeclineTrade,
+        ResetTrade, CloseTrade, HousePurchase, DropInto, DropOnStack, DropOnBackpack,
+        MarkSalvage, AddShortcut, RemoveShortcut, PickUpToShortcut, EnterUseMode,
+        EnterExamineMode, CancelTargetMode, OfferTarget, CloseContainer, Inscribe, Salvage,
+        QueryMana, RefreshCurrentAppraisal, UseSelected, ExamineSelected, PickUpSelected,
+        PlaceSelectedInPack, PickUpSelectedToMainPack, GiveSelectedToPrevious, DropSelected,
+        Place,
+    }
+    gameplay_variant, GAMEPLAY: GameplayCommand {
+        Select, SelectAs, ClearSelection, ClearRevealedSelection, Escape, SelectPrevious,
+        SelectNearestMonster, CycleSelection, UseUnopenedCorpse, SelectSelf,
+        SelectLastAttacker, CycleFellow, Cast, CastWithoutSelecting, ListSpells,
+        ShowEnchantments, ShowCharacter, ForgetSpell, AddFavorite, RemoveFavorite,
+        SetSpellbookFilter, SetDesiredComponent, ClearDesiredComponents, ToggleCombat,
+        SetCombatMode, Attack, AttackInput, SetAttackPower, ShowCombat, Book, Chess, Barber,
+        Fellowship, Allegiance, QueryHouse, ShowHouse, ShowVitae, SetTitle, ShowTitles,
+    }
+    lifecycle_variant, LIFECYCLE: LifecycleCommand {
+        Reconnect, LogOff, EndCharacterSession, ShowSelection, Highlight, Enter,
+        RequestDelete, ConfirmDelete, Restore, Cancel, SetNextLogin, Create,
+    }
+    creation_variant, CREATION: CreationCommand {
+        Show, SelectHeritage, SelectGender, SelectTemplate, SetAttribute, SetAttributeLock,
+        TrainSkill, SpecializeSkill, UntrainSkill, SetAppearance, SetShade, SelectStartArea,
+        SetName, SetSlot, Finish, AcknowledgeRejection, RandomizeCharacter,
+        RandomizeAppearance, RandomizeClothing,
+    }
+    movement_variant, MOVEMENT: MovementCommand {
+        Keys, ToggleRunLock, Stop, Posture, Move, Jump, StopMoves, TurnToHeading,
+        FirstPersonTurn, Status, BeginMouseLook, MouseTurn, StopMouseDrift, EndMouseLook,
+        BeginModernMouseLook, MouseLookFacing, Motion, ReleaseKeys,
+    }
+    character_variant, CHARACTER: CharacterCommand {
+        RaiseAttribute, RaiseVital, RaiseSkill, TrainSkill,
+    }
+    chat_entry_variant, CHAT_ENTRY: ChatEntryCommand {
+        Submit, SetDraft, Compose, SetChannel, SetTellTarget, RecallPrevious, RecallNext,
+        ResetRecall, Clear,
+    }
+    journal_variant, JOURNAL: JournalCommand {
+        NewPage, DeletePage, GotoPage, Edit, RecordLocation, SetTimer, StartTimer, ResetTimer,
+    }
+    ui_input_variant, UI_INPUT: UiInput {
+        Action, PanelShown, Pointer, ClientWindows, ClientChords, Hotkey, InputAction, Theme,
+        FileIconsShown, DisplayDensity, CanvasHosted, DialogAnswered,
+    }
+    interface_variant, INTERFACE: InterfaceEvent {
+        Items, Player, State, Appraisal, Trade, Vendor, Social, Contracts, Book, House,
+        HousePurchase, Journal, OpenSalvage, Chess, Barber, BeginGame, OpenContainedContainer,
+        ItemMana, PluginUi, Titles, ChatEntry, Selection,
+    }
+    ui_change_variant, UI_CHANGE: UiChange {
+        Clear, PanelAdded, PanelRemoved, PanelValues, PanelRequestedVisible, ControlLabel,
+        ControlVisible, CanvasAdded, CanvasRemoved, CanvasPaint, CanvasPlacement,
+        CanvasListening, CanvasReleasePointer, CanvasResized, ImageAdded, FileIcon,
+        ImageRemoved, Labels, Lines, Triangles, Icons, Shapes, ProjectileDebug, ClientWindow,
+        Hotkeys, FontAdded, FontRemoved, DialogAdded, DialogRemoved, Modal,
+    }
+    pregame_variant, PREGAME: PreGameEvent { Connection, Selection, Creation, Options, Refused }
+    portal_variant, PORTAL: PortalSpaceEvent {
+        Entered, Destination, Arrived, LoginEntering, LoginDestination, LoginWithdrawn,
+        LogoutStarted,
+    }
+    window_request_variant, WINDOW_REQUEST: WindowRequest {
+        ToggleFrameRate, SaveUi, LoadUi, SaveAutoUi, LoadAutoUi, SetLandscapeRadius,
+        SetFieldOfView, SetClipboard, Minimize, Restore, GameplayOptionsPage,
+    }
+    delta_variant, DELTA: ObjectDelta { Upsert, Remove }
+}
+
+/// A plugin font change, small enough to bake quickly.
+fn font_change() -> UiChange {
+    use ac_plugin_ui::fonts::{FontView, FontWeight, SharpBake, bake_bundled};
+    let ranges = [(0x41, 0x43)];
+    UiChange::FontAdded(Box::new(FontView {
+        owner: "example".into(),
+        handle: 7,
+        font: Arc::new(bake_bundled(FontWeight::Regular, 12.0, &ranges).unwrap()),
+        sharp: Some(SharpBake {
+            scale: 2.0,
+            font: Arc::new(bake_bundled(FontWeight::Regular, 24.0, &ranges).unwrap()),
+        }),
+    }))
+}
+
+#[test]
+fn every_sub_variant_has_a_sample() {
+    let mut seen: BTreeMap<&str, HashSet<&str>> = BTreeMap::new();
+    let mut note = |kind: &'static str, name: &'static str| {
+        seen.entry(kind).or_default().insert(name);
+    };
+    for command in every_command() {
+        match &command {
+            SessionCommand::Item(c) => note("item", item_variant(c)),
+            SessionCommand::Gameplay(c) => note("gameplay", gameplay_variant(c)),
+            SessionCommand::Lifecycle(c) => {
+                note("lifecycle", lifecycle_variant(c));
+                if let LifecycleCommand::Create(c) = c {
+                    note("creation", creation_variant(c));
+                }
+            }
+            SessionCommand::Movement(c) => note("movement", movement_variant(c)),
+            SessionCommand::Character(c) => note("character", character_variant(c)),
+            SessionCommand::ChatEntry(c) => note("chat entry", chat_entry_variant(c)),
+            SessionCommand::Journal(c) => note("journal", journal_variant(c)),
+            SessionCommand::PluginUi(c) => note("ui input", ui_input_variant(c)),
+            _ => {}
+        }
+    }
+    let (e, _) = contexts();
+    let mut changes = vec![font_change()];
+    for event in every_event(e.epoch) {
+        match &event {
+            PresentationEvent::Interface(i) => {
+                note("interface", interface_variant(i));
+                if let InterfaceEvent::PluginUi(c) = i {
+                    changes.extend(c.iter().cloned());
+                }
+            }
+            PresentationEvent::PreGame(p) => note("pregame", pregame_variant(p)),
+            PresentationEvent::PortalSpace(p) => note("portal", portal_variant(p)),
+            PresentationEvent::WindowRequest(w) => {
+                note("window request", window_request_variant(w))
+            }
+            PresentationEvent::Deltas(d) => d.iter().for_each(|d| note("delta", delta_variant(d))),
+            _ => {}
+        }
+    }
+    for change in &changes {
+        note("ui change", ui_change_variant(change));
+    }
+    for (kind, all) in [
+        ("item", ITEM),
+        ("gameplay", GAMEPLAY),
+        ("lifecycle", LIFECYCLE),
+        ("creation", CREATION),
+        ("movement", MOVEMENT),
+        ("character", CHARACTER),
+        ("chat entry", CHAT_ENTRY),
+        ("journal", JOURNAL),
+        ("ui input", UI_INPUT),
+        ("interface", INTERFACE),
+        ("ui change", UI_CHANGE),
+        ("pregame", PREGAME),
+        ("portal", PORTAL),
+        ("window request", WINDOW_REQUEST),
+        ("delta", DELTA),
+    ] {
+        let missing: Vec<&str> = all
+            .iter()
+            .copied()
+            .filter(|name| !seen.get(kind).is_some_and(|s| s.contains(name)))
+            .collect();
+        assert!(missing.is_empty(), "{kind} has no sample of {missing:?}");
+    }
+    // The font sample crosses too.
+    let event = PresentationEvent::Interface(InterfaceEvent::PluginUi(vec![font_change()]));
+    let (e, d) = contexts();
+    let back = decode_batch(&encode_batch(&[event], &e).unwrap(), &d).unwrap();
+    assert_eq!(back.len(), 1);
 }
