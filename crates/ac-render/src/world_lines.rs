@@ -111,21 +111,7 @@ impl LineShape {
     }
 }
 
-/// A plugin's line placed in the drawing frame.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PlacedLine {
-    /// One end, drawing frame.
-    pub start: Vec3,
-    /// The other end, drawing frame.
-    pub end: Vec3,
-    /// `0xRRGGBB`.
-    pub color_rgb: u32,
-    /// Kept just above the ground along its length.
-    pub follow_terrain: bool,
-    /// Thickness, metres.
-    pub width_metres: f32,
-}
-
+pub use ac_ui_window::world::PlacedLine;
 /// The pieces of one line that are drawn: the line is cut into `count`
 /// equal pieces and pieces `first` up to, not including, `last` are drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]

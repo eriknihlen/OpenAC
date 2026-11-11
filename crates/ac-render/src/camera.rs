@@ -114,14 +114,7 @@ impl Lens {
     }
 }
 
-/// The direction an orientation faces in the ground plane, as an angle from
-/// +x (east) toward +y (north), radians in -pi..=pi. An object's forward
-/// axis is its local +y.
-#[must_use]
-pub fn yaw_of(orientation: Quat) -> f32 {
-    let forward = orientation * Vec3::Y;
-    forward.y.atan2(forward.x)
-}
+pub use ac_ui_window::world::yaw_of;
 
 /// `angle` wrapped to (-π, π], radians.
 #[must_use]

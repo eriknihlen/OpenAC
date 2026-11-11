@@ -4,7 +4,7 @@
 //! player moves windows, `/saveui`, `/loadui`, `/saveautoui`,
 //! `/loadautoui`), and the client commands that act on the interface.
 
-use ac_host::settings::SettingsStore;
+use ac_plugin_ui::control_state::ControlStateFile;
 use ac_runtime::communication::WindowRequest;
 use ac_runtime::session::interface::InterfaceState;
 use ac_ui::font::DEFAULT_FONT_ID;
@@ -44,11 +44,11 @@ pub const JUMP_POWERBAR_WINDOW: &str = "jump-powerbar";
 
 /// A clock started with the window's UI.
 #[derive(Debug, Clone, Copy)]
-pub struct StatusClock(std::time::Instant);
+pub struct StatusClock(ac_clock::Instant);
 
 impl Default for StatusClock {
     fn default() -> Self {
-        Self(std::time::Instant::now())
+        Self(ac_clock::Instant::now())
     }
 }
 
@@ -239,11 +239,17 @@ impl WindowUi {
         self.host.root.tooltip_delay_ms = (misc.tooltip_delay_seconds * 1000.0) as i64;
     }
 
-    /// Where window layouts are saved (the settings file).
-    pub fn set_layout_store(&mut self, store: Option<SettingsStore>) {
-        self.plugins.set_control_state_file(store.clone());
-        if let Some(layouts) = self.status.layouts.as_mut() {
-            layouts.set_store(store.map(|s| Box::new(s) as Box<dyn LayoutStore>));
+    /// Where window layouts and the plugin windows' remembered control
+    /// values are kept (natively both in the settings file; none: they last
+    /// the session).
+    pub fn set_stores(
+        &mut self,
+        layouts: Option<Box<dyn LayoutStore>>,
+        control_state: Option<Box<dyn ControlStateFile>>,
+    ) {
+        self.plugins.set_control_state_file(control_state);
+        if let Some(persistence) = self.status.layouts.as_mut() {
+            persistence.set_store(layouts);
         }
     }
 
@@ -314,7 +320,7 @@ impl WindowUi {
 
     /// Take what plugins asked of the OS window: minimize (`true`) or
     /// restore, oldest first.
-    pub(crate) fn take_minimize_requests(&mut self) -> Vec<bool> {
+    pub fn take_minimize_requests(&mut self) -> Vec<bool> {
         std::mem::take(&mut self.minimize_requests)
     }
 

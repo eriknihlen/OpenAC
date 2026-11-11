@@ -27,6 +27,8 @@ glam.workspace = true
 bytemuck.workspace = true
 rustc-hash.workspace = true
 ac-ui.workspace = true
+# The UI without the GPU: the scene, the panels and their glue, drawn here.
+ac-ui-window.workspace = true
 # The window's copy of the session's plugin UI (data only; the plugin host
 # stays out of the window's graph).
 ac-plugin-ui.workspace = true

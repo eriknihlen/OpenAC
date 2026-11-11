@@ -274,6 +274,7 @@ dependencies = [
  "ac-proto",
  "ac-runtime",
  "ac-ui",
+ "ac-ui-window",
  "ac-vfx",
  "arboard",
  "bytemuck",
@@ -331,6 +332,23 @@ dependencies = [
 [[package]]
 name = "ac-ui-web"
 version = "0.2.6"
+
+[[package]]
+name = "ac-ui-window"
+version = "0.2.6"
+dependencies = [
+ "ac-clock",
+ "ac-core",
+ "ac-dat",
+ "ac-host",
+ "ac-physics",
+ "ac-plugin-ui",
+ "ac-proto",
+ "ac-runtime",
+ "ac-ui",
+ "bytemuck",
+ "glam",
+]
 
 [[package]]
 name = "ac-vfx"

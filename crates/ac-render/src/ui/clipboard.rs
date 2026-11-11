@@ -65,3 +65,14 @@ impl SystemClipboard {
         (!std::mem::replace(&mut self.failure_reported, true)).then_some(error)
     }
 }
+
+/// The window UI's clipboard is the system's.
+impl ac_ui_window::ui::clipboard::Clipboard for SystemClipboard {
+    fn text(&mut self) -> Result<String, Option<String>> {
+        SystemClipboard::text(self)
+    }
+
+    fn set_text(&mut self, text: &str) -> Result<(), Option<String>> {
+        SystemClipboard::set_text(self, text)
+    }
+}

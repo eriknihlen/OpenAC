@@ -12,7 +12,7 @@ use ac_dat::texture::DecodedTexture;
 use ac_ui::draw::TextureRef;
 use ac_ui::icons::{IconUploader, Rgba};
 
-use super::gpu::UiPixels;
+use super::textures::UiPixels;
 
 #[derive(Debug, Default)]
 struct Store {

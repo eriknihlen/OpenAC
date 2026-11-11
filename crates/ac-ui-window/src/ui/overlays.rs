@@ -20,9 +20,8 @@ use ac_ui::overlay::{
 use glam::{Mat4, Quat, Vec3};
 
 use super::window::WindowUi;
-use crate::renderer::WorldRenderer;
 use crate::scene::Scene;
-use crate::world_lines::PlacedLine;
+use crate::world::{PlacedLine, WorldFrame};
 
 /// The character option bit of the vivid targeting indicator (options 1).
 const VIVID_TARGETING_BIT: u32 = 0x0000_8000;
@@ -136,7 +135,7 @@ impl WindowUi {
 /// The session's navigation view (OpenAC `NavMeshDebugOverlay`) in the
 /// drawing frame: its segments are measured from the corner of its frame's
 /// centre landblock, which the world's floating origin places.
-pub(crate) fn navigation_lines(world: &WorldRenderer, scene: &Scene) -> Vec<PlacedLine> {
+pub fn navigation_lines(world: &dyn WorldFrame, scene: &Scene) -> Vec<PlacedLine> {
     let view = scene.navigation();
     if view.lines.is_empty() {
         return Vec::new();
@@ -211,7 +210,7 @@ pub fn selection_sphere(
 /// Where `object` stands in the drawing frame: its position, or, held by
 /// another, the root pose the world renderer last published for it (none
 /// before one was).
-pub(crate) fn placement(world: &WorldRenderer, object: &ObjectView) -> Option<Placement> {
+pub fn placement(world: &dyn WorldFrame, object: &ObjectView) -> Option<Placement> {
     if object.parent.is_some() {
         return world.published_root_pose(object.guid).map(Placement::Held);
     }
@@ -235,11 +234,11 @@ pub(crate) fn placement(world: &WorldRenderer, object: &ObjectView) -> Option<Pl
 /// 0.1 m sphere at its base when the setup has none).
 ///
 /// `viewport` is the framebuffer in UI units
-/// (`crate::ui_scale::UiScale::overlay_viewport`): what the camera puts at
+/// (the host's UI scale gives it): what the camera puts at
 /// a pixel the overlays place at that pixel in units, so the UI scale
 /// draws it back over the pixel.
-pub(crate) fn world_view(
-    world: &WorldRenderer,
+pub fn world_view(
+    world: &dyn WorldFrame,
     scene: &Scene,
     dats: &DatCollection,
     objects: &ClientObjectTable,

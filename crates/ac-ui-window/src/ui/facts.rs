@@ -83,7 +83,7 @@ pub struct InterfaceFacts {
     pub contracts: Option<ContractFacts>,
     /// When the player's numbers arrived (their session clock runs on
     /// from it).
-    player_at: Option<std::time::Instant>,
+    player_at: Option<ac_clock::Instant>,
     /// The open book, once sent.
     pub book: Option<BookView>,
     /// The house, once sent.
@@ -129,7 +129,7 @@ impl InterfaceFacts {
             }
             InterfaceEvent::Player(facts) => {
                 self.player = Some(*facts);
-                self.player_at = Some(std::time::Instant::now());
+                self.player_at = Some(ac_clock::Instant::now());
                 self.dirty.player = true;
             }
             InterfaceEvent::State(state) => {

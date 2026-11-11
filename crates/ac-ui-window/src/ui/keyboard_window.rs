@@ -25,7 +25,9 @@ use ac_ui::panels::keyboard_config::{
     TEMPLATE_STRING_TABLE_ID,
 };
 use ac_ui::root::ElementMessage;
-use ac_ui::storage::{FileUiStorage, UiStorage, keys};
+#[cfg(not(target_arch = "wasm32"))]
+use ac_ui::storage::FileUiStorage;
+use ac_ui::storage::{UiStorage, keys};
 use ac_ui::strings::{StringResolver, compute_hash};
 use ac_ui::tree::ElementId;
 
@@ -56,6 +58,7 @@ impl KeyboardFiles {
     }
 
     /// The storage over these files, for [`WindowUi::build_with`].
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn storage(&self) -> FileUiStorage {
         FileUiStorage::for_key_bindings(&self.bindings_file, &self.keymap_directory)
@@ -165,7 +168,7 @@ impl WindowUi {
             StringResolver::new(move |id| dats.get::<StringTable>(id).ok().flatten());
         let names = RetailKeyNames::new(
             Box::new(move |table, hash| name_strings.resolve(table, hash, 0)),
-            crate::platform::key_name_provider(),
+            (self.os_key_names)(),
         );
         let filename = self
             .storage

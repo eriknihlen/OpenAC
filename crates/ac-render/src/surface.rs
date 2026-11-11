@@ -40,7 +40,7 @@ use crate::renderer::{WorldRenderer, WorldSettings, WorldStats};
 use crate::scene::{SceneEffect, SceneSource};
 use crate::title::{TitleFacts, TitleStats, TitleSubject, format_title};
 use crate::ui::input::{self as ui_input, Routed, WorldInput};
-use crate::ui::{UiBatch, UiRenderer, WindowUi};
+use crate::ui::{SettingsStores, UiBatch, UiRenderer, WindowUi};
 use crate::ui_scale::UiScale;
 use crate::{RenderError, WindowSpec};
 use ac_core::sky::EnvironmentEffect;
@@ -537,6 +537,8 @@ impl AttachedWindow {
             });
             match built {
                 Ok(mut ui) => {
+                    ui.set_clipboard(Box::new(crate::ui::clipboard::SystemClipboard::new()));
+                    ui.set_os_key_names(crate::platform::key_name_provider);
                     notices.extend(ui.take_notices());
                     notices.push(format!("ui: mounted {}", ui.mounted().join(", ")));
                     Some(ui)
@@ -2776,7 +2778,9 @@ impl AttachedWindow {
             _ => Vec::new(),
         };
         ui.set_plugin_world(
-            self.world.as_ref(),
+            self.world
+                .as_ref()
+                .map(|w| w as &dyn ac_ui_window::world::WorldFrame),
             self.scene.as_deref().map(SceneSource::scene),
         );
         // The navigation view and the plugins' world lines, triangles and

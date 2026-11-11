@@ -19,6 +19,7 @@ pub(crate) mod pipelines;
 mod portal;
 mod shadows;
 mod sink;
+mod ui_world;
 mod viewport;
 mod world_lines;
 pub(crate) mod world_pipelines;

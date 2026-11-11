@@ -9,8 +9,8 @@
 //! coordinator).
 
 use std::sync::Arc;
-use std::time::Instant;
 
+use ac_clock::Instant;
 use ac_dat::DatCollection;
 use ac_runtime::session::SessionCommand;
 use ac_ui::plugin::dock::{self, PluginDock};

@@ -41,15 +41,7 @@ pub struct WorldTriangleVertex {
     pub color: [f32; 4],
 }
 
-/// A plugin's triangle placed in the drawing frame.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PlacedTriangle {
-    /// The corners, drawing frame.
-    pub corners: [Vec3; 3],
-    /// Each corner's colour (0..1, alpha last), blended across the face.
-    pub colors: [[f32; 4]; 3],
-}
-
+pub use ac_ui_window::world::PlacedTriangle;
 /// A triangle that is drawn this frame, and how far it is.
 struct Planned<'a> {
     triangle: &'a PlacedTriangle,
