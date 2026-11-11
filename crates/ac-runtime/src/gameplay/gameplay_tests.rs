@@ -1259,15 +1259,24 @@ fn a_mode_change_parked_behind_the_body_reaches_the_log_with_its_reason() {
     let _ = f.sent();
     f.run(GameplayCommand::SetCombatMode(CombatMode::MELEE));
     let (ctx, gameplay) = f.ctx();
-    assert_eq!(gameplay.parked_mode_log_line(&ctx), None, "the wait starts");
+    assert!(
+        gameplay.parked_mode_log_line(&ctx).is_none(),
+        "the wait starts"
+    );
 
     f.clocks.session += Duration::from_secs(5);
     let (ctx, gameplay) = f.ctx();
     assert_eq!(
-        gameplay.parked_mode_log_line(&ctx).as_deref(),
+        gameplay
+            .parked_mode_log_line(&ctx)
+            .map(|(line, _)| line)
+            .as_deref(),
         Some("change to Melee parked 5.0 s: mode=NonCombat blocked by: no body")
     );
-    assert_eq!(gameplay.parked_mode_log_line(&ctx), None, "not every pass");
+    assert!(
+        gameplay.parked_mode_log_line(&ctx).is_none(),
+        "not every pass"
+    );
 }
 
 #[test]
@@ -1276,6 +1285,7 @@ fn the_parked_line_names_the_stance_the_motion_and_what_fails() {
         ParkedModeReport::StillParked {
             mode: CombatMode::NON_COMBAT,
             seconds: 35.0,
+            first: false,
         },
         CombatMode::MISSILE,
         Some(BodyMotion {
@@ -1305,4 +1315,47 @@ fn the_parked_line_names_the_stance_the_motion_and_what_fails() {
         ),
         "change to NonCombat went out after 40.0 s"
     );
+}
+
+#[test]
+fn the_first_report_of_a_wait_carries_the_history_that_led_to_it() {
+    let mut f = Fixture::in_the_field();
+    f.body = Some(Movement::new(false));
+    let _ = f.sent();
+    f.run(GameplayCommand::SetCombatMode(CombatMode::MELEE));
+    let (ctx, gameplay) = f.ctx();
+    assert!(
+        gameplay.parked_mode_log_line(&ctx).is_none(),
+        "the wait starts"
+    );
+    let update = |sequence| {
+        Inbound::PrivateUpdatePropertyInt(PrivateUpdatePropertyInt {
+            sequence,
+            property: COMBAT_MODE_PROPERTY,
+            value: CombatMode::NON_COMBAT.bits().cast_signed(),
+        })
+    };
+    // The server's word, then an older one that arrives late.
+    f.apply(&update(5));
+    f.apply(&update(4));
+    f.gameplay.note_swap_asked_again(CombatMode::MISSILE, 31.0);
+
+    f.clocks.session += Duration::from_secs(5);
+    let (ctx, gameplay) = f.ctx();
+    let (_, history) = gameplay.parked_mode_log_line(&ctx).expect("reported");
+    assert_eq!(
+        history.expect("the first report carries the history"),
+        [
+            "s=30.000 request for Melee held back until the body is ready",
+            "s=30.000 server update: NonCombat seq=5 taken",
+            "s=30.000 server update: NonCombat seq=4 refused as older",
+            "s=31.000 weapon swap asked for Missile again",
+        ]
+    );
+
+    // A later report of the same wait does not repeat it.
+    f.clocks.session += Duration::from_secs(30);
+    let (ctx, gameplay) = f.ctx();
+    let (_, history) = gameplay.parked_mode_log_line(&ctx).expect("reported again");
+    assert!(history.is_none());
 }

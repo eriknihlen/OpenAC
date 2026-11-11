@@ -498,8 +498,12 @@ impl Inventory {
     /// The combat mode changed. A wield made in combat waits out the
     /// server's stance shuffle (ready, peace, ready, peace); when it ends at
     /// peace after the ready mode came back, the ready mode is asked for
-    /// again.
-    pub fn on_combat_mode_changed(&mut self, mode: CombatMode, ctx: &mut ItemContext<'_>) {
+    /// again. Returns the mode asked for, when it was.
+    pub fn on_combat_mode_changed(
+        &mut self,
+        mode: CombatMode,
+        ctx: &mut ItemContext<'_>,
+    ) -> Option<CombatMode> {
         if let Some(PendingSwitch {
             combat_mode_after_wield: Some(ready),
             ..
@@ -508,9 +512,7 @@ impl Inventory {
         {
             self.wield.transition_observed_during_switch = true;
         }
-        let Some(settlement) = self.wield.settlement else {
-            return;
-        };
+        let settlement = self.wield.settlement?;
         if mode == settlement.ready_mode {
             self.wield.settlement = (settlement.phase == SettlementPhase::SawTransitionalPeace
                 || settlement.expect_trailing_peace)
@@ -518,19 +520,21 @@ impl Inventory {
                     phase: SettlementPhase::SawReadyAfterPeace,
                     ..settlement
                 });
-            return;
+            return None;
         }
         if mode != CombatMode::NON_COMBAT {
-            return;
+            return None;
         }
         if settlement.phase == SettlementPhase::SawReadyAfterPeace {
             self.wield.settlement = None;
             ctx.send(|seq| build_change_combat_mode(seq, settlement.ready_mode.bits()));
+            Some(settlement.ready_mode)
         } else {
             self.wield.settlement = Some(CombatSettlement {
                 phase: SettlementPhase::SawTransitionalPeace,
                 ..settlement
             });
+            None
         }
     }
 

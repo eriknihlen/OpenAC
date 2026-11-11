@@ -311,7 +311,8 @@ fn a_long_wait_is_reported_then_repeated_then_ended() {
         w.observe(peace, CombatMode::MISSILE, 105.0),
         Some(ParkedModeReport::StillParked {
             mode: CombatMode::NON_COMBAT,
-            seconds: 5.0
+            seconds: 5.0,
+            first: true
         })
     );
     // Asked again and again (a plugin re-requesting each pass): the wait
@@ -321,7 +322,8 @@ fn a_long_wait_is_reported_then_repeated_then_ended() {
         w.observe(peace, CombatMode::MISSILE, 135.0),
         Some(ParkedModeReport::StillParked {
             mode: CombatMode::NON_COMBAT,
-            seconds: 35.0
+            seconds: 35.0,
+            first: false
         })
     );
     assert_eq!(
@@ -361,6 +363,40 @@ fn a_reported_wait_replaced_by_another_mode_is_given_up() {
             ..
         })
     ));
+}
+
+#[test]
+fn the_history_keeps_the_latest_events_and_words_each() {
+    let mut h = CombatModeHistory::default();
+    for i in 0..COMBAT_MODE_HISTORY_LEN {
+        h.record(i as f64, CombatModeHistoryEvent::BodyStance(0x8000_003D));
+    }
+    h.record(
+        100.0,
+        CombatModeHistoryEvent::RequestSent(CombatMode::MISSILE),
+    );
+    h.record(
+        100.5,
+        CombatModeHistoryEvent::ServerUpdate {
+            mode: CombatMode::NON_COMBAT,
+            sequence: 9,
+            taken: false,
+        },
+    );
+    assert_eq!(h.entries().len(), COMBAT_MODE_HISTORY_LEN);
+    // The two oldest made room.
+    assert_eq!(h.entries().next().map(|e| e.0), Some(2.0));
+    let lines = h.lines();
+    assert_eq!(lines[0], "s=2.000 body stance now 0x8000003D");
+    assert_eq!(
+        &lines[lines.len() - 2..],
+        [
+            "s=100.000 request for Missile sent",
+            "s=100.500 server update: NonCombat seq=9 refused as older",
+        ]
+    );
+    h.reset();
+    assert!(h.lines().is_empty());
 }
 
 // -- Attack -----------------------------------------------------------------------

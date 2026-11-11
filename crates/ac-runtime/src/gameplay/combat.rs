@@ -214,8 +214,13 @@ pub const PARKED_MODE_REPEAT_SECONDS: f64 = 30.0;
 /// What the parked-change watch has to say on a pass.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ParkedModeReport {
-    /// The change to `mode` has waited `seconds` and still waits.
-    StillParked { mode: CombatMode, seconds: f64 },
+    /// The change to `mode` has waited `seconds` and still waits; `first`
+    /// on the first report of this wait.
+    StillParked {
+        mode: CombatMode,
+        seconds: f64,
+        first: bool,
+    },
     /// A change the log reported went out after `seconds`.
     WentOut { mode: CombatMode, seconds: f64 },
     /// A change the log reported was given up after `seconds` (another
@@ -255,12 +260,14 @@ impl ParkedModeWatch {
                 if now < parked.next_report {
                     return None;
                 }
+                let first = !parked.reported;
                 parked.reported = true;
                 parked.next_report = now + PARKED_MODE_REPEAT_SECONDS;
                 self.parked = Some(parked);
                 Some(ParkedModeReport::StillParked {
                     mode,
                     seconds: now - parked.since,
+                    first,
                 })
             }
             (Some(mode), old) => {
@@ -300,6 +307,109 @@ impl ParkedModeWatch {
                 seconds,
             }
         })
+    }
+}
+
+/// How many combat-mode events the history keeps.
+pub const COMBAT_MODE_HISTORY_LEN: usize = 32;
+
+/// One combat-mode event the history keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombatModeHistoryEvent {
+    /// A request for `mode` went out at once.
+    RequestSent(CombatMode),
+    /// A request for the mode the client was already in.
+    RequestAlreadyThere(CombatMode),
+    /// A request for `mode` was held back until the body is ready.
+    RequestHeldBack(CombatMode),
+    /// A request was refused (a teleport, an invalid mode, a held item).
+    RequestRefused,
+    /// A held-back request for `mode` went out.
+    HeldBackSent(CombatMode),
+    /// A weapon swap made in combat asked for `mode` again.
+    SwapAskedAgain(CombatMode),
+    /// The server's combat-mode update, its sequence, and whether the
+    /// client took it (an update older than the last taken is refused).
+    ServerUpdate {
+        mode: CombatMode,
+        sequence: u8,
+        taken: bool,
+    },
+    /// The client's combat mode became `mode`.
+    ModeNow(CombatMode),
+    /// The body's stance became `style` (a full motion command).
+    BodyStance(u32),
+}
+
+/// The last [`COMBAT_MODE_HISTORY_LEN`] combat-mode events, with the
+/// session clock in seconds, for the client log: written out with the first
+/// report of a mode change that waits on the body, so the log shows how it
+/// came to wait. A diagnostic only: it decides nothing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CombatModeHistory {
+    entries: std::collections::VecDeque<(f64, CombatModeHistoryEvent)>,
+}
+
+impl CombatModeHistory {
+    /// Keep `event` at `now`, dropping the oldest past the limit.
+    pub fn record(&mut self, now: f64, event: CombatModeHistoryEvent) {
+        if self.entries.len() == COMBAT_MODE_HISTORY_LEN {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((now, event));
+    }
+
+    /// Forget everything (the session ended).
+    pub fn reset(&mut self) {
+        self.entries.clear();
+    }
+
+    /// The events kept, oldest first.
+    pub fn entries(&self) -> impl ExactSizeIterator<Item = &(f64, CombatModeHistoryEvent)> {
+        self.entries.iter()
+    }
+
+    /// One log line per event, oldest first: `s=<session seconds> <what>`.
+    #[must_use]
+    pub fn lines(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .map(|(at, event)| format!("s={at:.3} {}", describe_history_event(*event)))
+            .collect()
+    }
+}
+
+fn mode_name(mode: CombatMode) -> &'static str {
+    mode.name().unwrap_or("Unknown")
+}
+
+fn describe_history_event(event: CombatModeHistoryEvent) -> String {
+    use CombatModeHistoryEvent as E;
+    match event {
+        E::RequestSent(mode) => format!("request for {} sent", mode_name(mode)),
+        E::RequestAlreadyThere(mode) => {
+            format!("request for {}: already in it", mode_name(mode))
+        }
+        E::RequestHeldBack(mode) => format!(
+            "request for {} held back until the body is ready",
+            mode_name(mode)
+        ),
+        E::RequestRefused => "request refused".to_owned(),
+        E::HeldBackSent(mode) => format!("held-back request for {} sent", mode_name(mode)),
+        E::SwapAskedAgain(mode) => {
+            format!("weapon swap asked for {} again", mode_name(mode))
+        }
+        E::ServerUpdate {
+            mode,
+            sequence,
+            taken,
+        } => format!(
+            "server update: {} seq={sequence} {}",
+            mode_name(mode),
+            if taken { "taken" } else { "refused as older" }
+        ),
+        E::ModeNow(mode) => format!("client mode now {}", mode_name(mode)),
+        E::BodyStance(style) => format!("body stance now 0x{style:08X}"),
     }
 }
 

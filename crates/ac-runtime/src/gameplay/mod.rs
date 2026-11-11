@@ -57,9 +57,9 @@ pub use barber::{BarberCommand, BarberState, BarberView};
 pub use book::{BookFlushAction, BookPageAction, BookPageTurn, BookState, BookView};
 pub use chess::{ChessCommand, ChessStage, ChessState, ChessView};
 pub use combat::{
-    CombatAttackCommand, CombatAttackState, CombatModeRequestResult, CombatModeRequestStatus,
-    CombatModeState, CombatTargetState, CreatureDeathState, HealthQuery, InputActivation,
-    ParkedModeReport, ParkedModeWatch,
+    CombatAttackCommand, CombatAttackState, CombatModeHistory, CombatModeHistoryEvent,
+    CombatModeRequestResult, CombatModeRequestStatus, CombatModeState, CombatTargetState,
+    CreatureDeathState, HealthQuery, InputActivation, ParkedModeReport, ParkedModeWatch,
 };
 pub use death::{
     CorpseSummary, DeathState, LAST_OUTSIDE_DEATH_POSITION, VitaeView, corpses,
@@ -494,6 +494,8 @@ pub struct Gameplay {
     combat: CombatState,
     mode: CombatModeState,
     parked_mode_watch: ParkedModeWatch,
+    combat_mode_history: CombatModeHistory,
+    last_body_style: Option<u32>,
     attack: CombatAttackState,
     target: CombatTargetState,
     deaths: CreatureDeathState,
@@ -536,6 +538,8 @@ impl Gameplay {
             combat: CombatState::new(),
             mode: CombatModeState::default(),
             parked_mode_watch: ParkedModeWatch::default(),
+            combat_mode_history: CombatModeHistory::default(),
+            last_body_style: None,
             attack: CombatAttackState::default(),
             target: CombatTargetState::default(),
             deaths: CreatureDeathState::default(),
@@ -889,16 +893,27 @@ impl Gameplay {
             // A combat mode the world refused as older than the one it
             // holds changes nothing.
             Inbound::PrivateUpdatePropertyInt(update)
-                if update.property == COMBAT_MODE_PROPERTY && !ctx.world.refused_last_update() =>
+                if update.property == COMBAT_MODE_PROPERTY =>
             {
                 let mode = CombatMode(update.value.cast_unsigned());
-                if matches!(
-                    mode,
-                    CombatMode::NON_COMBAT
-                        | CombatMode::MELEE
-                        | CombatMode::MISSILE
-                        | CombatMode::MAGIC
-                ) {
+                let taken = !ctx.world.refused_last_update();
+                self.combat_mode_history.record(
+                    ctx.now(),
+                    CombatModeHistoryEvent::ServerUpdate {
+                        mode,
+                        sequence: update.sequence,
+                        taken,
+                    },
+                );
+                if taken
+                    && matches!(
+                        mode,
+                        CombatMode::NON_COMBAT
+                            | CombatMode::MELEE
+                            | CombatMode::MISSILE
+                            | CombatMode::MAGIC
+                    )
+                {
                     let event = self.combat.set_server_combat_mode(mode);
                     self.combat_event(event, ctx);
                 }
@@ -1251,33 +1266,76 @@ impl Gameplay {
             .mode
             .apply_pending_mode(current, &mut ops, readiness.as_dyn())
         {
+            self.combat_mode_history
+                .record(now, CombatModeHistoryEvent::HeldBackSent(mode));
             let event = self.combat.set_combat_mode(mode);
             self.finish(ctx);
             self.combat_event(event, ctx);
         }
-        if let Some(line) = self.parked_mode_log_line(ctx) {
-            eprintln!("[combat-mode] {} {line}", crate::world::motion_log_stamp());
+        self.note_body_stance(ctx);
+        if let Some((line, history)) = self.parked_mode_log_line(ctx) {
+            let stamp = crate::world::motion_log_stamp();
+            eprintln!("[combat-mode] {stamp} {line}");
+            if let Some(history) = history {
+                eprintln!(
+                    "[combat-mode-history] {stamp} s={now:.3} the last {} combat-mode events, oldest first:",
+                    history.len()
+                );
+                for entry in history {
+                    eprintln!("[combat-mode-history]   {entry}");
+                }
+            }
         }
         let mut ops = ops!(self, ctx);
         self.attack.tick(&mut ops, now);
         self.finish(ctx);
     }
 
+    /// The history notes each stance the body takes, as a pass sees it.
+    fn note_body_stance(&mut self, ctx: &GameplayContext<'_>) {
+        let style = ctx
+            .body
+            .as_deref()
+            .and_then(Movement::body_motion)
+            .map(|m| m.current_style);
+        if style != self.last_body_style {
+            self.last_body_style = style;
+            if let Some(style) = style {
+                self.combat_mode_history
+                    .record(ctx.now(), CombatModeHistoryEvent::BodyStance(style));
+            }
+        }
+    }
+
+    /// A weapon swap made in combat asked for its mode again (the
+    /// inventory sends that request itself): the history notes it.
+    pub fn note_swap_asked_again(&mut self, mode: CombatMode, now: f64) {
+        self.combat_mode_history
+            .record(now, CombatModeHistoryEvent::SwapAskedAgain(mode));
+    }
+
     /// What the client log says this pass about a mode change waiting on
-    /// the body, if anything.
-    fn parked_mode_log_line(&mut self, ctx: &GameplayContext<'_>) -> Option<String> {
+    /// the body, if anything: its line, and with the first report of a
+    /// wait the history that led to it.
+    fn parked_mode_log_line(
+        &mut self,
+        ctx: &GameplayContext<'_>,
+    ) -> Option<(String, Option<Vec<String>>)> {
         let current = self.combat.current_mode();
         let report =
             self.parked_mode_watch
                 .observe(self.mode.pending_mode(), current, ctx.now())?;
         let body = ctx.body.as_deref();
-        Some(parked_mode_line(
+        let line = parked_mode_line(
             report,
             current,
             body.and_then(Movement::body_motion),
             has_combat_table(ctx.world),
             &body.map_or_else(Vec::new, Movement::pending_motion_commands),
-        ))
+        );
+        let history = matches!(report, ParkedModeReport::StillParked { first: true, .. })
+            .then(|| self.combat_mode_history.lines());
+        Some((line, history))
     }
 
     /// The character left the world: every owner forgets the session.
@@ -1296,6 +1354,8 @@ impl Gameplay {
         self.combat.clear();
         self.mode.reset();
         self.parked_mode_watch.reset();
+        self.combat_mode_history.reset();
+        self.last_body_style = None;
         self.target = CombatTargetState::default();
         self.deaths.clear();
         self.death = DeathState::default();
@@ -1584,6 +1644,20 @@ impl Gameplay {
 
     fn mode_result(&mut self, result: CombatModeRequestResult, ctx: &mut GameplayContext<'_>) {
         self.last_mode_request = Some(result.clone());
+        let noted = match result.status {
+            CombatModeRequestStatus::Sent if self.combat.current_mode() == result.mode => {
+                Some(CombatModeHistoryEvent::RequestAlreadyThere(result.mode))
+            }
+            CombatModeRequestStatus::Sent => Some(CombatModeHistoryEvent::RequestSent(result.mode)),
+            CombatModeRequestStatus::Deferred => Some(CombatModeHistoryEvent::RequestHeldBack(
+                self.mode.pending_mode().unwrap_or(result.mode),
+            )),
+            CombatModeRequestStatus::Rejected => Some(CombatModeHistoryEvent::RequestRefused),
+            CombatModeRequestStatus::Inactive => None,
+        };
+        if let Some(event) = noted {
+            self.combat_mode_history.record(ctx.now(), event);
+        }
         match result.status {
             CombatModeRequestStatus::Sent => {
                 let event = self.combat.set_combat_mode(result.mode);
@@ -1602,8 +1676,9 @@ impl Gameplay {
     }
 
     fn combat_event(&mut self, event: Option<CombatEvent>, ctx: &mut GameplayContext<'_>) {
-        let _ = ctx;
         if let Some(CombatEvent::CombatModeChanged(mode)) = event {
+            self.combat_mode_history
+                .record(ctx.now(), CombatModeHistoryEvent::ModeNow(mode));
             self.attack.on_combat_mode_changed(mode);
             self.mode_changes.push(mode);
             self.events.push(GameplayEvent::CombatMode(mode));
@@ -2498,7 +2573,7 @@ fn parked_mode_line(
         ParkedModeReport::GivenUp { mode, seconds } => {
             return format!("change to {} given up after {seconds:.1} s", name(mode));
         }
-        ParkedModeReport::StillParked { mode, seconds } => (mode, seconds),
+        ParkedModeReport::StillParked { mode, seconds, .. } => (mode, seconds),
     };
     let head = format!(
         "change to {} parked {seconds:.1} s: mode={}",

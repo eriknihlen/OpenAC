@@ -824,8 +824,13 @@ impl SessionState {
             in_peace: self.gameplay.combat_mode() == CombatMode::NON_COMBAT,
             approach: None,
         };
+        let mut asked_again = Vec::new();
         for mode in modes {
-            self.inventory.on_combat_mode_changed(mode, &mut ctx);
+            asked_again.extend(self.inventory.on_combat_mode_changed(mode, &mut ctx));
+        }
+        for mode in asked_again {
+            self.gameplay
+                .note_swap_asked_again(mode, clocks.session.as_secs_f64());
         }
     }
 

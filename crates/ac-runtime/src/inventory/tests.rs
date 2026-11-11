@@ -804,11 +804,12 @@ use ac_core::combat::CombatMode;
 use ac_proto::combat::build_change_combat_mode;
 
 impl Fixture {
-    fn mode(&mut self, mode: CombatMode) {
+    fn mode(&mut self, mode: CombatMode) -> Option<CombatMode> {
         self.in_peace = mode == CombatMode::NON_COMBAT;
         let mut inventory = std::mem::take(&mut self.inventory);
-        inventory.on_combat_mode_changed(mode, &mut self.ctx());
+        let asked = inventory.on_combat_mode_changed(mode, &mut self.ctx());
         self.inventory = inventory;
+        asked
     }
 
     /// Wield the sword over the axe: the axe goes to the pack, then the
@@ -842,7 +843,8 @@ fn a_wield_in_combat_asks_for_its_stance_again_after_the_shuffle() {
     f.mode(CombatMode::NON_COMBAT);
     f.mode(CombatMode::MELEE);
     assert!(f.sent().is_empty());
-    f.mode(CombatMode::NON_COMBAT);
+    // The session notes the re-ask in the combat-mode history.
+    assert_eq!(f.mode(CombatMode::NON_COMBAT), Some(CombatMode::MELEE));
     assert_eq!(
         f.sent(),
         [build_change_combat_mode(3, CombatMode::MELEE.bits())]
