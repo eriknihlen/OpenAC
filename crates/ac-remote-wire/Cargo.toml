@@ -1,0 +1,28 @@
+[package]
+name = "ac-remote-wire"
+description = "The binary encoding of a session's presentation stream and of the commands a window sends back, for a window over a network link (the same UI code, later in a browser), with a stream recorder and replayer. No I/O in the encoding itself; the recorder reads and writes files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The stream's and the commands' types. They move to a lighter crate later;
+# until then the encoding names them where the runtime defines them.
+ac-runtime.workspace = true
+ac-core.workspace = true
+ac-proto.workspace = true
+ac-physics.workspace = true
+ac-nav.workspace = true
+ac-plugin-ui.workspace = true
+ac-plugin-icon.workspace = true
+# The compile-time shape hash and the byte buffer of the plugin calling
+# convention, reused for this stream.
+ac-plugin-abi.workspace = true
+glam.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
