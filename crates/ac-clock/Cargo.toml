@@ -1,0 +1,12 @@
+[package]
+name = "ac-clock"
+description = "The clock the UI reads: the system's monotonic clock and wall time natively, and in a browser (wasm32-unknown-unknown, where the standard clock panics) the times the host page last handed in."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

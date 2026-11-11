@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 
 use ac_host::json::{self, Value};
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::storage::{FileUiStorage, WriteMode};
 use crate::storage::UiStorage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::keys;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::{FileUiStorage, WriteMode};
 
 use super::bindings::KeyBindingsError;
 use super::chord::{InputKey, KeyChord, modifiers_name, parse_modifiers};

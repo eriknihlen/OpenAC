@@ -2,7 +2,8 @@
 //! status texts, the error box and the cancel button, shown on the
 //! authored 800x600 canvas while the session connects.
 
-use std::time::{Duration, Instant};
+use ac_clock::Instant;
+use std::time::Duration;
 
 use ac_runtime::session::pregame::{ConnectionStatus, ConnectionView};
 

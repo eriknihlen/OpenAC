@@ -1,9 +1,9 @@
 //! What the pre-game screens show: the connection, character selection,
 //! character creation and its choices.
 
+use ac_clock::Instant;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use ac_core::chargen::{
     ChargenAnimPartChange, ChargenAttributeValues, ChargenEyeStrip, ChargenFaceStrip,

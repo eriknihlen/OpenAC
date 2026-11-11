@@ -14,9 +14,9 @@ pub mod connection;
 pub mod credits;
 pub mod rich_text;
 
+use ac_clock::Instant;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use ac_core::chargen::ChargenOptions;
 use ac_dat::DatCollection;

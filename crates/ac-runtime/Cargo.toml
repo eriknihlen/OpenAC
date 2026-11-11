@@ -17,6 +17,8 @@ default = ["host"]
 host = ["dep:ac-plugin", "dep:ac-plugin-net", "dep:ac-net"]
 
 [dependencies]
+# The clock: std's natively, the page's in a browser.
+ac-clock.workspace = true
 ac-core.workspace = true
 ac-dat.workspace = true
 ac-motion.workspace = true

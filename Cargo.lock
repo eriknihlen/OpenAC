@@ -38,6 +38,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac-clock"
+version = "0.2.6"
+
+[[package]]
 name = "ac-core"
 version = "0.2.6"
 dependencies = [
@@ -239,6 +243,7 @@ dependencies = [
 name = "ac-remote-wire"
 version = "0.2.6"
 dependencies = [
+ "ac-clock",
  "ac-core",
  "ac-host-core",
  "ac-motion",
@@ -288,6 +293,7 @@ name = "ac-runtime"
 version = "0.2.6"
 dependencies = [
  "ac-bits",
+ "ac-clock",
  "ac-core",
  "ac-dat",
  "ac-host",
@@ -309,6 +315,7 @@ dependencies = [
 name = "ac-ui"
 version = "0.2.6"
 dependencies = [
+ "ac-clock",
  "ac-core",
  "ac-dat",
  "ac-host",

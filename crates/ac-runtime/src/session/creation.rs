@@ -389,9 +389,7 @@ impl SeededRandom {
     /// Seeded from the clock.
     #[must_use]
     pub fn from_clock() -> Self {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
+        let nanos = ac_clock::unix_time().as_nanos();
         Self(u64::try_from(nanos & u128::from(u64::MAX)).unwrap_or(0))
     }
 }

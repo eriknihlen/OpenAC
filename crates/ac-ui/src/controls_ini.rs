@@ -9,11 +9,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::draw::Color;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::storage::{FileUiStorage, WriteMode};
 use crate::storage::UiStorage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::storage::keys;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::{FileUiStorage, WriteMode};
 
 /// See the module documentation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

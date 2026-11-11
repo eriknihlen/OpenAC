@@ -8,10 +8,11 @@
 //! in order; an enum is a one-byte tag and its variant's fields. Maps go out
 //! in key order, so the same value always gives the same bytes.
 
+use ac_clock::Instant;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ac_core::player::SkillFormulaBonusResolver;
 use ac_core::spells::SpellTable;

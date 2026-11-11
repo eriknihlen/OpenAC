@@ -126,10 +126,7 @@ pub struct AppliedMotion {
 /// the same on the session's and the window's lines.
 #[must_use]
 pub fn motion_log_stamp() -> String {
-    let ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis())
-        % 1_000_000_000;
+    let ms = ac_clock::unix_time().as_millis() % 1_000_000_000;
     format!("t={}.{:03}", ms / 1000, ms % 1000)
 }
 

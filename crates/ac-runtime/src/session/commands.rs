@@ -5,8 +5,9 @@
 //! draws a session (in this process, over a network link, in a browser)
 //! builds them without the session runner.
 
+use ac_clock::Instant;
 use std::sync::mpsc::Sender;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::CharacterSelector;
 use super::creation::CreationCommand;
