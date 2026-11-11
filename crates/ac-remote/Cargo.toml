@@ -1,0 +1,19 @@
+[package]
+name = "ac-remote"
+description = "A session's link to a remote-window relay: an outbound secure WebSocket (our own RFC 6455 client over the operating system's TLS) carrying JSON control messages and opaque binary frames, on its own worker thread, reconnecting with backoff."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The strict JSON reader the session-config document uses.
+ac-host-core.workspace = true
+# The same OS TLS the launcher and plugins use.
+native-tls.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

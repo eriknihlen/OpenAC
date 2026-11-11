@@ -41,6 +41,7 @@ openac-plugin = { path = "crates/openac-plugin" }
 openac-plugin-compat = { path = "crates/openac-plugin-compat" }
 ac-plugin-ui = { path = "crates/ac-plugin-ui" }
 ac-plugin-net = { path = "crates/ac-plugin-net" }
+ac-remote = { path = "crates/ac-remote" }
 
 # Third-party crates: pure Rust only, each justified in the commit that adds it.
 thiserror = "2.0"

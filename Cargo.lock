@@ -225,6 +225,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac-remote"
+version = "0.2.6"
+dependencies = [
+ "ac-host-core",
+ "native-tls",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ac-render"
 version = "0.2.6"
 dependencies = [
