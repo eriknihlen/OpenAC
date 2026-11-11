@@ -11,7 +11,8 @@ publish.workspace = true
 [dependencies]
 thiserror.workspace = true
 ac-net.workspace = true
-ac-runtime.workspace = true
+# The session runner.
+ac-runtime = { workspace = true, features = ["host"] }
 ctrlc.workspace = true
 ac-render.workspace = true
 ac-host.workspace = true

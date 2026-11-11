@@ -18,10 +18,12 @@ use ac_proto::appraise::IdentifyObjectResponse;
 use ac_proto::social::{ConfirmationDone, ConfirmationRequest};
 use ac_proto::{GameEventType, Inbound, PlayerDescription, build_login_complete};
 
+use super::Clocks;
 use super::Outbox;
 use super::Queue;
-use super::runner::Recall;
-use super::runner::{HostEvent, ObjectSummary, SessionCommand};
+use super::Recall;
+use super::SessionCommand;
+use super::runner::{HostEvent, ObjectSummary};
 use crate::character::{CharacterOptions, OPTIONS, option_id};
 use crate::communication::{
     ChatChannelKind, ClientCommandId, Communication, CommunicationEvent, CommunicationPaths,
@@ -40,16 +42,6 @@ use crate::world::transit::{
     WorldTransit,
 };
 use crate::world::{PlayerView, World, distance};
-
-/// The two clocks the owners read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Clocks {
-    /// Wall clock, UTC milliseconds since the Unix epoch (chat lines, the
-    /// journal, the options' auto-save).
-    pub wall_unix_ms: i64,
-    /// Session time (use pacing, appraisal limits, appraisal stamps).
-    pub session: Duration,
-}
 
 impl Clocks {
     fn session_ms(self) -> i64 {

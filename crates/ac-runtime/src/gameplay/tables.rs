@@ -238,6 +238,8 @@ impl GameTables {
     ///
     /// # Errors
     /// No dat directory, or [`GameTables::load`]'s errors.
+    // A browser has no dat files to open; it hands the tables in.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(dir: Option<&std::path::Path>) -> Result<Self, TablesError> {
         let dir = dir
             .map(std::path::Path::to_path_buf)

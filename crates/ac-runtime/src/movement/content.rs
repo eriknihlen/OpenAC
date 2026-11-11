@@ -4,6 +4,7 @@
 //! keeps its own physics engine built from it.
 
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -77,6 +78,8 @@ impl WorldContent {
     ///
     /// # Errors
     /// No dat directory, a dat that cannot be read, or no region record.
+    // A browser has no dat files to open (and simulates no world).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(dir: Option<&Path>) -> Result<Self, WorldContentError> {
         let dir = dir
             .map(Path::to_path_buf)

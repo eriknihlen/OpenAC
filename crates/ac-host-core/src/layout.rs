@@ -240,8 +240,13 @@ fn migrate_with(
         mover.old_session_folders(paths, now, zone)?;
         write_marker(paths).map_err(|error| failed(&paths.layout_marker_file(), error))
     })();
-    drop(lease);
-    drop(layout_lock);
+    // Released before the result is read. (Built for a browser, where
+    // there are no file locks, these hold nothing.)
+    #[cfg_attr(target_arch = "wasm32", allow(clippy::drop_non_drop))]
+    {
+        drop(lease);
+        drop(layout_lock);
+    }
     match result {
         Ok(()) => Ok(Migration {
             moved: true,

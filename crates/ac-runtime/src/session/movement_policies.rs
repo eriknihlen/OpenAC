@@ -6,7 +6,7 @@
 
 use super::{LocalPlayerWatch, Policy};
 use crate::movement::{MovementCommand, MovementEvent, MovementKeys};
-use crate::session::runner::{HostEvent, SessionCommand};
+use crate::session::{HostEvent, SessionCommand};
 use crate::world::transit::PortalKind;
 
 /// The cell `observer-movement` teleports to (a Rynthid landblock).

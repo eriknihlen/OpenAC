@@ -8,12 +8,20 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["host"]
+# The session runner and everything it needs to drive a live session: the
+# session thread, the network, the plugin engine and the peer hub. Without it
+# the crate is the view and command types and the pure game logic a window
+# draws from, which also build for the browser (`wasm32-unknown-unknown`).
+host = ["dep:ac-plugin", "dep:ac-plugin-net", "dep:ac-net"]
+
 [dependencies]
 ac-core.workspace = true
 ac-dat.workspace = true
 ac-motion.workspace = true
 ac-nav.workspace = true
-ac-plugin.workspace = true
+ac-plugin = { workspace = true, optional = true }
 # The coordinate matcher chat lines are linked by, shared with the SDK.
 ac-plugin-abi.workspace = true
 # The strict JSON reader and string escaping for the peer notes.
@@ -21,12 +29,12 @@ ac-host.workspace = true
 # The session's plugin UI state (panels, canvases, images, labels, lines).
 ac-plugin-ui.workspace = true
 # The peer hub's local endpoint (named pipe or Unix socket; peer_transport, peer_hub).
-ac-plugin-net.workspace = true
+ac-plugin-net = { workspace = true, optional = true }
 # The peer hub's endpoint name from the peer folder and user (OpenAC PeerHubEndpoint).
 sha2.workspace = true
 ac-physics.workspace = true
 glam.workspace = true
-ac-net.workspace = true
+ac-net = { workspace = true, optional = true }
 ac-proto.workspace = true
 thiserror.workspace = true
 

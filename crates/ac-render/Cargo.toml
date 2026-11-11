@@ -15,7 +15,8 @@ ac-audio.workspace = true
 ac-core.workspace = true
 ac-dat.workspace = true
 ac-proto.workspace = true
-ac-runtime.workspace = true
+# The session runner.
+ac-runtime = { workspace = true, features = ["host"] }
 ac-physics.workspace = true
 ac-nav.workspace = true
 ac-motion.workspace = true
