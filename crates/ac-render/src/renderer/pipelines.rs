@@ -404,6 +404,39 @@ pub fn world_line_pipeline(
     samples: u32,
     globals: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
+    line_pipeline(
+        device,
+        format,
+        samples,
+        globals,
+        wgpu::PrimitiveTopology::TriangleList,
+    )
+}
+
+/// The navigation view's lines: [`world_line_pipeline`]'s colour and depth,
+/// one pixel wide.
+pub fn navigation_line_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    samples: u32,
+    globals: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    line_pipeline(
+        device,
+        format,
+        samples,
+        globals,
+        wgpu::PrimitiveTopology::LineList,
+    )
+}
+
+fn line_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    samples: u32,
+    globals: &wgpu::BindGroupLayout,
+    topology: wgpu::PrimitiveTopology,
+) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("world line"),
         source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/world_line.wgsl").into()),
@@ -428,7 +461,7 @@ pub fn world_line_pipeline(
             })],
         },
         primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
+            topology,
             cull_mode: None,
             front_face: wgpu::FrontFace::Ccw,
             ..Default::default()

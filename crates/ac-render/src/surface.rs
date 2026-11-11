@@ -2772,15 +2772,15 @@ impl AttachedWindow {
             }
             _ => Vec::new(),
         };
-        ui.set_navigation_lines(navigation);
         ui.set_plugin_world(
             self.world.as_ref(),
             self.scene.as_deref().map(SceneSource::scene),
         );
-        // The plugins' world lines, triangles and ground shapes are drawn in
-        // the world pass, with its depth (lines as in OpenAC
-        // `PluginWorldLineRenderer`).
+        // The navigation view and the plugins' world lines, triangles and
+        // ground shapes are drawn in the world pass, with its depth (lines
+        // as in OpenAC `PluginWorldLineRenderer`).
         if let Some(world) = self.world.as_mut() {
+            world.set_navigation_lines(&self.device, &self.queue, &navigation);
             world.set_plugin_lines(&self.device, &self.queue, ui.plugin_world_lines());
             world.set_plugin_triangles(
                 &self.device,

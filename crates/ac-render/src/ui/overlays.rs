@@ -1,29 +1,28 @@
 //! The window's overlays over the world: the overlay band with the world
 //! labels (the plugins', `super::plugin_ui`) and the vivid target
 //! indicator around the selected object (OpenAC `RetailUiRuntime`'s
-//! `MountOverlayHost`, `MountWorldLabels`, `MountVividTargetIndicator`),
-//! and the navigation view (`/nav grid`, `/nav route` and walks under way,
-//! OpenAC `NavMeshDebugOverlay`) on a layer of the band, over the world
-//! rather than hidden behind it. The camera and the
-//! selected object's selection sphere come from the world renderer each
-//! frame.
+//! `MountOverlayHost`, `MountWorldLabels`, `MountVividTargetIndicator`).
+//! The camera and the selected object's selection sphere come from the
+//! world renderer each frame. The navigation view (`/nav grid`, `/nav route`
+//! and walks under way, OpenAC `NavMeshDebugOverlay`) is placed here for the
+//! world pass, which hides it behind whatever stands in front of it.
 
 use ac_core::items::ClientObjectTable;
 use ac_dat::DatCollection;
 use ac_dat::objects::Setup;
 use ac_runtime::world::ObjectView;
-use ac_ui::draw::Color;
 use ac_ui::font::DEFAULT_FONT_ID;
 use ac_ui::import::LayoutSource;
 use ac_ui::overlay::{
     OverlayCamera, OverlayHost, VividTargetIndicator, VividTargetInfo, WorldIconOverlay,
-    WorldLabelOverlay, WorldLine, WorldLineOverlay, load_vivid_target_images,
+    WorldLabelOverlay, load_vivid_target_images,
 };
 use glam::{Mat4, Quat, Vec3};
 
 use super::window::WindowUi;
 use crate::renderer::WorldRenderer;
 use crate::scene::Scene;
+use crate::world_lines::PlacedLine;
 
 /// The character option bit of the vivid targeting indicator (options 1).
 const VIVID_TARGETING_BIT: u32 = 0x0000_8000;
@@ -37,12 +36,7 @@ pub struct Overlays {
     vivid: Option<VividTargetIndicator>,
     camera: Option<OverlayCamera>,
     target: Option<VividTargetInfo>,
-    navigation: Option<WorldLineOverlay>,
-    navigation_lines: Vec<WorldLine>,
 }
-
-/// The overlay band layer of the navigation view.
-pub const NAVIGATION_LAYER: &str = "NavigationOverlay";
 
 impl Overlays {
     /// The overlay band (none before it is mounted).
@@ -74,10 +68,8 @@ impl WindowUi {
             line_height,
         ));
         let labels = WorldLabelOverlay::mount(&mut self.host.root, &mut host, font);
-        let navigation = WorldLineOverlay::mount(&mut self.host.root, &mut host, NAVIGATION_LAYER);
         self.status.overlays.host = Some(host);
         self.status.overlays.labels = Some(labels);
-        self.status.overlays.navigation = Some(navigation);
         match load_vivid_target_images(self.content.dats()) {
             Some(images) => {
                 self.status.overlays.vivid =
@@ -100,18 +92,6 @@ impl WindowUi {
         self.status.overlays.target = target;
     }
 
-    /// The navigation view's segments in the drawing frame (none without
-    /// a world).
-    pub fn set_navigation_lines(&mut self, lines: Vec<WorldLine>) {
-        self.status.overlays.navigation_lines = lines;
-    }
-
-    /// The navigation view's segments as last set.
-    #[must_use]
-    pub fn navigation_lines(&self) -> &[WorldLine] {
-        &self.status.overlays.navigation_lines
-    }
-
     /// One frame of the overlays. The plugins' labels follow only the
     /// labels, their anchors and the game camera; the window gives them no
     /// labels while the portal view hides the world.
@@ -129,13 +109,6 @@ impl WindowUi {
                 &mut self.host.root,
                 &self.plugins.labels,
                 &|id| anchors.get(&id).copied(),
-                camera.as_ref(),
-            );
-        }
-        if let Some(navigation) = overlays.navigation.as_mut() {
-            navigation.tick(
-                &mut self.host.root,
-                &overlays.navigation_lines,
                 camera.as_ref(),
             );
         }
@@ -163,7 +136,7 @@ impl WindowUi {
 /// The session's navigation view (OpenAC `NavMeshDebugOverlay`) in the
 /// drawing frame: its segments are measured from the corner of its frame's
 /// centre landblock, which the world's floating origin places.
-pub(crate) fn navigation_lines(world: &WorldRenderer, scene: &Scene) -> Vec<WorldLine> {
+pub(crate) fn navigation_lines(world: &WorldRenderer, scene: &Scene) -> Vec<PlacedLine> {
     let view = scene.navigation();
     if view.lines.is_empty() {
         return Vec::new();
@@ -174,11 +147,14 @@ pub(crate) fn navigation_lines(world: &WorldRenderer, scene: &Scene) -> Vec<Worl
     view.lines
         .iter()
         .map(|line| {
-            let [r, g, b] = line.kind.rgb();
-            WorldLine {
-                from: line.from + offset,
-                to: line.to + offset,
-                color: Color::rgba(r, g, b, 1.0),
+            let [r, g, b] = line.kind.rgb().map(|c| (c * 255.0).round() as u32);
+            PlacedLine {
+                start: line.from + offset,
+                end: line.to + offset,
+                color_rgb: r << 16 | g << 8 | b,
+                follow_terrain: line.follows_ground,
+                // Drawn one pixel wide at any distance.
+                width_metres: 0.0,
             }
         })
         .collect()

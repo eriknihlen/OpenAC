@@ -54,6 +54,8 @@ pub(super) struct PassPipelines<'a> {
     pub atmosphere: Option<&'a wgpu::BindGroup>,
     /// The plugins' world lines.
     pub world_line: &'a wgpu::RenderPipeline,
+    /// The navigation view's lines.
+    pub navigation_line: &'a wgpu::RenderPipeline,
     /// The plugins' world triangles.
     pub world_triangle: &'a wgpu::RenderPipeline,
     /// The invisible probes of the icons hidden behind the world.
@@ -74,6 +76,7 @@ impl WorldRenderer {
             particle_meshes: &self.particle_gpu.meshes,
             atmosphere: None,
             world_line: &self.pipelines.world_line,
+            navigation_line: &self.pipelines.navigation_line,
             world_triangle: &self.pipelines.world_triangle,
             icon_probe: &self.pipelines.icon_probe,
         }
@@ -692,6 +695,7 @@ impl WorldRenderer {
                     particle_meshes: &w.particle_meshes,
                     atmosphere: Some(&a.group),
                     world_line: &w.world_line,
+                    navigation_line: &w.navigation_line,
                     world_triangle: &w.world_triangle,
                     icon_probe: &w.icon_probe,
                 };

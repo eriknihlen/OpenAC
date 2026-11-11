@@ -84,6 +84,9 @@ pub struct NavLine {
     pub to: Vec3,
     /// What it shows.
     pub kind: NavLineKind,
+    /// It runs along the ground between its ends, over rises and across
+    /// floors, rather than straight through the air.
+    pub follows_ground: bool,
 }
 
 /// What the drawing reads of a walk.
@@ -198,7 +201,19 @@ pub fn grid_marks(grid: &NavGrid, centre: Vec3) -> Vec<(Vec3, bool)> {
 }
 
 fn line(from: Vec3, to: Vec3, kind: NavLineKind) -> NavLine {
-    NavLine { from, to, kind }
+    NavLine {
+        from,
+        to,
+        kind,
+        follows_ground: false,
+    }
+}
+
+fn ground_line(from: Vec3, to: Vec3, kind: NavLineKind) -> NavLine {
+    NavLine {
+        follows_ground: true,
+        ..line(from, to, kind)
+    }
 }
 
 /// A cylinder standing on `base`: its two rings and four uprights.
@@ -241,7 +256,7 @@ fn route_lines(
     };
     if show_grid {
         for pair in route.path.windows(2) {
-            out.push(line(
+            out.push(ground_line(
                 lift(pair[0], PATH_LIFT),
                 lift(pair[1], PATH_LIFT),
                 NavLineKind::Path,
@@ -256,7 +271,7 @@ fn route_lines(
         && let Ok(walking) = usize::try_from(walking)
         && walking < route.legs.len()
     {
-        out.push(line(
+        out.push(ground_line(
             lift(at, ROUTE_LIFT),
             lift(route.legs[walking], ROUTE_LIFT),
             NavLineKind::Route,
@@ -269,7 +284,7 @@ fn route_lines(
     if state.staged
         && let (Some((beyond, _)), Some(&last)) = (state.goal, route.legs.last())
     {
-        out.push(line(
+        out.push(ground_line(
             lift(last, ROUTE_LIFT),
             lift(beyond, ROUTE_LIFT),
             NavLineKind::Beyond,
@@ -287,7 +302,7 @@ fn leg(out: &mut Vec<NavLine>, route: &NavRoute, index: usize) {
         .iter()
         .any(|leap| usize::try_from(leap.leg_index).ok() == Some(index))
     {
-        out.push(line(from, to, NavLineKind::Route));
+        out.push(ground_line(from, to, NavLineKind::Route));
         return;
     }
     let mut previous = from;
