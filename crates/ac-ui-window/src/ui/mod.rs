@@ -35,6 +35,7 @@ pub mod pregame;
 pub mod salvage_window;
 mod social_panels;
 pub mod status;
+pub mod stores;
 pub mod textures;
 pub mod viewports;
 pub mod window;
