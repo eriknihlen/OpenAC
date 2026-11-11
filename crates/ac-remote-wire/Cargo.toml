@@ -12,6 +12,8 @@ publish.workspace = true
 # The stream's and the commands' types. They move to a lighter crate later;
 # until then the encoding names them where the runtime defines them.
 ac-runtime.workspace = true
+# The JSON reader, for the development codec.
+ac-host-core.workspace = true
 ac-core.workspace = true
 ac-proto.workspace = true
 ac-physics.workspace = true

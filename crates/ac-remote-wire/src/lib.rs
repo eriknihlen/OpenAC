@@ -64,6 +64,7 @@
 
 pub mod codec;
 mod commands;
+pub mod devtool;
 mod interface;
 mod plugin_ui;
 mod pregame;

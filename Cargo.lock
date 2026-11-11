@@ -240,6 +240,7 @@ name = "ac-remote-wire"
 version = "0.2.6"
 dependencies = [
  "ac-core",
+ "ac-host-core",
  "ac-nav",
  "ac-physics",
  "ac-plugin-abi",
