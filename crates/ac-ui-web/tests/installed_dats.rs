@@ -53,6 +53,8 @@ struct Page {
     module: Module<ClientPanels>,
     dats: DatCollection,
     dir: std::path::PathBuf,
+    /// The page hands in the high-resolution dat (when the install has one).
+    high_res: bool,
     now: f64,
     answered: BTreeMap<u32, Answered>,
     textures: HashSet<(u32, u32)>,
@@ -66,12 +68,17 @@ struct Page {
 
 impl Page {
     fn open() -> Self {
+        Self::with_high_res(true)
+    }
+
+    fn with_high_res(high_res: bool) -> Self {
         let dir = ac_dat::default_dat_dir().expect("a user profile");
         let dats = DatCollection::open(&dir).expect("the installed dats");
         Self {
             module: Module::new(ClientPanels::new()),
             dats,
             dir,
+            high_res,
             now: 0.0,
             answered: BTreeMap::new(),
             textures: HashSet::new(),
@@ -88,6 +95,7 @@ impl Page {
         let name = match page::source_of(source)? {
             DatSource::Portal => ac_dat::PORTAL_DAT,
             DatSource::Cell => ac_dat::CELL_DAT,
+            DatSource::HighRes if !self.high_res => return None,
             DatSource::HighRes => ac_dat::HIGHRES_DAT,
             DatSource::Local => ac_dat::LOCAL_DAT,
         };
@@ -304,10 +312,9 @@ fn forward_keys(command: &SessionCommand) -> bool {
     )
 }
 
-#[test]
-#[ignore = "reads the installed dats"]
-fn the_panels_build_from_the_installed_dats_and_answer_a_page() {
-    let mut page = Page::open();
+/// Hand in the headers, then the canvas, and run frames until the panels
+/// are built and want nothing more; print what it took.
+fn build(page: &mut Page) {
     // Before init: the headers, then the canvas.
     for (source, id) in page.module.panels().dat_preload() {
         page.answer(source, id);
@@ -336,6 +343,21 @@ fn the_panels_build_from_the_installed_dats_and_answer_a_page() {
     }
     println!("{}", page.log);
     assert!(rounds > 0 && rounds < 40, "{rounds} rounds");
+}
+
+#[test]
+#[ignore = "reads the installed dats"]
+fn without_the_high_resolution_dat_the_page_is_never_asked_for_it() {
+    let mut page = Page::with_high_res(false);
+    build(&mut page);
+    assert!(!page.answered.contains_key(&2), "{:?}", page.answered);
+}
+
+#[test]
+#[ignore = "reads the installed dats"]
+fn the_panels_build_from_the_installed_dats_and_answer_a_page() {
+    let mut page = Page::open();
+    build(&mut page);
 
     // The session: a snapshot, a chat line, the vitals.
     let epoch = Instant::now();

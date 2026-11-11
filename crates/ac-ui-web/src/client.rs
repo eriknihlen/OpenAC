@@ -1104,6 +1104,42 @@ mod tests {
         assert!(out.take(kind::DAT_REQUESTS).is_empty());
     }
 
+    /// The first bytes of a dat file of `kind` (1 portal, 2 cell, 3 local):
+    /// its header with that type.
+    fn header(kind: u32) -> Vec<u8> {
+        let mut bytes = vec![0; crate::page::HEADER_BYTES];
+        bytes[320..324].copy_from_slice(&DatHeader::RETAIL_MAGIC.to_le_bytes());
+        bytes[332..336].copy_from_slice(&kind.to_le_bytes());
+        bytes
+    }
+
+    /// The sources of the dat requests of the first frames, with or
+    /// without a high-resolution dat.
+    fn asked_sources(high_res: bool) -> Vec<u32> {
+        let mut panels = ClientPanels::new();
+        for (source, kind) in [(0, 1), (1, 2), (3, 3)] {
+            panels.dat(source, HEADER_ID, Some(&header(kind)));
+        }
+        let high = high_res.then(|| header(1));
+        panels.dat(2, HEADER_ID, high.as_deref());
+        panels.init(800, 600, 1.0, 0.0);
+        assert!(panels.dat_preload().is_empty(), "every header is in");
+        let mut out = Outputs::default();
+        panels.frame(16.0, &mut out);
+        let requests = words(&out.take(kind::DAT_REQUESTS));
+        assert!(!requests.is_empty(), "the build asked for files");
+        requests.chunks_exact(2).map(|r| r[0]).collect()
+    }
+
+    #[test]
+    fn without_a_high_resolution_dat_nothing_is_asked_of_it() {
+        assert!(!asked_sources(false).contains(&2));
+        assert!(
+            asked_sources(true).contains(&2),
+            "with one, a portal-type file is asked of it first"
+        );
+    }
+
     #[test]
     fn losing_the_keyboard_or_control_lets_the_keys_go_and_tells_the_session_once() {
         let release = format!(
