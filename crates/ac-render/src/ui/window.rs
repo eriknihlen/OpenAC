@@ -548,6 +548,9 @@ pub struct WindowUi {
     pub(super) status: super::status::StatusUi,
     /// The Configure Keyboard screen (`super::keyboard_window`).
     pub(super) keyboard: super::keyboard_window::KeyboardUi,
+    /// Where the window keeps the player's key configuration (none: the
+    /// window saves nothing).
+    pub(super) storage: Option<Box<dyn ac_ui::storage::UiStorage>>,
     /// The shared item cooldown sweep (`super::cooldowns`).
     pub(super) item_cooldowns: Option<ac_ui::panels::item_cooldown::ItemCooldownController>,
     /// The map's clock (`super::map_window`).
@@ -583,17 +586,22 @@ impl WindowUi {
             size,
             &PlayerSettings::default(),
             super::options::resolution_choices(&[], None),
+            None,
         )
     }
 
     /// [`WindowUi::build`] with the player's client settings (the options
-    /// window edits them; the chat font and filters start from them) and
-    /// the resolutions the display menu offers.
+    /// window edits them; the chat font and filters start from them), the
+    /// resolutions the display menu offers, and where the player's key
+    /// configuration is kept (natively the files of
+    /// [`super::keyboard_window::KeyboardFiles::storage`]; none saves
+    /// nothing).
     pub fn build_with(
         dats: Arc<DatCollection>,
         size: (u32, u32),
         settings: &PlayerSettings,
         resolution_choices: Vec<String>,
+        storage: Option<Box<dyn ac_ui::storage::UiStorage>>,
     ) -> Result<Self, String> {
         let content = DatContent::new(dats.clone()).map_err(|e| e.to_string())?;
         let character_pages = super::character_pages::CharacterPagesState::new(&content);
@@ -635,6 +643,7 @@ impl WindowUi {
             viewports: super::viewports::UiViewports::new(dats.clone()),
             status: super::status::StatusUi::default(),
             keyboard: super::keyboard_window::KeyboardUi::default(),
+            storage,
             item_cooldowns: None,
             map_state: super::map_window::MapWindowState::default(),
             character_pages,

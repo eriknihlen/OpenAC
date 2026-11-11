@@ -416,8 +416,8 @@ fn the_docks_dragged_place_survives_an_options_window_change() {
     let (state, _) = session();
     let mut saved = PlayerSettings::default();
     saved.plugin_ui.dock = "top".to_owned();
-    let mut ui =
-        WindowUi::build_with(dats(), size, &saved, vec!["1280x720".into()]).expect("the UI builds");
+    let mut ui = WindowUi::build_with(dats(), size, &saved, vec!["1280x720".into()], None)
+        .expect("the UI builds");
     let mut scene = Scene::default();
     scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
         state.snapshot(),

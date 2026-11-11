@@ -512,6 +512,19 @@ impl AttachedWindow {
         // window without dats draws no UI.
         let choices = resolution_choices_of(&window);
         let platform_scale = UiScale::for_window(HostOs::current(), window.scale_factor());
+        // The key configuration screen edits the dispatcher's bindings and
+        // saves where they were read from.
+        let keyboard_storage = match (&options.key_bindings_file, &options.keymap_directory) {
+            (Some(bindings_file), Some(keymap_directory)) => Some(Box::new(
+                crate::ui::keyboard_window::KeyboardFiles {
+                    bindings_file: bindings_file.clone(),
+                    keymap_directory: keymap_directory.clone(),
+                }
+                .storage(),
+            )
+                as Box<dyn ac_ui::storage::UiStorage>),
+            _ => None,
+        };
         let ui = world.and_then(|world| {
             let built = world.content.ui_dats().and_then(|dats| {
                 WindowUi::build_with(
@@ -519,6 +532,7 @@ impl AttachedWindow {
                     platform_scale.ui_size((config.width, config.height)),
                     settings,
                     choices,
+                    keyboard_storage,
                 )
             });
             match built {
@@ -574,20 +588,9 @@ impl AttachedWindow {
             options.keymap_directory.as_deref(),
             &mut notices,
         );
-        // The key configuration screen edits the dispatcher's bindings and
-        // saves where they were read from.
         let mut ui = ui;
         if let Some(ui) = ui.as_mut() {
-            let files = match (&options.key_bindings_file, &options.keymap_directory) {
-                (Some(bindings_file), Some(keymap_directory)) => {
-                    Some(crate::ui::keyboard_window::KeyboardFiles {
-                        bindings_file: bindings_file.clone(),
-                        keymap_directory: keymap_directory.clone(),
-                    })
-                }
-                _ => None,
-            };
-            ui.attach_key_bindings(gameplay.dispatcher().bindings(), files);
+            ui.attach_key_bindings(gameplay.dispatcher().bindings());
             // The player's style sheet in the game folder (OpenAC
             // `InteractionRetainedUiComposition`): a missing file is an empty
             // sheet.

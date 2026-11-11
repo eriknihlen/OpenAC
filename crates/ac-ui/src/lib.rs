@@ -40,6 +40,7 @@ pub mod radar;
 pub mod root;
 pub mod shapes;
 pub mod states;
+pub mod storage;
 pub mod strings;
 pub mod text;
 pub mod tooltip;

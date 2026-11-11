@@ -4,10 +4,16 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::event::Modifiers;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::FileUiStorage;
+use crate::storage::{UiStorage, keys};
 
 use super::action::InputAction;
 use super::bindings::KeyBindings;
@@ -516,26 +522,172 @@ pub struct KeymapSaveResult {
     pub error: Option<String>,
 }
 
-/// The named key map profiles (`*.keymap` in the game's folder) and the
-/// active one (`active-keymap.txt` beside the bindings file).
-#[derive(Debug, Clone)]
-pub struct KeymapProfileStore {
-    directory: PathBuf,
-    selector: PathBuf,
-}
-
 /// The profile used when none was chosen.
 pub const DEFAULT_FILE_NAME: &str = "openac.keymap";
 
+/// The key a profile of that (normalized) file name is stored under.
+fn profile_key(name: &str) -> String {
+    format!("{}{name}", keys::KEYMAPS)
+}
+
+/// The active profile's file name ([`DEFAULT_FILE_NAME`] when none was
+/// chosen or the choice cannot be read).
+#[must_use]
+pub fn active_profile_name(storage: &dyn UiStorage) -> String {
+    storage
+        .get(keys::ACTIVE_KEYMAP)
+        .and_then(text)
+        .ok()
+        .map(|text| normalize_file_name(&text))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| DEFAULT_FILE_NAME.to_owned())
+}
+
+/// Stored bytes as text, failing as reading a file as text does.
+fn text(bytes: Vec<u8>) -> io::Result<String> {
+    String::from_utf8(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        )
+    })
+}
+
+/// The profiles stored, sorted ignoring case.
+///
+/// # Errors
+/// They cannot be listed.
+pub fn list_profiles(storage: &dyn UiStorage) -> io::Result<Vec<String>> {
+    let mut names: Vec<String> = storage
+        .list(keys::KEYMAPS)?
+        .into_iter()
+        .filter_map(|key| key.strip_prefix(keys::KEYMAPS).map(str::to_owned))
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("keymap"))
+        })
+        .collect();
+    names.sort_by_key(|n| n.to_ascii_lowercase());
+    Ok(names)
+}
+
+/// Load a profile over `base` and make it the active one.
+///
+/// # Errors
+/// The name is not a plain file name, or the profile cannot be read or
+/// parsed (the text of the failure).
+pub fn load_profile(
+    storage: &mut dyn UiStorage,
+    file_name: &str,
+    base: &KeyBindings,
+) -> Result<KeyBindings, String> {
+    let name = normalize_file_name(file_name);
+    if name.is_empty() {
+        return Err("The keymap filename is invalid.".to_owned());
+    }
+    let text = storage
+        .get(&profile_key(&name))
+        .and_then(text)
+        .map_err(|e| e.to_string())?;
+    let bindings = parse(&text, base).map_err(|e| e.to_string())?;
+    select(storage, &name).map_err(|e| e.to_string())?;
+    Ok(bindings)
+}
+
+/// Remember `name` as the active profile.
+fn select(storage: &mut dyn UiStorage, name: &str) -> io::Result<()> {
+    storage.put(keys::ACTIVE_KEYMAP, format!("{name}\n").as_bytes())
+}
+
+/// Save `bindings` as a profile and make it the active one.
+#[must_use]
+pub fn save_profile(
+    storage: &mut dyn UiStorage,
+    file_name: &str,
+    bindings: &KeyBindings,
+    overwrite: bool,
+) -> KeymapSaveResult {
+    let name = normalize_file_name(file_name);
+    let result = |status, error: Option<String>| KeymapSaveResult {
+        status,
+        file_name: name.clone(),
+        error,
+    };
+    if name.is_empty() {
+        return result(KeymapSaveStatus::InvalidName, None);
+    }
+    let key = profile_key(&name);
+    if let Some(stored) = storage.presence(&key) {
+        if !overwrite {
+            return result(KeymapSaveStatus::Exists, None);
+        }
+        if stored.read_only {
+            return result(KeymapSaveStatus::ReadOnly, None);
+        }
+    }
+    let text = match write(bindings) {
+        Ok(text) => text,
+        Err(error) => return result(KeymapSaveStatus::Failed, Some(error.to_string())),
+    };
+    let written = storage
+        .put(&key, text.as_bytes())
+        .and_then(|()| select(storage, &name));
+    match written {
+        Ok(()) => result(KeymapSaveStatus::Saved, None),
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            result(KeymapSaveStatus::ReadOnly, Some(error.to_string()))
+        }
+        Err(error) => result(KeymapSaveStatus::Failed, Some(error.to_string())),
+    }
+}
+
+/// The active profile over the stored bindings: the bindings (or the
+/// defaults) when no profile is stored under the active name; a profile
+/// that fails to load is reported and the bindings are used.
+#[must_use]
+pub fn load_active(storage: &mut dyn UiStorage) -> (KeyBindings, Vec<String>) {
+    let mut notices = Vec::new();
+    let (fallback, error) = KeyBindings::load_from(storage, keys::KEY_BINDINGS);
+    if let Some(error) = error {
+        notices.push(format!("{error}; using the retail defaults"));
+    }
+    let name = active_profile_name(storage);
+    if !storage
+        .presence(&profile_key(&name))
+        .is_some_and(|p| p.file)
+    {
+        return (fallback, notices);
+    }
+    match load_profile(storage, &name, &fallback) {
+        Ok(loaded) => (loaded, notices),
+        Err(error) => {
+            notices.push(format!(
+                "keymap: '{name}' could not be loaded; using the bindings file: {error}"
+            ));
+            (fallback, notices)
+        }
+    }
+}
+
+/// The named key map profiles (`*.keymap` in the game's folder) and the
+/// active one (`active-keymap.txt` beside the bindings file), as files.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+pub struct KeymapProfileStore {
+    directory: PathBuf,
+    files: FileUiStorage,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl KeymapProfileStore {
     /// Profiles in `keymap_directory`; the active one is remembered beside
     /// `bindings_path`.
     #[must_use]
     pub fn new(bindings_path: &Path, keymap_directory: &Path) -> Self {
-        let config = bindings_path.parent().unwrap_or(Path::new("."));
         Self {
             directory: keymap_directory.to_path_buf(),
-            selector: config.join("active-keymap.txt"),
+            files: FileUiStorage::for_key_bindings(bindings_path, keymap_directory),
         }
     }
 
@@ -545,59 +697,30 @@ impl KeymapProfileStore {
         &self.directory
     }
 
-    /// The active profile's file name ([`DEFAULT_FILE_NAME`] when none was
-    /// chosen or the choice cannot be read).
+    /// See [`active_profile_name`].
     #[must_use]
     pub fn current_file_name(&self) -> String {
-        std::fs::read_to_string(&self.selector)
-            .ok()
-            .map(|text| normalize_file_name(&text))
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| DEFAULT_FILE_NAME.to_owned())
+        active_profile_name(&self.files)
     }
 
-    /// The profiles in the folder, sorted ignoring case.
+    /// See [`list_profiles`].
     ///
     /// # Errors
     /// The folder exists but cannot be listed.
-    pub fn list_files(&self) -> std::io::Result<Vec<String>> {
-        if !self.directory.is_dir() {
-            return Ok(Vec::new());
-        }
-        let mut names = Vec::new();
-        for entry in std::fs::read_dir(&self.directory)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if entry.file_type()?.is_file()
-                && Path::new(&name)
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("keymap"))
-            {
-                names.push(name);
-            }
-        }
-        names.sort_by_key(|n| n.to_ascii_lowercase());
-        Ok(names)
+    pub fn list_files(&self) -> io::Result<Vec<String>> {
+        list_profiles(&self.files)
     }
 
-    /// Load a profile over `base` and make it the active one.
+    /// See [`load_profile`].
     ///
     /// # Errors
     /// The name is not a plain file name, or the file cannot be read or
     /// parsed (the text of the failure).
     pub fn load(&self, file_name: &str, base: &KeyBindings) -> Result<KeyBindings, String> {
-        let name = normalize_file_name(file_name);
-        if name.is_empty() {
-            return Err("The keymap filename is invalid.".to_owned());
-        }
-        let text =
-            std::fs::read_to_string(self.directory.join(&name)).map_err(|e| e.to_string())?;
-        let bindings = parse(&text, base).map_err(|e| e.to_string())?;
-        self.write_selector(&name).map_err(|e| e.to_string())?;
-        Ok(bindings)
+        load_profile(&mut self.files.clone(), file_name, base)
     }
 
-    /// Save `bindings` as a profile and make it the active one.
+    /// See [`save_profile`].
     #[must_use]
     pub fn save(
         &self,
@@ -605,75 +728,21 @@ impl KeymapProfileStore {
         bindings: &KeyBindings,
         overwrite: bool,
     ) -> KeymapSaveResult {
-        let name = normalize_file_name(file_name);
-        let result = |status, error: Option<String>| KeymapSaveResult {
-            status,
-            file_name: name.clone(),
-            error,
-        };
-        if name.is_empty() {
-            return result(KeymapSaveStatus::InvalidName, None);
-        }
-        let path = self.directory.join(&name);
-        if let Ok(meta) = std::fs::metadata(&path) {
-            if !overwrite {
-                return result(KeymapSaveStatus::Exists, None);
-            }
-            if meta.permissions().readonly() {
-                return result(KeymapSaveStatus::ReadOnly, None);
-            }
-        }
-        let text = match write(bindings) {
-            Ok(text) => text,
-            Err(error) => return result(KeymapSaveStatus::Failed, Some(error.to_string())),
-        };
-        let written = std::fs::create_dir_all(&self.directory)
-            .and_then(|()| atomic_write(&path, &text))
-            .and_then(|()| self.write_selector(&name));
-        match written {
-            Ok(()) => result(KeymapSaveStatus::Saved, None),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-                result(KeymapSaveStatus::ReadOnly, Some(error.to_string()))
-            }
-            Err(error) => result(KeymapSaveStatus::Failed, Some(error.to_string())),
-        }
-    }
-
-    fn write_selector(&self, name: &str) -> std::io::Result<()> {
-        if let Some(dir) = self.selector.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        atomic_write(&self.selector, &format!("{name}\n"))
+        save_profile(&mut self.files.clone(), file_name, bindings, overwrite)
     }
 }
 
-/// The active profile over the bindings file: the bindings file (or the
-/// defaults) when no profile file exists; a profile that fails to load is
-/// reported and the bindings file is used.
+/// [`load_active`] over the bindings file and the profile folder.
+#[cfg(not(target_arch = "wasm32"))]
 #[must_use]
 pub fn load_active_or_json(
     bindings_path: &Path,
     keymap_directory: &Path,
 ) -> (KeyBindings, Vec<String>) {
-    let mut notices = Vec::new();
-    let (fallback, error) = KeyBindings::load_or_default(bindings_path);
-    if let Some(error) = error {
-        notices.push(format!("{error}; using the retail defaults"));
-    }
-    let store = KeymapProfileStore::new(bindings_path, keymap_directory);
-    let name = store.current_file_name();
-    if !store.directory().join(&name).is_file() {
-        return (fallback, notices);
-    }
-    match store.load(&name, &fallback) {
-        Ok(loaded) => (loaded, notices),
-        Err(error) => {
-            notices.push(format!(
-                "keymap: '{name}' could not be loaded; using the bindings file: {error}"
-            ));
-            (fallback, notices)
-        }
-    }
+    load_active(&mut FileUiStorage::for_key_bindings(
+        bindings_path,
+        keymap_directory,
+    ))
 }
 
 /// A plain file name with the `.keymap` extension, or empty when the name
@@ -696,21 +765,6 @@ pub fn normalize_file_name(value: &str) -> String {
     } else {
         format!("{trimmed}.keymap")
     }
-}
-
-fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    let temp = path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos())
-    ));
-    let written = std::fs::write(&temp, content).and_then(|()| std::fs::rename(&temp, path));
-    if written.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    written
 }
 
 #[cfg(test)]
@@ -825,6 +879,129 @@ mod tests {
             active.for_action(InputAction::MovementForward).count(),
             a.len()
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn profiles_through_the_storage_are_the_bytes_the_files_hold() {
+        use crate::storage::{MemoryUiStorage, StorageWrite};
+        let root = std::env::temp_dir().join(format!(
+            "openac-keymap-storage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let json = root.join("config").join("keybinds.json");
+        let documents = root.join("documents");
+        let source = KeyBindings::retail_defaults();
+        let files = KeymapProfileStore::new(&json, &documents);
+        assert_eq!(
+            files.save("friends", &source, false).status,
+            KeymapSaveStatus::Saved
+        );
+        let profile = std::fs::read(documents.join("friends.keymap")).unwrap();
+        let selector = std::fs::read(root.join("config").join("active-keymap.txt")).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let mut memory = MemoryUiStorage::new();
+        assert_eq!(active_profile_name(&memory), DEFAULT_FILE_NAME);
+        let saved = save_profile(&mut memory, "friends", &source, false);
+        assert_eq!(saved.status, KeymapSaveStatus::Saved, "{saved:?}");
+        assert_eq!(saved.file_name, "friends.keymap");
+        assert_eq!(
+            memory.take_writes(),
+            [
+                StorageWrite::Put {
+                    key: "keymaps/friends.keymap".into(),
+                    bytes: profile
+                },
+                StorageWrite::Put {
+                    key: keys::ACTIVE_KEYMAP.into(),
+                    bytes: selector.clone()
+                },
+            ]
+        );
+        assert_eq!(active_profile_name(&memory), "friends.keymap");
+        assert_eq!(
+            save_profile(&mut memory, "friends", &source, false).status,
+            KeymapSaveStatus::Exists
+        );
+        assert_eq!(
+            save_profile(&mut memory, "../x", &source, true).status,
+            KeymapSaveStatus::InvalidName
+        );
+        assert!(memory.take_writes().is_empty());
+
+        // Listing: only `.keymap` names, sorted ignoring case.
+        memory.insert("keymaps/Alpha.KEYMAP", b"x".to_vec());
+        memory.insert("keymaps/notes.txt", b"x".to_vec());
+        assert_eq!(
+            list_profiles(&memory).unwrap(),
+            ["Alpha.KEYMAP", "friends.keymap"]
+        );
+
+        // Loading makes it the active one; a broken one fails with the
+        // reason and changes nothing.
+        let loaded = load_profile(&mut memory, "friends.keymap", &KeyBindings::new()).unwrap();
+        let a: Vec<_> = source.for_action(InputAction::MovementForward).collect();
+        let b: Vec<_> = loaded.for_action(InputAction::MovementForward).collect();
+        assert_eq!(a, b);
+        assert_eq!(
+            memory.take_writes(),
+            [StorageWrite::Put {
+                key: keys::ACTIVE_KEYMAP.into(),
+                bytes: selector
+            }]
+        );
+        assert!(load_profile(&mut memory, "Alpha.KEYMAP", &KeyBindings::new()).is_err());
+        assert!(load_profile(&mut memory, "missing", &KeyBindings::new()).is_err());
+        assert!(memory.take_writes().is_empty());
+
+        // The active profile over the stored bindings, and the bindings
+        // when the active one is not stored.
+        let (active, notices) = load_active(&mut memory);
+        assert!(notices.is_empty(), "{notices:?}");
+        assert_eq!(
+            active.for_action(InputAction::MovementForward).count(),
+            a.len()
+        );
+        let mut fresh = MemoryUiStorage::new();
+        let mut custom = KeyBindings::new();
+        custom.add(Binding::new(
+            KeyChord::key(Key::Q, Modifiers::NONE),
+            InputAction::MovementForward,
+        ));
+        custom.save_to(&mut fresh, keys::KEY_BINDINGS).unwrap();
+        let (active, notices) = load_active(&mut fresh);
+        assert!(notices.is_empty(), "{notices:?}");
+        assert_eq!(active, KeyBindings::load_from(&fresh, keys::KEY_BINDINGS).0);
+    }
+
+    #[test]
+    fn a_read_only_profile_is_not_overwritten() {
+        use crate::storage::{FileUiStorage, WriteMode};
+        let root = std::env::temp_dir().join(format!(
+            "openac-keymap-read-only-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let mut files = FileUiStorage::new().with_folder(keys::KEYMAPS, &root, WriteMode::Replace);
+        let source = KeyBindings::retail_defaults();
+        files.put("keymaps/locked.keymap", b"old").unwrap();
+        let path = root.join("locked.keymap");
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions.clone()).unwrap();
+        let result = save_profile(&mut files, "locked", &source, true);
+        assert_eq!(result.status, KeymapSaveStatus::ReadOnly);
+        assert_eq!(result.error, None);
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 

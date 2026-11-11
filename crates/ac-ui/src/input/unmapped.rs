@@ -3,9 +3,13 @@
 //! in their own file by (input map, action id).
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ac_host::json::{self, Value};
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::{FileUiStorage, WriteMode};
+use crate::storage::{UiStorage, keys};
 
 use super::bindings::KeyBindingsError;
 use super::chord::{InputKey, KeyChord, modifiers_name, parse_modifiers};
@@ -43,9 +47,17 @@ impl RetailUnmappedKeyBindings {
 
     /// The bindings in `path` (none when the file is missing); a file that
     /// cannot be read or parsed gives none, with the reason.
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn load_or_empty(path: &Path) -> (Self, Option<KeyBindingsError>) {
-        let bytes = match std::fs::read(path) {
+        Self::load_from(&single_file(path), keys::UNMAPPED_KEY_BINDINGS)
+    }
+
+    /// [`RetailUnmappedKeyBindings::load_or_empty`] over the bindings
+    /// stored under `key`.
+    #[must_use]
+    pub fn load_from(storage: &dyn UiStorage, key: &str) -> (Self, Option<KeyBindingsError>) {
+        let bytes = match storage.get(key) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return (Self::new(), None);
@@ -172,13 +184,36 @@ impl RetailUnmappedKeyBindings {
     ///
     /// # Errors
     /// The directory or file could not be written.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_to_file(&self, path: &Path) -> Result<(), KeyBindingsError> {
-        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(path, self.to_json())?;
+        self.save_to(&mut single_file(path), keys::UNMAPPED_KEY_BINDINGS)
+    }
+
+    /// Store the document under `key`.
+    ///
+    /// # Errors
+    /// It could not be written.
+    pub fn save_to(&self, storage: &mut dyn UiStorage, key: &str) -> Result<(), KeyBindingsError> {
+        storage.put(key, self.to_json().as_bytes())?;
         Ok(())
     }
+}
+
+/// Where the unmapped bindings are kept beside a bindings file:
+/// `keybinds.json` → `keybinds.unmapped.json`.
+#[must_use]
+pub fn unmapped_path(bindings_file: &Path) -> PathBuf {
+    let stem = bindings_file
+        .file_stem()
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let dir = bindings_file.parent().unwrap_or(Path::new("."));
+    dir.join(format!("{stem}.unmapped.json"))
+}
+
+/// A storage of the one unmapped bindings file at `path`.
+#[cfg(not(target_arch = "wasm32"))]
+fn single_file(path: &Path) -> FileUiStorage {
+    FileUiStorage::new().with_file(keys::UNMAPPED_KEY_BINDINGS, path, WriteMode::InPlace)
 }
 
 #[cfg(test)]
@@ -218,5 +253,49 @@ mod tests {
         let (u, error) = RetailUnmappedKeyBindings::load_or_empty(&path);
         assert!(error.is_some() && u == RetailUnmappedKeyBindings::new());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_bindings_stored_by_key_are_the_bytes_of_the_file() {
+        use crate::storage::{MemoryUiStorage, StorageWrite};
+        let path = std::env::temp_dir().join(format!(
+            "openac_unmapped_storage_{}_{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let mut u = RetailUnmappedKeyBindings::new();
+        u.set(0x0E, 0x7E, &[KeyChord::key(Key::F13, Modifiers::CTRL)]);
+        u.save_to_file(&path).unwrap();
+        let on_disk = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let mut memory = MemoryUiStorage::new();
+        u.save_to(&mut memory, keys::UNMAPPED_KEY_BINDINGS).unwrap();
+        assert_eq!(
+            memory.take_writes(),
+            [StorageWrite::Put {
+                key: keys::UNMAPPED_KEY_BINDINGS.into(),
+                bytes: on_disk
+            }]
+        );
+        let (back, error) =
+            RetailUnmappedKeyBindings::load_from(&memory, keys::UNMAPPED_KEY_BINDINGS);
+        assert!(error.is_none() && back == u);
+        let (none, error) =
+            RetailUnmappedKeyBindings::load_from(&MemoryUiStorage::new(), "missing");
+        assert!(error.is_none() && none == RetailUnmappedKeyBindings::new());
+        memory.insert(keys::UNMAPPED_KEY_BINDINGS, b"{ nope".to_vec());
+        let (none, error) =
+            RetailUnmappedKeyBindings::load_from(&memory, keys::UNMAPPED_KEY_BINDINGS);
+        assert!(error.is_some() && none == RetailUnmappedKeyBindings::new());
+    }
+
+    #[test]
+    fn the_unmapped_file_sits_beside_the_bindings_file() {
+        assert_eq!(
+            unmapped_path(Path::new("cfg/keybinds.json")),
+            Path::new("cfg").join("keybinds.unmapped.json")
+        );
     }
 }

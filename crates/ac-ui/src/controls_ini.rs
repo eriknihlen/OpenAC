@@ -5,9 +5,13 @@
 //! start a comment line; lines outside a section are ignored.
 
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use crate::draw::Color;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::storage::{FileUiStorage, WriteMode};
+use crate::storage::{UiStorage, keys};
 
 /// See the module documentation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -21,8 +25,20 @@ impl ControlsIni {
     ///
     /// # Errors
     /// The file exists but cannot be read.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path) -> std::io::Result<Self> {
-        match std::fs::read(path) {
+        Self::load_from(
+            &FileUiStorage::new().with_file(keys::CONTROLS_INI, path, WriteMode::InPlace),
+            keys::CONTROLS_INI,
+        )
+    }
+
+    /// The sheet stored under `key`; nothing stored is an empty sheet.
+    ///
+    /// # Errors
+    /// It is stored but cannot be read.
+    pub fn load_from(storage: &dyn UiStorage, key: &str) -> std::io::Result<Self> {
+        match storage.get(key) {
             Ok(bytes) => Ok(Self::parse(&String::from_utf8_lossy(&bytes))),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e),
@@ -123,6 +139,34 @@ mod tests {
     fn a_missing_file_is_an_empty_sheet() {
         let ini = ControlsIni::load(Path::new("Z:/does/not/exist/controls.ini")).unwrap();
         assert_eq!(ini.get("title", "height"), None);
+    }
+
+    #[test]
+    fn the_sheet_stored_by_key_reads_as_the_file_does() {
+        use crate::storage::MemoryUiStorage;
+        let text = "[title]\r\ncolor=#FF4F657D\n[body]\nbad=\u{FF}\n";
+        let path = std::env::temp_dir().join(format!(
+            "openac_controls_ini_{}_{}.ini",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        // Not UTF-8 throughout: both read it the same lossy way.
+        let mut bytes = text.as_bytes().to_vec();
+        bytes.push(0xFF);
+        std::fs::write(&path, &bytes).unwrap();
+        let from_file = ControlsIni::load(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let mut memory = MemoryUiStorage::new();
+        memory.insert(keys::CONTROLS_INI, bytes);
+        let from_storage = ControlsIni::load_from(&memory, keys::CONTROLS_INI).unwrap();
+        assert_eq!(from_storage, from_file);
+        assert_eq!(from_storage.get("title", "color"), Some("#FF4F657D"));
+        assert_eq!(
+            ControlsIni::load_from(&MemoryUiStorage::new(), keys::CONTROLS_INI).unwrap(),
+            ControlsIni::default()
+        );
     }
 
     #[test]

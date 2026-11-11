@@ -465,7 +465,9 @@ impl ScriptRunner {
     }
 
     /// A runner over the script file at `path`; a file that cannot be read
-    /// is reported on the first tick.
+    /// is reported on the first tick. Native only: a host without a file
+    /// system hands the script's text to [`ScriptRunner::parse`].
+    #[cfg(not(target_arch = "wasm32"))]
     #[must_use]
     pub fn load(path: &std::path::Path, dump_on_start: bool) -> Self {
         match std::fs::read_to_string(path) {

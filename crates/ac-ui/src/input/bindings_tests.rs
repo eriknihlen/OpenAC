@@ -405,3 +405,40 @@ fn an_unknown_action_name_is_skipped() {
             .any(|x| x.chord.key == InputKey::Key(Key::Q))
     );
 }
+
+// ── Through the window's storage ───────────────────────────────────────
+
+#[test]
+fn the_bindings_stored_by_key_are_the_bytes_of_the_bindings_file() {
+    use crate::storage::{MemoryUiStorage, StorageWrite, UiStorage, keys};
+    let file = TempFile::new("storage");
+    let mut original = KeyBindings::retail_defaults();
+    original.add(Binding::new(bare(Key::F13), A::MovementForward).activation(ActivationType::Hold));
+    original.save_to_file(&file.0).unwrap();
+    let mut memory = MemoryUiStorage::new();
+    original.save_to(&mut memory, keys::KEY_BINDINGS).unwrap();
+    let on_disk = std::fs::read(&file.0).unwrap();
+    assert_eq!(
+        memory.take_writes(),
+        [StorageWrite::Put {
+            key: keys::KEY_BINDINGS.into(),
+            bytes: on_disk.clone()
+        }]
+    );
+    let (loaded, error) = KeyBindings::load_from(&memory, keys::KEY_BINDINGS);
+    assert!(error.is_none(), "{error:?}");
+    assert_eq!(loaded, KeyBindings::load_or_default(&file.0).0);
+    // Nothing stored is the defaults; a corrupt value is the defaults with
+    // the reason, and is left as it is.
+    let empty = MemoryUiStorage::new();
+    let (loaded, error) = KeyBindings::load_from(&empty, keys::KEY_BINDINGS);
+    assert!(error.is_none());
+    assert_eq!(loaded, KeyBindings::retail_defaults());
+    let mut corrupt = MemoryUiStorage::new();
+    corrupt.insert(keys::KEY_BINDINGS, b"{ nope".to_vec());
+    let (loaded, error) = KeyBindings::load_from(&corrupt, keys::KEY_BINDINGS);
+    assert!(error.is_some());
+    assert_eq!(loaded, KeyBindings::retail_defaults());
+    assert_eq!(corrupt.get(keys::KEY_BINDINGS).unwrap(), b"{ nope");
+    assert!(corrupt.take_writes().is_empty());
+}
