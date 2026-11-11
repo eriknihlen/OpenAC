@@ -118,15 +118,8 @@ pub fn key<K>(
     }
     let captured = ui.root.wants_keyboard();
     ui.key_down(key, modifiers);
-    // A Ctrl chord (Ctrl+V, Ctrl+C) is a command, though the window still
-    // reports its letter as text. AltGr comes as Ctrl and Alt together and
-    // does type (AltGr+2 is "@" on some keyboards).
-    let chord = modifiers.contains(Modifiers::CTRL) && !modifiers.contains(Modifiers::ALT);
-    for c in text.into_iter().flat_map(str::chars).filter(|_| !chord) {
-        // Control characters (Enter, Backspace, Tab, Escape) acted as keys.
-        if !c.is_control() {
-            ui.char_typed(c);
-        }
+    if let Some(text) = text {
+        type_text(ui, text, modifiers);
     }
     let mut outputs = ui.take_outputs();
     let fell = fell_through(&mut outputs, |o| matches!(o, UiOutput::WorldKey { .. }));
@@ -135,6 +128,30 @@ pub fn key<K>(
         repeat,
     });
     Routed::new(world, outputs)
+}
+
+/// The characters a key typed, as [`key`] types the text that comes with
+/// it.
+fn type_text(ui: &mut UiHost, text: &str, modifiers: Modifiers) {
+    // A Ctrl chord (Ctrl+V, Ctrl+C) is a command, though the window still
+    // reports its letter as text. AltGr comes as Ctrl and Alt together and
+    // does type (AltGr+2 is "@" on some keyboards).
+    let chord = modifiers.contains(Modifiers::CTRL) && !modifiers.contains(Modifiers::ALT);
+    for c in text.chars().filter(|_| !chord) {
+        // Control characters (Enter, Backspace, Tab, Escape) acted as keys.
+        if !c.is_control() {
+            ui.char_typed(c);
+        }
+    }
+}
+
+/// Text typed after its key went down, for a host that hears the two apart
+/// (a web page's key and input events): typed as [`key`] types the text
+/// that comes with the key, with the modifiers held for it. Returns the
+/// UI's outputs.
+pub fn typed(ui: &mut UiHost, text: &str, modifiers: Modifiers) -> Vec<UiOutput> {
+    type_text(ui, text, modifiers);
+    ui.take_outputs()
 }
 
 /// A mouse button went down or up at window pixel (`x`, `y`).
@@ -356,6 +373,19 @@ mod tests {
         let altgr = Modifiers::CTRL | Modifiers::ALT;
         super::key(&mut ui, 3, Key::Number2, true, false, altgr, Some("@"));
         assert_eq!(ui.root.widget::<Entry>(entry).unwrap().text, "@");
+    }
+
+    #[test]
+    fn text_typed_apart_from_its_key_types_as_it_would_with_it() {
+        let (mut ui, entry) = host();
+        ui.root.set_keyboard_focus(Some(entry));
+        let r = super::key(&mut ui, 30, Key::A, true, false, Modifiers::NONE, None);
+        assert_eq!(r.world, None);
+        assert!(typed(&mut ui, "a\u{8}", Modifiers::NONE).is_empty());
+        // A Ctrl chord's letter is a command, not typing; AltGr types.
+        typed(&mut ui, "v", Modifiers::CTRL);
+        typed(&mut ui, "@", Modifiers::CTRL | Modifiers::ALT);
+        assert_eq!(ui.root.widget::<Entry>(entry).unwrap().text, "a@");
     }
 
     #[test]
