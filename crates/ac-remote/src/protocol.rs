@@ -382,6 +382,10 @@ pub struct Subscription {
     pub effects: bool,
     /// Navigation events.
     pub navigation: bool,
+    /// The world's own game messages, as the server sent them, in frames
+    /// of their own beside the stream (for a viewer that runs the world's
+    /// logic itself).
+    pub world: bool,
     /// Which objects.
     pub objects: ObjectsFilter,
 }
@@ -533,6 +537,13 @@ impl RelayMessage {
                     sound: wanted.boolean("sound")?,
                     effects: wanted.boolean("effects")?,
                     navigation: wanted.boolean("navigation")?,
+                    // Asked for by name; a relay that does not know it
+                    // leaves it out.
+                    world: match member(wanted.members, "world").map(|node| &node.value) {
+                        None => false,
+                        Some(Value::Bool(wanted)) => *wanted,
+                        Some(_) => return Err(wanted.bad("world")),
+                    },
                     objects: match wanted.string("objects")? {
                         "none" => ObjectsFilter::None,
                         "radar" => ObjectsFilter::Radar,
@@ -910,6 +921,7 @@ mod tests {
                     sound: true,
                     effects: false,
                     navigation: true,
+                    world: false,
                     objects: ObjectsFilter::Radar,
                 },
                 permissions: Permissions {
@@ -1080,5 +1092,23 @@ mod tests {
                 type_name: "weather".into()
             })
         );
+    }
+
+    #[test]
+    fn the_world_stream_is_asked_for_by_name_and_off_when_not_named() {
+        let attach = |extra: &str| {
+            let text = format!(
+                r#"{{"type":"attach","request_id":1,"subscription":{{"motions":false,"sound":false,"effects":false,"navigation":false,"objects":"all"{extra}}},"permissions":{{"control":false,"lifecycle":[]}}}}"#
+            );
+            match RelayMessage::parse(&text) {
+                Ok(RelayMessage::Attach { subscription, .. }) => Ok(subscription.world),
+                Ok(other) => panic!("{other:?}"),
+                Err(error) => Err(error),
+            }
+        };
+        assert_eq!(attach(""), Ok(false));
+        assert_eq!(attach(r#","world":true"#), Ok(true));
+        assert_eq!(attach(r#","world":false"#), Ok(false));
+        assert!(attach(r#","world":"yes""#).is_err());
     }
 }

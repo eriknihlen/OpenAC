@@ -2288,6 +2288,7 @@ fn command_name(command: &SessionCommand) -> &'static str {
         C::Attach(_) => "Attach",
         C::AttachRemote(_) => "AttachRemote",
         C::Detach => "Detach",
+        C::WorldTap(_) => "WorldTap",
         C::Shutdown => "Shutdown",
         C::ListObjects => "ListObjects",
         C::AnswerConfirmation { .. } => "AnswerConfirmation",

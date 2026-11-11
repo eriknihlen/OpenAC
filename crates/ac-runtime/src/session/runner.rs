@@ -302,6 +302,9 @@ pub enum SessionCommand {
     AttachRemote(Sender<PresentationEvent>),
     /// The window, or the remote presentation, detaches.
     Detach,
+    /// Keep, or listen to, the world's own messages as the server sent
+    /// them (for a viewer that runs the world's logic somewhere else).
+    WorldTap(super::world_tap::WorldTapCommand),
     /// Log the character off and end the session.
     Shutdown,
     /// Reply with [`HostEvent::Objects`]: every object the session knows.
@@ -1587,11 +1590,14 @@ impl Drive<'_> {
                     Queue::Control => GameMessageGroup::ControlQueue,
                     Queue::Login => GameMessageGroup::LoginQueue,
                 };
+                self.state.world_tap.outbound(&outgoing.body);
                 connection
                     .send_message(driver.now(), &outgoing.body, group)
                     .map_err(|e| e.to_string())?;
             }
             driver.flush(connection).map_err(|e| e.to_string())?;
+            let player = self.state.world.player_guid().unwrap_or(0);
+            self.state.world_tap.flush(player);
 
             if let Some(error) = self.forward() {
                 return self.end_with(error);
@@ -1642,6 +1648,7 @@ impl Drive<'_> {
             match Inbound::parse(&message.body) {
                 Ok(parsed) => {
                     self.dump(&parsed, message.body.len());
+                    self.state.world_tap.inbound(&parsed, &message.body);
                     self.flow.set_wall_clock(now_unix_ms());
                     self.flow.handle(now, &parsed);
                     let clocks = clocks(driver);
