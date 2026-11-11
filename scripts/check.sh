@@ -9,6 +9,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 # Plugins are built for WebAssembly; the crates they link must build for it too.
 if rustup target list --installed | grep -qx 'wasm32-unknown-unknown'; then
     cargo build -p openac-plugin-compat --target wasm32-unknown-unknown
+    # The panels are also a module for a web page: it must build for the web (its tests read the
+    # release build to check that it imports nothing).
+    cargo clippy -p ac-ui-web --target wasm32-unknown-unknown -- -D warnings
+    cargo build -p ac-ui-web --target wasm32-unknown-unknown --release
 else
     echo "wasm32-unknown-unknown not installed; skipping the plugin-crate WebAssembly build."
 fi
