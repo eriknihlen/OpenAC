@@ -7,230 +7,39 @@
 //!
 //! Needs the dats in `Documents\Asheron's Call` under the user's profile.
 
-use std::collections::{BTreeMap, HashSet};
+mod harness;
+
 use std::sync::Arc;
 
 use ac_clock::Instant;
 use ac_core::chat::ChatKind;
-use ac_dat::{DatCollection, DatSource};
-use ac_remote_wire::{DecodeContext, EncodeContext, PresentationEvent, SessionCommand};
+use ac_dat::DatCollection;
+use ac_remote_wire::{EncodeContext, PresentationEvent, SessionCommand};
 use ac_runtime::communication::ChatLine;
 use ac_runtime::movement::{MovementCommand, MovementKeys};
-use ac_runtime::session::Generation;
 use ac_runtime::world::{
     EffectFacts, ObjectKey, ObjectView, PlayerView, RadarFacts, VitalReading, WorldSnapshot,
 };
-use ac_ui_web::client::ClientPanels;
-use ac_ui_web::host::{Modifiers, Module, Panels, Session};
-use ac_ui_web::output::kind;
-use ac_ui_web::page::{self, HEADER_BYTES, HEADER_ID};
+use ac_ui_web::host::{Modifiers, Panels, Session};
+use ac_ui_web::page;
 use ac_ui_window::ui::{TextureLedger, UiBatch, WindowUi};
+use harness::{Answered, Page};
 
 const WIDTH: u32 = 1024;
 const HEIGHT: u32 = 768;
 const PLAYER: u32 = 0x5000_0001;
 const GENERATION: u64 = 3;
 
-fn words(bytes: &[u8]) -> Vec<u32> {
-    bytes
-        .chunks_exact(4)
-        .map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+/// The commands sent since the last look, unstamped, each checked for
+/// the test's generation.
+fn sent(page: &mut Page) -> Vec<SessionCommand> {
+    page.sent_stamped()
+        .into_iter()
+        .map(|(generation, command)| {
+            assert_eq!(generation, GENERATION);
+            command
+        })
         .collect()
-}
-
-/// What the page answered, by dat: files found, their bytes, files not
-/// found.
-#[derive(Debug, Default, Clone, Copy)]
-struct Answered {
-    files: usize,
-    bytes: u64,
-    missing: usize,
-}
-
-/// A page: the module, the installed dats it answers from, and what it
-/// holds of the module's textures.
-struct Page {
-    module: Module<ClientPanels>,
-    dats: DatCollection,
-    dir: std::path::PathBuf,
-    /// The page hands in the high-resolution dat (when the install has one).
-    high_res: bool,
-    now: f64,
-    answered: BTreeMap<u32, Answered>,
-    textures: HashSet<(u32, u32)>,
-    /// The last picture: vertices (32 bytes each) and runs.
-    vertices: Vec<u8>,
-    runs: Vec<[u32; 5]>,
-    /// Command frames taken since the last look.
-    commands: Vec<Vec<u8>>,
-    log: String,
-}
-
-impl Page {
-    fn open() -> Self {
-        Self::with_high_res(true)
-    }
-
-    fn with_high_res(high_res: bool) -> Self {
-        let dir = ac_dat::default_dat_dir().expect("a user profile");
-        let dats = DatCollection::open(&dir).expect("the installed dats");
-        Self {
-            module: Module::new(ClientPanels::new()),
-            dats,
-            dir,
-            high_res,
-            now: 0.0,
-            answered: BTreeMap::new(),
-            textures: HashSet::new(),
-            vertices: Vec::new(),
-            runs: Vec::new(),
-            commands: Vec::new(),
-            log: String::new(),
-        }
-    }
-
-    /// The first bytes of dat `source`'s file, `None` when the install has
-    /// none.
-    fn header(&self, source: u32) -> Option<Vec<u8>> {
-        let name = match page::source_of(source)? {
-            DatSource::Portal => ac_dat::PORTAL_DAT,
-            DatSource::Cell => ac_dat::CELL_DAT,
-            DatSource::HighRes if !self.high_res => return None,
-            DatSource::HighRes => ac_dat::HIGHRES_DAT,
-            DatSource::Local => ac_dat::LOCAL_DAT,
-        };
-        let bytes = std::fs::read(self.dir.join(name)).ok()?;
-        Some(bytes[..HEADER_BYTES.min(bytes.len())].to_vec())
-    }
-
-    fn answer(&mut self, source: u32, id: u32) {
-        if id == HEADER_ID {
-            let header = self.header(source);
-            self.module.panels().dat(source, id, header.as_deref());
-            return;
-        }
-        let dat = page::source_of(source).expect("a dat the page knows");
-        let bytes = self
-            .dats
-            .file(dat)
-            .and_then(|file| file.get_bytes(id).expect("a readable dat"));
-        let tally = self.answered.entry(source).or_default();
-        match &bytes {
-            Some(b) => {
-                tally.files += 1;
-                tally.bytes += b.len() as u64;
-            }
-            None => tally.missing += 1,
-        }
-        self.module.panels().dat(source, id, bytes.as_deref());
-    }
-
-    /// One frame: take everything, answer every request. Returns how many
-    /// requests it made and whether a picture came.
-    fn frame(&mut self) -> (usize, bool) {
-        self.now += 16.0;
-        let mask = self.module.frame(self.now);
-        let bit = |k: u32| mask & (1 << (k - 1)) != 0;
-        let releases = words(self.module.take(kind::TEXTURE_RELEASES));
-        for pair in releases.chunks_exact(2) {
-            self.textures.remove(&(pair[0], pair[1]));
-        }
-        let uploads = self.module.take(kind::TEXTURE_UPLOADS).to_vec();
-        self.read_uploads(&uploads);
-        let picture = bit(kind::VERTICES);
-        if picture {
-            self.vertices = self.module.take(kind::VERTICES).to_vec();
-            self.runs = words(self.module.take(kind::RUNS))
-                .chunks_exact(5)
-                .map(|r| [r[0], r[1], r[2], r[3], r[4]])
-                .collect();
-            for run in &self.runs {
-                if run[0] != 0 {
-                    assert!(
-                        self.textures.contains(&(run[0], run[1])),
-                        "a run draws texture {}:{:#010x}, never uploaded",
-                        run[0],
-                        run[1]
-                    );
-                }
-                assert!((run[3] + run[4]) as usize * 32 <= self.vertices.len());
-            }
-        }
-        let frames = self.module.take(kind::COMMAND_FRAMES).to_vec();
-        let mut at = 0;
-        while at < frames.len() {
-            let len = words(&frames[at..at + 4])[0] as usize;
-            self.commands.push(frames[at + 4..at + 4 + len].to_vec());
-            at += 4 + len;
-        }
-        self.log
-            .push_str(&String::from_utf8_lossy(self.module.take(kind::LOG)));
-        for k in [
-            kind::STORAGE_WRITES,
-            kind::CLIPBOARD_COPY,
-            kind::CLIPBOARD_PASTE,
-            kind::CURSOR,
-        ] {
-            self.module.take(k);
-        }
-        let requests = words(self.module.take(kind::DAT_REQUESTS));
-        for pair in requests.chunks_exact(2) {
-            self.answer(pair[0], pair[1]);
-        }
-        (requests.len() / 2, picture)
-    }
-
-    fn read_uploads(&mut self, bytes: &[u8]) {
-        let mut at = 0;
-        while at < bytes.len() {
-            let head = words(&bytes[at..at + 24]);
-            let (texture_kind, id, format, levels) = (head[0], head[1], head[2], head[5]);
-            at += 24;
-            for _ in 0..levels {
-                let size = words(&bytes[at..at + 8]);
-                let per_texel = if format == 0 { 4 } else { 1 };
-                at += 8 + (size[0] * size[1] * per_texel) as usize;
-            }
-            self.textures.insert((texture_kind, id));
-        }
-        assert_eq!(at, bytes.len(), "uploads end on a record");
-    }
-
-    /// Frames until a frame makes no request and the panels are built;
-    /// returns the frames run.
-    fn settle(&mut self, limit: usize) -> usize {
-        for n in 1..=limit {
-            let (requests, _) = self.frame();
-            if requests == 0 && self.module.panels().ui().is_some() {
-                return n;
-            }
-        }
-        panic!(
-            "not settled after {limit} frames ({} rounds)\n{}",
-            self.module.panels().rounds(),
-            self.log
-        );
-    }
-
-    /// The commands sent since the last look, unstamped.
-    fn sent(&mut self) -> Vec<SessionCommand> {
-        let cx = DecodeContext::new(Instant::now(), None, None);
-        std::mem::take(&mut self.commands)
-            .iter()
-            .map(
-                |frame| match ac_remote_wire::decode_command(frame, &cx).unwrap() {
-                    SessionCommand::AtGeneration {
-                        generation,
-                        command,
-                    } => {
-                        assert_eq!(generation, Generation(GENERATION));
-                        *command
-                    }
-                    other => panic!("not stamped: {other:?}"),
-                },
-            )
-            .collect()
-    }
 }
 
 fn player() -> ObjectView {
@@ -419,7 +228,7 @@ fn the_panels_build_from_the_installed_dats_and_answer_a_page() {
         .panels()
         .key(false, "KeyW", none, false, page.now);
     page.frame();
-    assert!(page.sent().is_empty(), "nothing sent without control");
+    assert!(sent(&mut page).is_empty(), "nothing sent without control");
 
     // With control, W walks; held, it is sent again after a quarter
     // second; losing the keyboard lets it go.
@@ -435,22 +244,22 @@ fn the_panels_build_from_the_installed_dats_and_answer_a_page() {
             .key(true, "KeyW", none, false, page.now)
     );
     page.frame();
-    let sent = page.sent();
-    assert!(sent.iter().any(forward_keys), "{sent:?}");
+    let walked = sent(&mut page);
+    assert!(walked.iter().any(forward_keys), "{walked:?}");
     page.frame();
-    assert!(page.sent().is_empty(), "not again within 250 ms");
+    assert!(sent(&mut page).is_empty(), "not again within 250 ms");
     let started = page.now;
     while page.now < started + 250.0 {
         page.frame();
     }
-    let again = page.sent();
+    let again = sent(&mut page);
     assert!(
         again.iter().any(forward_keys),
         "again after 250 ms: {again:?}"
     );
     page.module.panels().focus(false);
     page.frame();
-    let released = page.sent();
+    let released = sent(&mut page);
     assert!(
         matches!(
             released.last(),

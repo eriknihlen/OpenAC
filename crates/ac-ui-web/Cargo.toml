@@ -34,6 +34,8 @@ ac-runtime.workspace = true
 [dev-dependencies]
 # The stream a test session sends.
 ac-proto.workspace = true
+# The replay harness writes its pictures as PNG files.
+ac-bits.workspace = true
 
 [lints]
 workspace = true

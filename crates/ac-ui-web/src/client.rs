@@ -162,6 +162,15 @@ impl std::fmt::Debug for ClientPanels {
 }
 
 impl ClientPanels {
+    /// Only watching: the browser has no control. Its keys, text and
+    /// buttons then do nothing, in the panels too: what they changed there
+    /// would never reach the session, and the picture would show a state
+    /// the session does not have. (The pointer still shows what is under
+    /// it, and the wheel still scrolls.)
+    fn watching(&self) -> bool {
+        !self.outbox.session().controlling
+    }
+
     /// A new attach begins: its snapshot replaces the scene, the stream is
     /// decoded from its own first frame, and the panels are built again
     /// (from the files already in) to show what it brings.
@@ -866,8 +875,14 @@ impl Panels for ClientPanels {
     }
 
     fn session(&mut self, session: Session) {
+        let gained = session.controlling && !self.outbox.session().controlling;
         if self.outbox.set_session(session) {
             self.release_all(true);
+        }
+        // What the window told the session about itself while it only
+        // watched was dropped with every other command: it is said again.
+        if gained && let Some(ui) = self.ui.as_mut() {
+            ui.report_plugin_state_again();
         }
     }
 
@@ -933,6 +948,10 @@ impl Panels for ClientPanels {
         self.modifiers = modifiers;
         let (key, physical) = (keys::ui_key(code), keys::physical(code));
         let controlling = self.outbox.session().controlling;
+        if !controlling {
+            // Only watching: see `watching`.
+            return false;
+        }
         let capturing = self.gameplay.is_capturing();
         let routed = match self.ui.as_mut() {
             Some(ui) => {
@@ -970,6 +989,9 @@ impl Panels for ClientPanels {
     }
 
     fn text(&mut self, text: &str) -> bool {
+        if self.watching() {
+            return false;
+        }
         if std::mem::take(&mut self.swallow_text) {
             return true;
         }
@@ -1015,6 +1037,14 @@ impl Panels for ClientPanels {
         self.now_ms = now;
         self.modifiers = keys::ui_modifiers(modifiers);
         self.pointer_at(at);
+        if self.watching() {
+            // Nothing is pressed, but a press on a panel is still the
+            // panel's: it must not reach what the page shows underneath.
+            return self
+                .ui
+                .as_mut()
+                .is_some_and(|ui| ui.host_mut().root.wants_mouse());
+        }
         let Some(canvas) = self.canvas else {
             return false;
         };
@@ -1036,6 +1066,15 @@ impl Panels for ClientPanels {
         ui.host_mut().set_modifiers(modifiers);
         let routed = ui_input::button::<()>(ui.host_mut(), index, down, x, y, flags, false);
         self.after_ui(routed).is_none()
+    }
+
+    fn pointer_leave(&mut self) {
+        self.pointer = None;
+        let Some(ui) = self.ui.as_mut() else {
+            return;
+        };
+        let routed = ui_input::left::<()>(ui.host_mut());
+        let _ = self.after_ui(routed);
     }
 
     fn wheel(&mut self, lines: f32, at: (f32, f32), modifiers: Modifiers) -> bool {
