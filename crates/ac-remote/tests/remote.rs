@@ -248,3 +248,24 @@ fn what_the_session_is_doing_reaches_the_relay() {
     assert_eq!(member(&status, "character_name"), Some("\"Second\""));
     assert_eq!(member(&status, "state"), Some("\"portal_space\""));
 }
+
+#[test]
+fn a_fault_that_ends_an_attach_leaves_a_line_for_the_console() {
+    let (_relay, remote, session, mut conn) = start();
+    let _to_remote = attach(&mut conn, &session);
+    assert!(remote.take_notes().is_empty());
+    conn.send_text(r#"{"type":"control","request_id":7,"on":true}"#);
+    conn.send_binary(&[0xFF, 0x00]);
+    session.expect_detach();
+    let deadline = Instant::now() + PATIENCE;
+    let notes = loop {
+        let notes = remote.take_notes();
+        if !notes.is_empty() {
+            break notes;
+        }
+        assert!(Instant::now() < deadline, "no note");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("no command"), "{notes:?}");
+}

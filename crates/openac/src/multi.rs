@@ -602,8 +602,11 @@ pub(crate) fn monitor(
         }
         // The session's relay follows what it is doing. The endpoint stops
         // with this monitor, when the session has ended.
-        if let (Some(remote), Some(event)) = (&remote, &event) {
-            crate::remote::follow(remote, event);
+        if let Some(remote) = &remote {
+            if let Some(event) = &event {
+                crate::remote::follow(remote, event);
+            }
+            crate::remote::print_notes(id, remote);
         }
         // What a player would see of the event, when the launcher marks lines.
         let kind = event.as_ref().and_then(|event| printer.kind_of(event));

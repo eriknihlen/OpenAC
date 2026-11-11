@@ -452,3 +452,38 @@ fn events_that_cannot_be_encoded_end_the_attach() {
     assert!(matches!(actions[0], Action::Detach), "{actions:?}");
     assert_eq!(controls(&actions), [detached(DetachReason::Protocol)]);
 }
+
+fn notes(actions: &[Action]) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Note(line) => Some(line.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An attach that ends by a fault leaves a line for the client's console
+/// saying why; one the browser ended does not.
+#[test]
+fn an_attach_that_ends_by_a_fault_says_why_on_the_console() {
+    let (mut endpoint, now) = controlling(&[]);
+    let lines = notes(&endpoint.frame(&[0xFF], now));
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("not a command"), "{lines:?}");
+
+    let codec = FakeCodec {
+        broken: true,
+        ..FakeCodec::default()
+    };
+    let mut endpoint = Endpoint::new(codec, 1024);
+    endpoint.relay(attach(7, EVERYTHING, permissions(false, &[])), now);
+    endpoint.attach_done(Ok(()));
+    let lines = notes(&endpoint.events(vec![text("x")]));
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("cannot encode"), "{lines:?}");
+
+    let (mut endpoint, now) = attached(&[]);
+    let actions = endpoint.relay(RelayMessage::Detach { request_id: 7 }, now);
+    assert!(notes(&actions).is_empty(), "{actions:?}");
+}

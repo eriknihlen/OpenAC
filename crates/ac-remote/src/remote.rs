@@ -35,6 +35,7 @@ const EVENTS_PER_PASS: usize = 4096;
 pub struct Remote {
     stop: Arc<AtomicBool>,
     status: Sender<Status>,
+    notes: Receiver<String>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -48,6 +49,7 @@ impl Remote {
     ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let (status, changes) = mpsc::channel();
+        let (to_console, notes) = mpsc::channel();
         let link = Link::start(link)?;
         let mut worker = Worker {
             link,
@@ -55,6 +57,7 @@ impl Remote {
             commands,
             changes,
             presentation: None,
+            to_console,
             stop: Arc::clone(&stop),
         };
         let thread = std::thread::Builder::new()
@@ -63,6 +66,7 @@ impl Remote {
         Ok(Self {
             stop,
             status,
+            notes,
             thread: Some(thread),
         })
     }
@@ -71,6 +75,12 @@ impl Remote {
     /// the next hello.
     pub fn status(&self, change: Status) {
         let _ = self.status.send(change);
+    }
+
+    /// Lines for the client's console since the last call: why an attach
+    /// ended by a fault.
+    pub fn take_notes(&self) -> Vec<String> {
+        self.notes.try_iter().collect()
     }
 
     /// Detach from the session and stop.
@@ -102,6 +112,8 @@ struct Worker<C> {
     changes: Receiver<Status>,
     /// The session's events while attached.
     presentation: Option<Receiver<PresentationEvent>>,
+    /// Lines for the client's console.
+    to_console: Sender<String>,
     stop: Arc<AtomicBool>,
 }
 
@@ -204,6 +216,9 @@ impl<C: Codec> Worker<C> {
                 Action::Control(message) => {
                     // A link that is down has nobody to tell.
                     let _ = self.link.send_control(message);
+                }
+                Action::Note(line) => {
+                    let _ = self.to_console.send(line);
                 }
                 Action::Binary(frame) => {
                     if let Err(error) = self.link.send_binary(frame) {

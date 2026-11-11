@@ -121,6 +121,13 @@ pub(crate) fn follow(remote: &Remote, event: &HostEvent) {
     }
 }
 
+/// Print what the endpoint of session `id` has to say.
+pub(crate) fn print_notes(id: &str, remote: &Remote) {
+    for note in remote.take_notes() {
+        errln!("[{id}] {note}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ac_runtime::session::{Generation, Lifecycle, LifecycleState, Relogin};

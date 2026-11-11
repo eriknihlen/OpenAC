@@ -54,6 +54,8 @@ pub enum Action {
     Control(EndpointMessage),
     /// Send the relay this frame for the browser.
     Binary(Vec<u8>),
+    /// A line for the client's own console: why an attach ended by a fault.
+    Note(String),
 }
 
 /// The request attached now.
@@ -159,8 +161,12 @@ impl<C: Codec> Endpoint<C> {
         }
         // Any frame from the browser in control says it is still there.
         attached.control_until = Some(now + INPUT_SILENCE);
-        let Ok(command) = self.codec.decode(frame) else {
-            return self.end(DetachReason::Protocol);
+        let command = match self.codec.decode(frame) {
+            Ok(command) => command,
+            Err(error) => {
+                let why = format!("the browser sent bytes that are no command ({error})");
+                return self.fault(DetachReason::Protocol, why);
+            }
         };
         match &command {
             SessionCommand::AtGeneration { command: inner, .. }
@@ -182,7 +188,7 @@ impl<C: Codec> Endpoint<C> {
         let mut actions = Vec::new();
         match self.encode(&events, &mut actions) {
             Ok(()) => actions,
-            Err(reason) => self.end(reason),
+            Err((reason, why)) => self.fault(reason, why),
         }
     }
 
@@ -192,20 +198,25 @@ impl<C: Codec> Endpoint<C> {
         &mut self,
         events: &[PresentationEvent],
         frames: &mut Vec<Action>,
-    ) -> Result<(), DetachReason> {
+    ) -> Result<(), (DetachReason, String)> {
         if events.is_empty() {
             return Ok(());
         }
-        let frame = self
-            .codec
-            .encode(events)
-            .map_err(|_| DetachReason::Protocol)?;
+        let frame = self.codec.encode(events).map_err(|error| {
+            let why = format!("the session's events could not be encoded ({error})");
+            (DetachReason::Protocol, why)
+        })?;
         if frame.len() <= self.max_frame {
             frames.push(Action::Binary(frame));
             return Ok(());
         }
         if events.len() == 1 {
-            return Err(DetachReason::Overflow);
+            let why = format!(
+                "one event of {} bytes is larger than a frame ({} bytes)",
+                frame.len(),
+                self.max_frame
+            );
+            return Err((DetachReason::Overflow, why));
         }
         let (first, second) = events.split_at(events.len() / 2);
         self.encode(first, frames)?;
@@ -255,7 +266,10 @@ impl<C: Codec> Endpoint<C> {
     /// The link refused a frame.
     pub fn send_failed(&mut self, error: &SendError) -> Vec<Action> {
         match error {
-            SendError::QueueFull | SendError::TooLarge => self.end(DetachReason::Overflow),
+            SendError::QueueFull | SendError::TooLarge => self.fault(
+                DetachReason::Overflow,
+                "the link to the relay could not keep up".to_owned(),
+            ),
             // A link that is down says so by itself.
             SendError::NotConnected | SendError::HelloIsTheLinks => Vec::new(),
         }
@@ -286,6 +300,18 @@ impl<C: Codec> Endpoint<C> {
         } else {
             Vec::new()
         }
+    }
+
+    /// End the attach over a fault, leaving a line for the console saying
+    /// what it was.
+    fn fault(&mut self, reason: DetachReason, why: String) -> Vec<Action> {
+        let mut actions = self.end(reason);
+        if !actions.is_empty() {
+            actions.push(Action::Note(format!(
+                "the remote window was detached: {why}"
+            )));
+        }
+        actions
     }
 
     /// End the attach, if there is one, and say why. The detach lets go of
