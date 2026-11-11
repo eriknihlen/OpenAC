@@ -65,6 +65,7 @@ mod commands;
 mod interface;
 mod plugin_ui;
 mod pregame;
+pub mod record;
 mod subscription;
 mod world;
 
