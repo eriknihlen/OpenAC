@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ac_plugin_ui::flex::{FlexAlign, FlexDirection, FlexEdges, FlexJustify};
-use ac_plugin_ui::fonts::FontView;
+use ac_plugin_ui::fonts::{self, FontBake, FontSource, FontView, FontWeight, SharpBake};
 use ac_plugin_ui::hotkeys::{BoundHotkey, Chord};
 use ac_plugin_ui::markup::{
     Anchors, BoolSource, ColorSource, ColorValueKind, Column, ColumnAlign, ColumnHeader,
@@ -615,112 +615,78 @@ union! {
     }
 }
 
-/// A binding value. Item records hold binding values in turn, so reading
-/// one goes a level deeper each time ([`Reader::nested`]).
-impl Wire for UiValue {
-    const SHAPE: u64 = Shape::new("union")
-        .tag(0)
-        .of(bool::SHAPE)
-        .tag(1)
-        .of(i32::SHAPE)
-        .tag(2)
-        .of(u32::SHAPE)
-        .tag(3)
-        .of(f32::SHAPE)
-        .tag(4)
-        .of(String::SHAPE)
-        .tag(5)
-        .of(<Vec<String>>::SHAPE)
-        .tag(6)
-        .of(<Vec<u32>>::SHAPE)
-        .tag(7)
-        .of(<Vec<i32>>::SHAPE)
-        .tag(8)
-        .of(<Vec<bool>>::SHAPE)
-        .tag(9)
-        .of(<Option<bool>>::SHAPE)
-        .tag(10)
-        .of(<Vec<f32>>::SHAPE)
-        // Item records: a list of maps of binding names to these values.
-        .tag(11)
-        .name("list of maps of string to this union")
-        .finish();
-    fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
-        match self {
-            UiValue::Bool(v) => {
-                w.put_raw(&[0]);
-                v.encode(w, cx)
+/// A binding value. Item records hold binding values in turn: the shape
+/// spells their layout out with a marker where the value recurs, and
+/// reading them goes a level deeper each time ([`Reader::nested`]). One
+/// list of variants gives the shape, the encoder and the decoder, so the
+/// types read are the types declared.
+macro_rules! ui_value {
+    ($( $tag:literal => $variant:ident($ty:ty) ),+ $(,)?) => {
+        /// The tag of item records.
+        const UI_VALUE_ITEMS: u8 = 11;
+
+        impl Wire for UiValue {
+            const SHAPE: u64 = Shape::new("union")
+                $( .tag($tag).name(stringify!($variant)).of(<$ty as Wire>::SHAPE) )+
+                .tag(UI_VALUE_ITEMS as u64)
+                .name("Items")
+                // Arc<Vec<ItemRecord>>: a list of records whose one field,
+                // `values`, maps names to values of this union.
+                .of(Shape::new("list")
+                    .of(Shape::new("record")
+                        .name("values")
+                        .of(Shape::new("map")
+                            .of(<String as Wire>::SHAPE)
+                            .name("this union")
+                            .finish())
+                        .finish())
+                    .finish())
+                .finish();
+            fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
+                match self {
+                    $(
+                        UiValue::$variant(value) => {
+                            w.put_raw(&[$tag]);
+                            <$ty as Wire>::encode(value, w, cx)
+                        }
+                    )+
+                    UiValue::Items(items) => {
+                        w.put_raw(&[UI_VALUE_ITEMS]);
+                        <Arc<Vec<ItemRecord>> as Wire>::encode(items, w, cx)
+                    }
+                }
             }
-            UiValue::Int(v) => {
-                w.put_raw(&[1]);
-                v.encode(w, cx)
-            }
-            UiValue::Uint(v) => {
-                w.put_raw(&[2]);
-                v.encode(w, cx)
-            }
-            UiValue::Float(v) => {
-                w.put_raw(&[3]);
-                v.encode(w, cx)
-            }
-            UiValue::Text(v) => {
-                w.put_raw(&[4]);
-                v.encode(w, cx)
-            }
-            UiValue::TextList(v) => {
-                w.put_raw(&[5]);
-                v.encode(w, cx)
-            }
-            UiValue::UintList(v) => {
-                w.put_raw(&[6]);
-                v.encode(w, cx)
-            }
-            UiValue::IntList(v) => {
-                w.put_raw(&[7]);
-                v.encode(w, cx)
-            }
-            UiValue::BoolList(v) => {
-                w.put_raw(&[8]);
-                v.encode(w, cx)
-            }
-            UiValue::OptionalBool(v) => {
-                w.put_raw(&[9]);
-                v.encode(w, cx)
-            }
-            UiValue::FloatList(v) => {
-                w.put_raw(&[10]);
-                v.encode(w, cx)
-            }
-            UiValue::Items(v) => {
-                w.put_raw(&[11]);
-                v.encode(w, cx)
+            fn decode(r: &mut Reader<'_>, cx: &DecodeContext) -> Result<Self, DecodeError> {
+                Ok(match r.byte()? {
+                    $( $tag => UiValue::$variant(<$ty as Wire>::decode(r, cx)?), )+
+                    UI_VALUE_ITEMS => UiValue::Items(
+                        r.nested(|r| <Arc<Vec<ItemRecord>> as Wire>::decode(r, cx))?,
+                    ),
+                    tag => {
+                        return Err(DecodeError::UnknownTag {
+                            what: "binding value",
+                            tag: u32::from(tag),
+                        });
+                    }
+                })
             }
         }
-    }
-    fn decode(r: &mut Reader<'_>, cx: &DecodeContext) -> Result<Self, DecodeError> {
-        Ok(match r.byte()? {
-            0 => UiValue::Bool(Wire::decode(r, cx)?),
-            1 => UiValue::Int(Wire::decode(r, cx)?),
-            2 => UiValue::Uint(Wire::decode(r, cx)?),
-            3 => UiValue::Float(Wire::decode(r, cx)?),
-            4 => UiValue::Text(Wire::decode(r, cx)?),
-            5 => UiValue::TextList(Wire::decode(r, cx)?),
-            6 => UiValue::UintList(Wire::decode(r, cx)?),
-            7 => UiValue::IntList(Wire::decode(r, cx)?),
-            8 => UiValue::BoolList(Wire::decode(r, cx)?),
-            9 => UiValue::OptionalBool(Wire::decode(r, cx)?),
-            10 => UiValue::FloatList(Wire::decode(r, cx)?),
-            11 => UiValue::Items(r.nested(|r| Wire::decode(r, cx))?),
-            tag => {
-                return Err(DecodeError::UnknownTag {
-                    what: "binding value",
-                    tag: u32::from(tag),
-                });
-            }
-        })
-    }
+    };
 }
 
+ui_value! {
+    0 => Bool(bool),
+    1 => Int(i32),
+    2 => Uint(u32),
+    3 => Float(f32),
+    4 => Text(String),
+    5 => TextList(Vec<String>),
+    6 => UintList(Vec<u32>),
+    7 => IntList(Vec<i32>),
+    8 => BoolList(Vec<bool>),
+    9 => OptionalBool(Option<bool>),
+    10 => FloatList(Vec<f32>),
+}
 /// An exact decimal: its whole number and scale, checked on the way in.
 impl Wire for Dec {
     const SHAPE: u64 = Shape::new("decimal")
@@ -739,15 +705,134 @@ impl Wire for Dec {
     }
 }
 
-/// A plugin's baked font holds its parsed font file and glyph atlas, and a
-/// window tells two fonts apart by the identity of that bake, not by its
-/// contents: no copy could stand for it. A stream carrying one is refused.
-impl Wire for FontView {
-    const SHAPE: u64 = Shape::new("unsupported").name("plugin font").finish();
-    fn encode(&self, _w: &mut Writer, _cx: &EncodeContext) -> Result<(), EncodeError> {
-        Err(EncodeError::Unsupported("a plugin font"))
+/// A baked font as it crosses: what it is baked from, its size and the
+/// characters it has (as runs of code points), so the far side bakes the
+/// same again.
+struct BakeOnWire {
+    source: FontSource,
+    pixel_size: f32,
+    characters: Vec<(u32, u32)>,
+}
+
+/// A sharper bake: its scale and size; it is baked from what the font is.
+struct SharpOnWire {
+    scale: f32,
+    pixel_size: f32,
+}
+
+/// One font a plugin holds, as it crosses.
+struct FontViewOnWire {
+    owner: String,
+    handle: u32,
+    font: BakeOnWire,
+    sharp: Option<SharpOnWire>,
+}
+
+union! {
+    FontWeight: "font weight" {
+        0 => Regular,
+        1 => SemiBold,
     }
-    fn decode(_r: &mut Reader<'_>, _cx: &DecodeContext) -> Result<Self, DecodeError> {
-        Err(DecodeError::Unsupported("a plugin font"))
+    FontSource: "font source" {
+        0 => Bundled(weight: FontWeight),
+        1 => Own(file: Arc<Vec<u8>>),
+    }
+}
+
+record! {
+    BakeOnWire { source: FontSource, pixel_size: f32, characters: Vec<(u32, u32)> }
+    SharpOnWire { scale: f32, pixel_size: f32 }
+    FontViewOnWire { owner: String, handle: u32, font: BakeOnWire, sharp: Option<SharpOnWire> }
+}
+
+/// `characters` as runs of consecutive code points.
+fn runs(characters: &[char]) -> Vec<(u32, u32)> {
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for &c in characters {
+        let c = u32::from(c);
+        match runs.last_mut() {
+            Some((_, last)) if last.checked_add(1) == Some(c) => *last = c,
+            _ => runs.push((c, c)),
+        }
+    }
+    runs
+}
+
+/// Bakes `source` at `pixel_size` with the characters `ranges` names, as
+/// the session bakes plugin fonts. What the stream asks for is checked
+/// against the session's own bounds first; the baker refuses the rest.
+fn bake_again(
+    source: &FontSource,
+    pixel_size: f32,
+    ranges: &[(u32, u32)],
+) -> Result<FontBake, DecodeError> {
+    if !(fonts::MINIMUM_PIXEL_SIZE..=fonts::MAXIMUM_SHARP_PIXEL_SIZE).contains(&pixel_size) {
+        return Err(DecodeError::OutOfRange("font size"));
+    }
+    let baked = match source {
+        FontSource::Bundled(weight) => fonts::bake_bundled(*weight, pixel_size, ranges),
+        FontSource::Own(file) => {
+            if file.len() > fonts::MAXIMUM_FILE_BYTES {
+                return Err(DecodeError::OutOfRange("font file"));
+            }
+            fonts::bake((**file).clone(), pixel_size, ranges, fonts::MAXIMUM_GLYPHS)
+        }
+    };
+    baked.map_err(DecodeError::Font)
+}
+
+/// A plugin's font goes as what it is baked from and is baked again on
+/// arrival: a window tells fonts apart by the identity of their bake, so
+/// the copy is a new font that draws and measures the same.
+impl Wire for FontView {
+    const SHAPE: u64 = <FontViewOnWire as Wire>::SHAPE;
+    fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
+        let FontView {
+            owner,
+            handle,
+            font,
+            sharp,
+        } = self;
+        FontViewOnWire {
+            owner: owner.clone(),
+            handle: *handle,
+            font: BakeOnWire {
+                source: font.source(),
+                pixel_size: font.pixel_size,
+                characters: runs(&font.characters()),
+            },
+            sharp: sharp.as_ref().map(|SharpBake { scale, font }| SharpOnWire {
+                scale: *scale,
+                pixel_size: font.pixel_size,
+            }),
+        }
+        .encode(w, cx)
+    }
+    fn decode(r: &mut Reader<'_>, cx: &DecodeContext) -> Result<Self, DecodeError> {
+        let FontViewOnWire {
+            owner,
+            handle,
+            font:
+                BakeOnWire {
+                    source,
+                    pixel_size,
+                    characters,
+                },
+            sharp,
+        } = FontViewOnWire::decode(r, cx)?;
+        let font = Arc::new(bake_again(&source, pixel_size, &characters)?);
+        let sharp = match sharp {
+            None => None,
+            Some(SharpOnWire { scale, pixel_size }) => Some(SharpBake {
+                scale,
+                font: Arc::new(bake_again(&source, pixel_size, &characters)?),
+            }),
+        };
+        Ok(FontView {
+            owner,
+            handle,
+            font,
+            sharp,
+        })
     }
 }

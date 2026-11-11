@@ -13,6 +13,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ac_core::player::SkillFormulaBonusResolver;
+use ac_core::spells::SpellTable;
+
 pub use ac_plugin_abi::wire::{Shape, Writer};
 
 /// How deep values may nest inside each other when read (a binding value
@@ -33,6 +36,9 @@ pub enum EncodeError {
     /// The value cannot be carried faithfully (see the crate docs).
     #[error("{0} cannot be carried on the wire")]
     Unsupported(&'static str),
+    /// A list, string or map longer than a `u32` count can say.
+    #[error("{0} items are more than a count can say")]
+    CountTooLarge(usize),
 }
 
 /// Why bytes could not be read as the expected value.
@@ -88,9 +94,9 @@ pub enum DecodeError {
     /// A generation-stamped command inside another one.
     #[error("a generation-stamped command holds another")]
     NestedAtGeneration,
-    /// A value no valid stream carries (see [`EncodeError::Unsupported`]).
-    #[error("{0} cannot be carried on the wire")]
-    Unsupported(&'static str),
+    /// A plugin font could not be baked again from what was sent.
+    #[error("a plugin font cannot be baked: {0}")]
+    Font(String),
 }
 
 /// What the encoder needs besides the values: the instant the stream counts
@@ -111,32 +117,63 @@ impl EncodeContext {
 
 /// What the decoder needs besides the bytes: the instant on its own clock
 /// that stands for the stream's epoch (taken when the stream starts), and
-/// the game's spell table, which a spellbook refers to but which never goes
-/// on the wire (the receiver has the same game data).
-#[derive(Debug, Clone)]
+/// the receiver's own copy of two pieces of game data the session holds but
+/// never sends, built from the same tables: the spell table a spellbook
+/// refers to, and the skill formulas that score a skill from buffed
+/// attributes.
+#[derive(Clone)]
 pub struct DecodeContext {
     /// The stream's epoch, on the receiver's clock.
     pub epoch: Instant,
-    /// The spell table decoded spellbooks get.
-    pub spell_table: Arc<ac_core::spells::SpellTable>,
+    /// The spell table decoded spellbooks get. `None`: the receiver has none
+    /// yet, and a decoded book has no table installed, so one can be
+    /// installed later.
+    pub spell_table: Option<Arc<SpellTable>>,
+    /// What decoded player numbers recompute a skill's attribute term
+    /// with. `None`: they have none (a buffed attribute then does not
+    /// change a skill).
+    pub skill_formula_bonus_resolver: Option<SkillFormulaBonusResolver>,
+}
+
+impl std::fmt::Debug for DecodeContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecodeContext")
+            .field("epoch", &self.epoch)
+            .field("spell_table", &self.spell_table.as_ref().map(|t| t.len()))
+            .field(
+                "skill_formula_bonus_resolver",
+                &self.skill_formula_bonus_resolver.is_some(),
+            )
+            .finish()
+    }
 }
 
 impl DecodeContext {
-    /// A stream whose epoch is `epoch` here, with an empty spell table.
+    /// A stream whose epoch is `epoch` here, decoding spellbooks against
+    /// `spell_table` and player numbers with `skill_formula_bonus_resolver`
+    /// (each `None` when the receiver has none; nothing is assumed).
     #[must_use]
-    pub fn new(epoch: Instant) -> Self {
+    pub fn new(
+        epoch: Instant,
+        spell_table: Option<Arc<SpellTable>>,
+        skill_formula_bonus_resolver: Option<SkillFormulaBonusResolver>,
+    ) -> Self {
         Self {
             epoch,
-            spell_table: Arc::default(),
+            spell_table,
+            skill_formula_bonus_resolver,
         }
     }
+}
 
-    /// The same, with decoded spellbooks referring to `table`.
-    #[must_use]
-    pub fn with_spell_table(mut self, table: Arc<ac_core::spells::SpellTable>) -> Self {
-        self.spell_table = table;
-        self
-    }
+/// Writes a `u32` count.
+///
+/// # Errors
+/// [`EncodeError::CountTooLarge`] past `u32::MAX`.
+pub fn put_count(w: &mut Writer, count: usize) -> Result<(), EncodeError> {
+    let count = u32::try_from(count).map_err(|_| EncodeError::CountTooLarge(count))?;
+    w.put_raw(&count.to_le_bytes());
+    Ok(())
 }
 
 /// Reads values from a byte slice, front to back. Every read checks what is
@@ -245,10 +282,10 @@ impl<'a> Reader<'a> {
 /// convention's: the stream's types live in other crates, and only a trait
 /// of this crate may be implemented for them here.
 pub trait Wire: Sized {
-    /// A hash of the encoding's layout ([`Shape`]): the order and shape of
-    /// the fields, and each variant's tag and fields; names are left out.
-    /// It changes whenever the layout of this type, or of anything inside
-    /// it, changes.
+    /// A hash of the encoding's layout ([`Shape`]): each field's name and
+    /// shape in order, and each variant's tag, name and fields. It changes
+    /// whenever the layout of this type, or of anything inside it, changes,
+    /// a rename included (both ends are built from the same source).
     const SHAPE: u64;
 
     /// The fewest bytes a value takes: a count is checked against it.
@@ -400,7 +437,7 @@ impl Wire for String {
     const SHAPE: u64 = Shape::new("string").finish();
     const MIN_SIZE: usize = 4;
     fn encode(&self, w: &mut Writer, _cx: &EncodeContext) -> Result<(), EncodeError> {
-        w.put_count(self.len());
+        put_count(w, self.len())?;
         w.put_raw(self.as_bytes());
         Ok(())
     }
@@ -432,7 +469,7 @@ impl<T: Wire> Wire for Vec<T> {
     const SHAPE: u64 = Shape::new("list").of(T::SHAPE).finish();
     const MIN_SIZE: usize = 4;
     fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
-        w.put_count(self.len());
+        put_count(w, self.len())?;
         T::encode_slice(self, w, cx)
     }
     fn decode(r: &mut Reader<'_>, cx: &DecodeContext) -> Result<Self, DecodeError> {
@@ -527,7 +564,7 @@ impl<K: Wire + Ord, V: Wire> Wire for BTreeMap<K, V> {
     const SHAPE: u64 = Shape::new("map").of(K::SHAPE).of(V::SHAPE).finish();
     const MIN_SIZE: usize = 4;
     fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
-        w.put_count(self.len());
+        put_count(w, self.len())?;
         for (key, value) in self {
             key.encode(w, cx)?;
             value.encode(w, cx)?;
@@ -558,7 +595,7 @@ impl<K: Wire + Ord + std::hash::Hash, V: Wire, S: std::hash::BuildHasher + Defau
     fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
         let mut entries: Vec<(&K, &V)> = self.iter().collect();
         entries.sort_by(|a, b| a.0.cmp(b.0));
-        w.put_count(entries.len());
+        put_count(w, entries.len())?;
         for (key, value) in entries {
             key.encode(w, cx)?;
             value.encode(w, cx)?;
@@ -586,7 +623,7 @@ impl<T: Wire + Ord + std::hash::Hash, S: std::hash::BuildHasher + Default> Wire 
     fn encode(&self, w: &mut Writer, cx: &EncodeContext) -> Result<(), EncodeError> {
         let mut items: Vec<&T> = self.iter().collect();
         items.sort();
-        w.put_count(items.len());
+        put_count(w, items.len())?;
         for item in items {
             item.encode(w, cx)?;
         }
@@ -656,7 +693,7 @@ macro_rules! record {
     ($( $name:ident { $($field:ident : $ty:ty),* $(,)? } )*) => {$(
         impl $crate::codec::Wire for $name {
             const SHAPE: u64 = $crate::codec::Shape::new("record")
-                $( .of(<$ty as $crate::codec::Wire>::SHAPE) )*
+                $( .name(stringify!($field)).of(<$ty as $crate::codec::Wire>::SHAPE) )*
                 .finish();
             const MIN_SIZE: usize = 0 $( + <$ty as $crate::codec::Wire>::MIN_SIZE )*;
             fn encode(
@@ -725,8 +762,9 @@ macro_rules! union {
             const SHAPE: u64 = $crate::codec::Shape::new("union")
                 $(
                     .tag($tag)
+                    .name(stringify!($variant))
                     $( $( .of(<$at as $crate::codec::Wire>::SHAPE) )* )?
-                    $( $( .of(<$ft as $crate::codec::Wire>::SHAPE) )* )?
+                    $( $( .name(stringify!($f)).of(<$ft as $crate::codec::Wire>::SHAPE) )* )?
                 )+
                 .finish();
             fn encode(
@@ -777,7 +815,7 @@ mod tests {
 
     fn cx() -> (EncodeContext, DecodeContext) {
         let now = Instant::now();
-        (EncodeContext::new(now), DecodeContext::new(now))
+        (EncodeContext::new(now), DecodeContext::new(now, None, None))
     }
 
     #[test]
@@ -833,7 +871,7 @@ mod tests {
         let sender_epoch = Instant::now();
         let e = EncodeContext::new(sender_epoch);
         let receiver_epoch = sender_epoch + Duration::from_secs(1000);
-        let d = DecodeContext::new(receiver_epoch);
+        let d = DecodeContext::new(receiver_epoch, None, None);
         let later = sender_epoch + Duration::from_micros(2_500_001);
         let back: Instant = from_bytes(&to_bytes(&later, &e).unwrap(), &d).unwrap();
         assert_eq!(back - receiver_epoch, Duration::from_micros(2_500_001));
@@ -876,6 +914,63 @@ mod tests {
         // The same layout under another type is the same shape.
         assert_eq!(<Box<u32>>::SHAPE, u32::SHAPE);
         assert_eq!(<HashMap<u32, bool>>::SHAPE, <BTreeMap<u32, bool>>::SHAPE);
+    }
+
+    /// Two fields of one type, encoded in either order.
+    struct Ab {
+        a: u32,
+        b: u32,
+    }
+    struct Ba {
+        a: u32,
+        b: u32,
+    }
+    record! {
+        Ab { a: u32, b: u32 }
+        Ba { b: u32, a: u32 }
+    }
+
+    /// Two unit variants, each given the other's tag.
+    enum Xy {
+        X,
+        Y,
+    }
+    enum Yx {
+        X,
+        Y,
+    }
+    union! {
+        Xy: "xy" { 0 => X, 1 => Y }
+        Yx: "yx" { 0 => Y, 1 => X }
+    }
+
+    #[test]
+    fn the_shape_sees_swapped_fields_and_moved_tags() {
+        let (e, _) = cx();
+        // Bytes alike, meaning not: the shape must tell them apart.
+        assert_eq!(
+            to_bytes(&Ab { a: 1, b: 1 }, &e).unwrap(),
+            to_bytes(&Ba { a: 1, b: 1 }, &e).unwrap()
+        );
+        assert_ne!(Ab::SHAPE, Ba::SHAPE);
+        assert_eq!(to_bytes(&Xy::X, &e).unwrap(), [0]);
+        assert_eq!(to_bytes(&Yx::Y, &e).unwrap(), [0]);
+        assert_ne!(Xy::SHAPE, Yx::SHAPE);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_count_past_u32_is_an_error_not_a_clamp() {
+        let mut w = Writer::new();
+        let past = u32::MAX as usize + 1;
+        assert_eq!(
+            put_count(&mut w, past),
+            Err(EncodeError::CountTooLarge(past))
+        );
+        assert!(w.into_bytes().is_empty(), "nothing is written for it");
+        let mut w = Writer::new();
+        put_count(&mut w, u32::MAX as usize).unwrap();
+        assert_eq!(w.into_bytes(), u32::MAX.to_le_bytes());
     }
 
     #[test]
