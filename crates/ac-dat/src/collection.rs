@@ -4,10 +4,11 @@ use std::sync::Arc;
 use crate::cache::{
     CacheStats, DEFAULT_OBJECT_BYTE_LIMIT, DEFAULT_OBJECT_ENTRY_LIMIT, ObjectCache,
 };
-use crate::database::DatFile;
+use crate::database::{DatFile, Presence};
 use crate::error::{DatError, Result};
 use crate::header::DatFileType;
 use crate::objects::{DatObject, SurfaceTexture};
+use crate::pack::DatPack;
 
 /// File name of the portal dat.
 pub const PORTAL_DAT: &str = "client_portal.dat";
@@ -35,6 +36,7 @@ pub struct DatCollection {
 
 /// Open `path` as a dat of kind `expected`, or `None` when there is no
 /// such file. A file that is there but cannot be read is still an error.
+#[cfg(not(target_arch = "wasm32"))]
 fn open_if_present(path: PathBuf, expected: DatFileType) -> Result<Option<DatFile>> {
     match DatFile::open_as(path, expected) {
         Ok(dat) => Ok(Some(dat)),
@@ -48,7 +50,10 @@ fn open_if_present(path: PathBuf, expected: DatFileType) -> Result<Option<DatFil
 impl DatCollection {
     /// Open the dats in `dir`, checking each header's kind. The portal,
     /// cell and language dats must be there; the high-resolution dat is
-    /// opened only when the file exists.
+    /// opened only when the file exists. Not on WebAssembly, which has no
+    /// dat files: build a collection of packs there
+    /// ([`DatCollection::from_packs`]).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
         Ok(Self {
@@ -62,11 +67,16 @@ impl DatCollection {
     /// Read a typed object from the dat its type lives in. A portal object
     /// the high-resolution dat holds is read from there; any other comes
     /// from the portal dat.
+    /// Over packs, `None` while the dat to read from is not known yet (see
+    /// [`DatCollection::portal_source`]).
     pub fn get<T: DatObject>(&self, id: u32) -> Result<Option<T>> {
         match T::DAT {
             DatFileType::Cell => self.cell.get(id),
             DatFileType::Local => self.local.get(id),
-            DatFileType::Portal => self.portal_file(id)?.get(id),
+            DatFileType::Portal => match self.portal_pick(id)? {
+                Some((_, file)) => file.get(id),
+                None => Ok(None),
+            },
             DatFileType::Undefined | DatFileType::Other(_) => Ok(None),
         }
     }
@@ -75,30 +85,54 @@ impl DatCollection {
     /// it is open and its directory holds the id, else the portal dat
     /// (whether or not the portal dat holds it). A high-resolution
     /// directory that cannot be read is an error.
+    ///
+    /// Over packs the answer waits for the high-resolution pack: while it
+    /// does not know whether it holds the id, the answer is
+    /// [`DatError::NotLoaded`], and the id is asked of it (and of the
+    /// portal pack, which is read if the high-resolution pack has none).
     pub fn portal_source(&self, id: u32) -> Result<DatSource> {
-        Ok(self.portal_pick(id)?.0)
-    }
-
-    /// The file a portal-type id is read from (see
-    /// [`DatCollection::portal_source`]), for readers that decode the raw
-    /// bytes themselves.
-    pub fn portal_file(&self, id: u32) -> Result<&DatFile> {
-        Ok(self.portal_pick(id)?.1)
-    }
-
-    fn portal_pick(&self, id: u32) -> Result<(DatSource, &DatFile)> {
-        match &self.high_res {
-            Some(high_res) if high_res.find_entry(id)?.is_some() => {
-                Ok((DatSource::HighRes, high_res))
-            }
-            _ => Ok((DatSource::Portal, &self.portal)),
+        match self.portal_pick(id)? {
+            Some((source, _)) => Ok(source),
+            None => Err(DatError::NotLoaded { id }),
         }
     }
 
+    /// The file a portal-type id is read from (see
+    /// [`DatCollection::portal_source`], including its wait over packs),
+    /// for readers that decode the raw bytes themselves.
+    pub fn portal_file(&self, id: u32) -> Result<&DatFile> {
+        match self.portal_pick(id)? {
+            Some((_, file)) => Ok(file),
+            None => Err(DatError::NotLoaded { id }),
+        }
+    }
+
+    /// The dat a portal-type id is read from; `None` while a
+    /// high-resolution pack does not know the id yet.
+    pub(crate) fn portal_pick(&self, id: u32) -> Result<Option<(DatSource, &DatFile)>> {
+        let Some(high_res) = &self.high_res else {
+            return Ok(Some((DatSource::Portal, &self.portal)));
+        };
+        Ok(match high_res.presence(id)? {
+            Presence::Held => Some((DatSource::HighRes, high_res)),
+            Presence::Absent => Some((DatSource::Portal, &self.portal)),
+            Presence::NotLoaded => {
+                // Ask the portal pack now too, so a file the
+                // high-resolution pack lacks takes one round trip, not two.
+                self.portal.presence(id)?;
+                None
+            }
+        })
+    }
+
     /// The raw bytes of portal-type file `id`, from the dat
-    /// [`DatCollection::portal_source`] picks; `None` when it has none.
+    /// [`DatCollection::portal_source`] picks; `None` when it has none (or,
+    /// over packs, while that dat is not known yet).
     pub fn portal_bytes(&self, id: u32) -> Result<Option<Vec<u8>>> {
-        self.portal_file(id)?.get_bytes(id)
+        match self.portal_pick(id)? {
+            Some((_, file)) => file.get_bytes(id),
+            None => Ok(None),
+        }
     }
 
     /// Whether the high-resolution dat is open.
@@ -128,12 +162,20 @@ impl DatCollection {
     /// The dat an id is read from when its type is not known in advance:
     /// the first of high-resolution, portal, language and cell that holds
     /// it. `None` when no dat has it.
+    ///
+    /// Over packs, also `None` while a pack earlier in that order does not
+    /// know the id yet; the id is asked of every pack up to the first that
+    /// holds it.
     pub fn resolve(&self, id: u32) -> Result<Option<DatSource>> {
+        let mut unsettled = false;
         for source in DatSource::PRECEDENCE {
-            if let Some(file) = self.file(source)
-                && file.find_entry(id)?.is_some()
-            {
-                return Ok(Some(source));
+            let Some(file) = self.file(source) else {
+                continue;
+            };
+            match file.presence(id)? {
+                Presence::Held => return Ok((!unsettled).then_some(source)),
+                Presence::Absent => {}
+                Presence::NotLoaded => unsettled = true,
             }
         }
         Ok(None)
@@ -150,10 +192,64 @@ impl DatCollection {
             DatSource::Cell => Some(&self.cell),
         }
     }
+
+    /// Build a collection from dats already made, usually packs
+    /// ([`DatFile::new_pack`]) for a process with no dat files, checking
+    /// each header's kind as [`DatCollection::open`] does. `high_res` is
+    /// `None` when there is no high-resolution dat; with one, every
+    /// portal-type read waits until the high-resolution pack knows whether
+    /// it holds the id (see [`DatCollection::portal_source`]).
+    pub fn from_packs(
+        portal: DatFile,
+        cell: DatFile,
+        high_res: Option<DatFile>,
+        local: DatFile,
+    ) -> Result<Self> {
+        let check = |dat: DatFile, expected: DatFileType| {
+            let found = dat.header().file_type;
+            if found == expected {
+                Ok(dat)
+            } else {
+                Err(DatError::WrongType {
+                    path: dat.path().to_path_buf(),
+                    expected,
+                    found,
+                })
+            }
+        };
+        Ok(Self {
+            portal: check(portal, DatFileType::Portal)?,
+            cell: check(cell, DatFileType::Cell)?,
+            high_res: high_res
+                .map(|dat| check(dat, DatFileType::Portal))
+                .transpose()?,
+            local: check(local, DatFileType::Local)?,
+        })
+    }
+
+    /// The pack behind one of the dats, to fill it; `None` when that dat
+    /// is a mapped file or (the high-resolution dat) is not there.
+    #[must_use]
+    pub fn pack(&self, source: DatSource) -> Option<&DatPack> {
+        self.file(source)?.as_pack()
+    }
+
+    /// The ids every pack was asked for and does not hold (see
+    /// [`DatPack::take_wanted`]), sorted by dat in [`DatSource`] order and
+    /// then by id, each once. Empty for mapped files.
+    pub fn take_wanted(&self) -> Vec<(DatSource, u32)> {
+        DatSource::ALL
+            .into_iter()
+            .filter_map(|source| Some((source, self.pack(source)?)))
+            .flat_map(|(source, pack)| pack.take_wanted().into_iter().map(move |id| (source, id)))
+            .collect()
+    }
 }
 
-/// Which of the four dats something was found in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Which of the four dats something was found in. Ordered as declared
+/// (portal, high-resolution, language, cell), the order lists of ids by
+/// dat are sorted in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DatSource {
     /// `client_portal.dat`.
     Portal,
@@ -171,6 +267,9 @@ impl DatSource {
     /// copies of portal objects, and a portal object it holds is read
     /// from it.
     pub const PRECEDENCE: [Self; 4] = [Self::HighRes, Self::Portal, Self::Local, Self::Cell];
+
+    /// The four in their sort order.
+    const ALL: [Self; 4] = [Self::Portal, Self::HighRes, Self::Local, Self::Cell];
 
     /// Where this dat's object cache sits in [`CachedDats`].
     const fn cache_index(self) -> usize {
@@ -236,7 +335,8 @@ pub struct CachedDats {
 
 impl CachedDats {
     /// Open the dats in `dir` (as [`DatCollection::open`]), each with a cache
-    /// of the default size.
+    /// of the default size. Not on WebAssembly.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
         let directory = dir.as_ref().to_path_buf();
         Ok(Self::new(DatCollection::open(&directory)?, directory))
@@ -249,7 +349,8 @@ impl CachedDats {
     }
 
     /// Open the dats in `dir` (as [`DatCollection::open`]) with caches of the
-    /// given sizes.
+    /// given sizes. Not on WebAssembly.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open_with_limits(dir: impl AsRef<Path>, limits: &ObjectCacheLimits) -> Result<Self> {
         let directory = dir.as_ref().to_path_buf();
         Ok(Self::with_limits(
@@ -356,7 +457,10 @@ impl CachedDats {
     /// [`DatCollection::portal_source`] picks. The portal cache only ever
     /// holds ids the high-resolution dat lacks (the dats do not change), so
     /// a hit in either cache needs no directory lookup. One hit or one miss
-    /// is counted per read.
+    /// is counted per read. Over packs that holds too: nothing is read
+    /// while the high-resolution pack does not know the id (the miss is
+    /// counted against the portal cache), so the portal cache never takes
+    /// a copy the high-resolution pack turns out to hold.
     fn get_portal_type<T: DatObject + Send + Sync + 'static>(
         &self,
         id: u32,
@@ -368,7 +472,10 @@ impl CachedDats {
                 return Ok(Some(object));
             }
         }
-        let (source, file) = self.dats.portal_pick(id)?;
+        let Some((source, file)) = self.dats.portal_pick(id)? else {
+            self.cache(DatSource::Portal).count_miss();
+            return Ok(None);
+        };
         self.cache(source).count_miss();
         self.read_into_cache(file, source, id)
     }
@@ -558,6 +665,220 @@ mod tests {
             Err(DatError::WrongType { .. })
         ));
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    const PORTAL: &[(u32, &[u8])] = &[(0x0600_0001, b"portal"), (0x0600_0002, b"portal only")];
+    const CELL: &[(u32, &[u8])] = &[(0x0101_FFFF, b"cell")];
+    const LOCAL: &[(u32, &[u8])] = &[(0x2300_0001, b"local")];
+
+    /// A pack of `file_type` holding `files`.
+    fn pack(file_type: DatFileType, files: &[(u32, &[u8])]) -> DatFile {
+        let dat = DatFile::new_pack(crate::database::tests::pack_header(file_type));
+        for (id, bytes) in files {
+            dat.as_pack().unwrap().insert(*id, bytes.to_vec());
+        }
+        dat
+    }
+
+    /// Packs of what `dat_dir` writes, each holding none of its files yet.
+    fn empty_packs(high_res: bool) -> DatCollection {
+        DatCollection::from_packs(
+            pack(DatFileType::Portal, &[]),
+            pack(DatFileType::Cell, &[]),
+            high_res.then(|| pack(DatFileType::Portal, &[])),
+            pack(DatFileType::Local, &[]),
+        )
+        .unwrap()
+    }
+
+    /// Answer every id the packs asked for from what `dat_dir` writes, as
+    /// a host does: the bytes, or "no such file".
+    fn serve(dats: &DatCollection, high_res: Option<&[(u32, &[u8])]>) {
+        for (source, id) in dats.take_wanted() {
+            let files = match source {
+                DatSource::Portal => PORTAL,
+                DatSource::HighRes => high_res.unwrap(),
+                DatSource::Local => LOCAL,
+                DatSource::Cell => CELL,
+            };
+            let pack = dats.pack(source).unwrap();
+            match files.iter().find(|(held, _)| *held == id) {
+                Some((_, bytes)) => pack.insert(id, bytes.to_vec()),
+                None => pack.mark_missing(id),
+            }
+        }
+    }
+
+    /// `read` once the host has answered every id it asks for.
+    fn settled<R>(
+        dats: &DatCollection,
+        high_res: Option<&[(u32, &[u8])]>,
+        read: impl Fn() -> R,
+    ) -> R {
+        for _ in 0..4 {
+            read();
+            serve(dats, high_res);
+        }
+        let answer = read();
+        assert!(dats.take_wanted().is_empty(), "settled");
+        answer
+    }
+
+    #[test]
+    fn packs_resolve_as_files_with_the_same_contents_do() {
+        for high_res in [Some(HIGH_RES), None] {
+            let dir = dat_dir(&format!("packs-{}", high_res.is_some()), high_res);
+            let files = DatCollection::open(&dir).unwrap();
+            let packs = empty_packs(high_res.is_some());
+            assert_eq!(packs.has_high_res(), files.has_high_res());
+            let texture = SurfaceTexture {
+                id: 0x0500_0001,
+                data_category: 0,
+                texture_type: crate::objects::TextureType(0),
+                textures: vec![0x0600_0001, 0x0600_0002],
+            };
+            assert_eq!(
+                packs.texture_source(&texture),
+                files.texture_source(&texture)
+            );
+            for id in [
+                0x0600_0001,
+                0x0600_0002,
+                0x0600_0003,
+                0x0600_0004,
+                0x0101_FFFF,
+                0x2300_0001,
+                0x7700_0000,
+            ] {
+                assert_eq!(
+                    settled(&packs, high_res, || packs.resolve(id).unwrap()),
+                    files.resolve(id).unwrap(),
+                    "{id:#x}"
+                );
+                assert_eq!(
+                    settled(&packs, high_res, || packs.portal_source(id).ok()),
+                    Some(files.portal_source(id).unwrap()),
+                    "{id:#x}"
+                );
+                assert_eq!(
+                    settled(&packs, high_res, || packs.get::<Raw>(id).unwrap()),
+                    files.get::<Raw>(id).unwrap(),
+                    "{id:#x}"
+                );
+                assert_eq!(
+                    settled(&packs, high_res, || packs.portal_bytes(id).unwrap()),
+                    files.portal_bytes(id).unwrap(),
+                    "{id:#x}"
+                );
+            }
+            std::fs::remove_dir_all(dir).ok();
+        }
+    }
+
+    #[test]
+    fn a_portal_read_waits_for_the_high_res_pack_to_answer() {
+        let dats = DatCollection::from_packs(
+            pack(DatFileType::Portal, PORTAL),
+            pack(DatFileType::Cell, CELL),
+            Some(pack(DatFileType::Portal, &[])),
+            pack(DatFileType::Local, LOCAL),
+        )
+        .unwrap();
+        let cached = CachedDats::new(dats, PathBuf::new());
+        let read = |id| cached.get::<Raw>(id).unwrap().map(|r| r.0.clone());
+        let high_res = cached.uncached().pack(DatSource::HighRes).unwrap();
+        // The portal pack holds it, but the high-resolution pack may too:
+        // not found until that pack knows, and neither copy is cached.
+        assert_eq!(read(0x0600_0001), None);
+        assert!(matches!(
+            cached.uncached().portal_source(0x0600_0001),
+            Err(DatError::NotLoaded { id: 0x0600_0001 })
+        ));
+        assert_eq!(cached.uncached().portal_bytes(0x0600_0001).unwrap(), None);
+        assert_eq!(cached.uncached().resolve(0x0600_0001).unwrap(), None);
+        assert_eq!(
+            cached.uncached().take_wanted(),
+            [(DatSource::HighRes, 0x0600_0001)]
+        );
+        high_res.insert(0x0600_0001, b"high res".to_vec());
+        assert_eq!(read(0x0600_0001), Some(b"high res".to_vec()));
+        // The high-resolution pack has none: the portal copy.
+        assert_eq!(read(0x0600_0002), None);
+        high_res.mark_missing(0x0600_0002);
+        assert_eq!(read(0x0600_0002), Some(b"portal only".to_vec()));
+        // Neither pack knows the id: both are asked at once.
+        assert_eq!(read(0x0600_0009), None);
+        assert_eq!(
+            cached.uncached().take_wanted(),
+            [
+                (DatSource::Portal, 0x0600_0009),
+                (DatSource::HighRes, 0x0600_0009)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_cached_read_of_a_file_not_loaded_yet_succeeds_once_it_arrives() {
+        let cached = CachedDats::new(empty_packs(false), PathBuf::new());
+        assert!(cached.get::<Raw>(0x0600_0005).unwrap().is_none());
+        assert_eq!(
+            cached.uncached().take_wanted(),
+            [(DatSource::Portal, 0x0600_0005)]
+        );
+        cached
+            .uncached()
+            .pack(DatSource::Portal)
+            .unwrap()
+            .insert(0x0600_0005, b"late".to_vec());
+        assert_eq!(cached.get::<Raw>(0x0600_0005).unwrap().unwrap().0, b"late");
+        // Now cached: a second read is a hit.
+        assert_eq!(cached.get::<Raw>(0x0600_0005).unwrap().unwrap().0, b"late");
+        let stats = cached.stats();
+        assert_eq!((stats.hits, stats.misses), (1, 2));
+    }
+
+    #[test]
+    fn a_pack_of_the_wrong_kind_is_refused() {
+        assert!(matches!(
+            DatCollection::from_packs(
+                pack(DatFileType::Cell, &[]),
+                pack(DatFileType::Cell, &[]),
+                None,
+                pack(DatFileType::Local, &[]),
+            ),
+            Err(DatError::WrongType {
+                expected: DatFileType::Portal,
+                found: DatFileType::Cell,
+                ..
+            })
+        ));
+        assert!(matches!(
+            DatCollection::from_packs(
+                pack(DatFileType::Portal, &[]),
+                pack(DatFileType::Cell, &[]),
+                Some(pack(DatFileType::Local, &[])),
+                pack(DatFileType::Local, &[]),
+            ),
+            Err(DatError::WrongType { .. })
+        ));
+        // A mapped collection has no packs.
+        let dir = dat_dir("no-packs", None);
+        let files = DatCollection::open(&dir).unwrap();
+        assert!(
+            DatSource::PRECEDENCE
+                .iter()
+                .all(|s| files.pack(*s).is_none())
+        );
+        assert!(files.take_wanted().is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn pack_collections_are_send_and_sync() {
+        const fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<DatCollection>();
+        assert_send_sync::<CachedDats>();
+        let _ = CachedDats::new(empty_packs(true), PathBuf::new());
     }
 
     #[test]

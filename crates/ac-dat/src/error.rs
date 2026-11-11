@@ -98,6 +98,14 @@ pub enum DatError {
         /// The entry's file id.
         id: u32,
     },
+    /// A pack does not hold the file (yet): its bytes have not been handed
+    /// in, or the dat has no such file. The pack asks for a file it does
+    /// not know.
+    #[error("file {id:#010x} is not loaded")]
+    NotLoaded {
+        /// The file id.
+        id: u32,
+    },
     /// The header bytes could not be decoded.
     #[error("bad dat header: {0}")]
     Header(#[from] BitsError),

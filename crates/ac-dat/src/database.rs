@@ -1,97 +1,81 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 
-use crate::btree::{DatEntry, Node, is_valid_offset};
-use crate::cache::{CacheStats, DEFAULT_NODE_CACHE_LIMIT, NodeCache};
+use crate::btree::DatEntry;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::btree::{Node, is_valid_offset};
+use crate::cache::CacheStats;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::cache::{DEFAULT_NODE_CACHE_LIMIT, NodeCache};
 use crate::error::{DatError, Result};
-use crate::header::{DatFileType, DatHeader};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::header::DatFileType;
+use crate::header::DatHeader;
 use crate::objects::{DatObject, Iteration};
+use crate::pack::{self, DatPack, Lookup, Read};
 
 /// File id of the iteration record every dat carries.
 pub const ITERATION_ID: u32 = 0xFFFF_0001;
 
-/// One open dat file: header, directory and reads.
+/// One dat: header, directory and reads.
 ///
-/// The file is mapped into memory read-only: a read copies the bytes of a
-/// file's blocks straight from the mapping, with no system call. The
-/// mapped pages are the system's file cache, shared by every process that
-/// reads the dats, not this process's own memory.
+/// A dat has one of two backings:
 ///
-/// `DatFile` is `Send + Sync`. Every read goes through `&self`; besides the
-/// header and the directory's root node it keeps a bounded, thread-safe
-/// cache of the directory nodes lookups have read, so any number of
-/// threads may read at once.
+/// - **A mapped file** ([`DatFile::open`], not on WebAssembly): the file is
+///   mapped into memory read-only, and a read copies the bytes of a file's
+///   blocks straight from the mapping, with no system call. The mapped
+///   pages are the system's file cache, shared by every process that reads
+///   the dats, not this process's own memory.
+/// - **A pack** ([`DatFile::new_pack`]): single files by id, handed in by a
+///   host that has no dat files (a browser), filled while the dat is read
+///   (see [`DatPack`]). A pack has no directory: it answers each method from
+///   the files it holds, as each method's documentation says. A read of a
+///   file it does not hold yet answers "not found" and asks for the file.
+///
+/// `DatFile` is `Send + Sync`. Every read goes through `&self`; a mapped
+/// dat keeps, besides the header and the directory's root node, a bounded,
+/// thread-safe cache of the directory nodes lookups have read, so any
+/// number of threads may read at once.
 #[derive(Debug)]
 pub struct DatFile {
+    /// Empty for a pack.
     path: PathBuf,
-    map: memmap2::Mmap,
-    file_len: u64,
     header: DatHeader,
-    root: Option<Arc<Node>>,
-    nodes: NodeCache,
+    /// A mapped dat's iteration record; a pack's until it holds one.
     iteration: Iteration,
+    backing: Backing,
+}
+
+#[derive(Debug)]
+enum Backing {
+    #[cfg(not(target_arch = "wasm32"))]
+    Mapped(Mapped),
+    Pack(DatPack),
 }
 
 impl DatFile {
     /// Open a dat file of any kind.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_node_cache(path, DEFAULT_NODE_CACHE_LIMIT)
     }
 
     /// Open a dat file keeping at most `node_limit` directory nodes besides
     /// the root (0: every lookup reads its nodes from the file).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open_with_node_cache(path: impl AsRef<Path>, node_limit: usize) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let io_error = |source| DatError::Io {
-            path: path.clone(),
-            source,
-        };
-        let file = File::open(&path).map_err(io_error)?;
-        let file_len = file.metadata().map_err(io_error)?.len();
-        if file_len < DatHeader::SIZE as u64 {
-            return Err(DatError::TooShort {
-                path,
-                len: file_len,
-            });
-        }
-        let map = map_read_only(&file).map_err(io_error)?;
-        // The mapping is the file's length when mapped; a file that changed
-        // length since is read as mapped.
-        let file_len = file_len.min(map.len() as u64);
-        if file_len < DatHeader::SIZE as u64 {
-            return Err(DatError::TooShort {
-                path,
-                len: file_len,
-            });
-        }
-        let header = DatHeader::unpack(&map[..DatHeader::SIZE])?;
-        if header.magic != DatHeader::RETAIL_MAGIC {
-            return Err(DatError::BadMagic {
-                path,
-                magic: header.magic,
-            });
-        }
-        // A block must hold its 4-byte next pointer and at least one data byte.
-        if header.block_size <= 4 {
-            return Err(DatError::BadBlockSize {
-                path,
-                block_size: header.block_size,
-            });
-        }
-
+        let (header, mapped) = Mapped::open(&path, node_limit)?;
         let mut dat = Self {
             path,
-            map,
-            file_len,
             header,
-            root: None,
-            nodes: NodeCache::new(node_limit),
             iteration: Iteration::default(),
+            backing: Backing::Mapped(mapped),
         };
-        if dat.header.root_block != 0 {
-            dat.root = Some(Arc::new(dat.read_node(dat.header.root_block)?));
-        }
         if let Some(iteration) = dat.get::<Iteration>(ITERATION_ID)? {
             dat.iteration = iteration;
         }
@@ -99,6 +83,7 @@ impl DatFile {
     }
 
     /// Open a dat file and check that its header names the expected kind.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn open_as(path: impl AsRef<Path>, expected: DatFileType) -> Result<Self> {
         let dat = Self::open(path)?;
         let found = dat.header.file_type;
@@ -112,33 +97,269 @@ impl DatFile {
         Ok(dat)
     }
 
-    /// Path the file was opened from.
+    /// An empty pack: the dat whose header is `header` (the header of the
+    /// dat file the pack's files come from, which says the dat's kind and
+    /// its master map), holding no files yet. Fill it through
+    /// [`DatFile::as_pack`].
+    #[must_use]
+    pub fn new_pack(header: DatHeader) -> Self {
+        Self {
+            path: PathBuf::new(),
+            header,
+            iteration: Iteration::default(),
+            backing: Backing::Pack(DatPack::new()),
+        }
+    }
+
+    /// The pack behind this dat, to fill it and take the ids it was asked
+    /// for; `None` for a mapped file.
+    #[must_use]
+    pub fn as_pack(&self) -> Option<&DatPack> {
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(_) => None,
+            Backing::Pack(pack) => Some(pack),
+        }
+    }
+
+    /// Path the file was opened from; empty for a pack.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Length of the file on disk, in bytes.
+    /// Length of the file on disk, in bytes; for a pack, the bytes of the
+    /// files it holds, together.
     #[must_use]
     pub fn file_len(&self) -> u64 {
-        self.file_len
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(mapped) => mapped.file_len,
+            Backing::Pack(pack) => pack.byte_len(),
+        }
     }
 
-    /// The decoded header.
+    /// The decoded header; for a pack, the header it was made with.
     #[must_use]
     pub fn header(&self) -> &DatHeader {
         &self.header
     }
 
-    /// The iteration record, or the default (iteration 1) when the dat has none.
+    /// The iteration record, or the default (iteration 1) when the dat has
+    /// none. A pack answers the record once it holds file
+    /// [`ITERATION_ID`], the default before.
     #[must_use]
     pub fn iteration(&self) -> &Iteration {
-        &self.iteration
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(_) => &self.iteration,
+            Backing::Pack(pack) => pack.iteration().unwrap_or(&self.iteration),
+        }
     }
 
-    /// Look up a file's directory entry by id.
+    /// Look up a file's directory entry by id. A pack gives an entry for a
+    /// file it holds, with the id and the size of its bytes (every other
+    /// field zero), and `None` for any other id, asking for it unless the
+    /// dat is known to have no such file.
     pub fn find_entry(&self, id: u32) -> Result<Option<DatEntry>> {
-        let mut block = self.header.root_block;
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(mapped) => mapped.find_entry(self.header.root_block, id),
+            Backing::Pack(pack) => Ok(match pack.lookup(id) {
+                Lookup::Held(size) => Some(DatEntry {
+                    size,
+                    ..pack::entry(id, 0)
+                }),
+                Lookup::Missing | Lookup::NotLoaded => None,
+            }),
+        }
+    }
+
+    /// What the dat knows of `id`: held, absent, or (a pack only) not
+    /// loaded yet, in which case the pack now wants it.
+    pub(crate) fn presence(&self, id: u32) -> Result<Presence> {
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(_) => Ok(match self.find_entry(id)? {
+                Some(_) => Presence::Held,
+                None => Presence::Absent,
+            }),
+            Backing::Pack(pack) => Ok(match pack.lookup(id) {
+                Lookup::Held(_) => Presence::Held,
+                Lookup::Missing => Presence::Absent,
+                Lookup::NotLoaded => Presence::NotLoaded,
+            }),
+        }
+    }
+
+    /// Every directory entry, in id order. A pack walks the files it holds
+    /// now (entries as [`DatFile::find_entry`] gives them).
+    #[must_use]
+    pub fn entries(&self) -> Entries<'_> {
+        let walk = match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(mapped) => Walk::Tree {
+                dat: mapped,
+                stack: mapped
+                    .root
+                    .iter()
+                    .map(|root| Frame {
+                        node: Node::clone(root),
+                        next: 0,
+                        descended: false,
+                    })
+                    .collect(),
+            },
+            Backing::Pack(pack) => Walk::Pack(pack.entries().into_iter(), PhantomData),
+        };
+        Entries { walk }
+    }
+
+    /// Read the stored bytes of an entry. A pack reads the file of the
+    /// entry's id; one it does not hold is [`DatError::NotLoaded`] (and is
+    /// asked for unless known to be absent).
+    pub fn read_entry(&self, entry: &DatEntry) -> Result<Vec<u8>> {
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(mapped) => mapped.read_entry(entry),
+            Backing::Pack(pack) => match pack.read(entry.id) {
+                Read::Held(bytes) => Ok(bytes),
+                Read::Missing | Read::NotLoaded => Err(DatError::NotLoaded { id: entry.id }),
+            },
+        }
+    }
+
+    /// Read a file's bytes by id; `None` when the directory has no such
+    /// file, and for a pack when it does not hold the file (it asks for
+    /// it unless the dat is known to have none).
+    pub fn get_bytes(&self, id: u32) -> Result<Option<Vec<u8>>> {
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(mapped) => match mapped.find_entry(self.header.root_block, id)? {
+                Some(entry) => mapped.read_entry(&entry).map(Some),
+                None => Ok(None),
+            },
+            Backing::Pack(pack) => Ok(match pack.read(id) {
+                Read::Held(bytes) => Some(bytes),
+                Read::Missing | Read::NotLoaded => None,
+            }),
+        }
+    }
+
+    /// Read and decode a typed object by id; `None` when the directory has
+    /// no such file (or a pack does not hold it, as for
+    /// [`DatFile::get_bytes`]). The object's id is set to the file id it
+    /// was read from.
+    pub fn get<T: DatObject>(&self, id: u32) -> Result<Option<T>> {
+        let Some(bytes) = self.get_bytes(id)? else {
+            return Ok(None);
+        };
+        let mut object =
+            T::unpack_owned(bytes).map_err(|source| DatError::Decode { id, source })?;
+        object.set_id(id);
+        Ok(Some(object))
+    }
+
+    /// Hits, misses and evictions of the directory-node cache; none for a
+    /// pack.
+    #[must_use]
+    pub fn node_cache_stats(&self) -> CacheStats {
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(mapped) => mapped.nodes.stats(),
+            Backing::Pack(_) => CacheStats::default(),
+        }
+    }
+
+    /// Directory nodes the cache holds (the root is kept apart); 0 for a
+    /// pack.
+    #[must_use]
+    pub fn cached_nodes(&self) -> usize {
+        match &self.backing {
+            #[cfg(not(target_arch = "wasm32"))]
+            Backing::Mapped(mapped) => mapped.nodes.len(),
+            Backing::Pack(_) => 0,
+        }
+    }
+}
+
+/// What a dat knows of one id (see `DatFile::presence`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Presence {
+    /// The dat holds the file.
+    Held,
+    /// The dat has no such file.
+    Absent,
+    /// A pack does not know yet; it has asked for the file.
+    NotLoaded,
+}
+
+/// A mapped dat file: the mapping and its directory.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct Mapped {
+    map: memmap2::Mmap,
+    file_len: u64,
+    block_size: i32,
+    root: Option<Arc<Node>>,
+    nodes: NodeCache,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Mapped {
+    /// Map the file at `path` and read its header and root node.
+    fn open(path: &Path, node_limit: usize) -> Result<(DatHeader, Self)> {
+        let io_error = |source| DatError::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+        let file = File::open(path).map_err(io_error)?;
+        let file_len = file.metadata().map_err(io_error)?.len();
+        if file_len < DatHeader::SIZE as u64 {
+            return Err(DatError::TooShort {
+                path: path.to_path_buf(),
+                len: file_len,
+            });
+        }
+        let map = map_read_only(&file).map_err(io_error)?;
+        // The mapping is the file's length when mapped; a file that changed
+        // length since is read as mapped.
+        let file_len = file_len.min(map.len() as u64);
+        if file_len < DatHeader::SIZE as u64 {
+            return Err(DatError::TooShort {
+                path: path.to_path_buf(),
+                len: file_len,
+            });
+        }
+        let header = DatHeader::unpack(&map[..DatHeader::SIZE])?;
+        if header.magic != DatHeader::RETAIL_MAGIC {
+            return Err(DatError::BadMagic {
+                path: path.to_path_buf(),
+                magic: header.magic,
+            });
+        }
+        // A block must hold its 4-byte next pointer and at least one data byte.
+        if header.block_size <= 4 {
+            return Err(DatError::BadBlockSize {
+                path: path.to_path_buf(),
+                block_size: header.block_size,
+            });
+        }
+        let mut mapped = Self {
+            map,
+            file_len,
+            block_size: header.block_size,
+            root: None,
+            nodes: NodeCache::new(node_limit),
+        };
+        if header.root_block != 0 {
+            mapped.root = Some(Arc::new(mapped.read_node(header.root_block)?));
+        }
+        Ok((header, mapped))
+    }
+
+    fn find_entry(&self, root_block: i32, id: u32) -> Result<Option<DatEntry>> {
+        let mut block = root_block;
         while is_valid_offset(block) {
             let node = self.cached_node(block)?;
             match node.search(id) {
@@ -150,25 +371,7 @@ impl DatFile {
         Ok(None)
     }
 
-    /// Every directory entry, in id order.
-    #[must_use]
-    pub fn entries(&self) -> Entries<'_> {
-        Entries {
-            dat: self,
-            stack: self
-                .root
-                .iter()
-                .map(|root| Frame {
-                    node: Node::clone(root),
-                    next: 0,
-                    descended: false,
-                })
-                .collect(),
-        }
-    }
-
-    /// Read the stored bytes of an entry.
-    pub fn read_entry(&self, entry: &DatEntry) -> Result<Vec<u8>> {
+    fn read_entry(&self, entry: &DatEntry) -> Result<Vec<u8>> {
         if entry.is_compressed() {
             return Err(DatError::Compressed { id: entry.id });
         }
@@ -179,38 +382,6 @@ impl DatFile {
             });
         }
         self.read_chain(entry.offset, entry.size as usize)
-    }
-
-    /// Read a file's bytes by id; `None` when the directory has no such file.
-    pub fn get_bytes(&self, id: u32) -> Result<Option<Vec<u8>>> {
-        match self.find_entry(id)? {
-            Some(entry) => self.read_entry(&entry).map(Some),
-            None => Ok(None),
-        }
-    }
-
-    /// Read and decode a typed object by id; `None` when the directory has
-    /// no such file. The object's id is set to the file id it was read from.
-    pub fn get<T: DatObject>(&self, id: u32) -> Result<Option<T>> {
-        let Some(bytes) = self.get_bytes(id)? else {
-            return Ok(None);
-        };
-        let mut object =
-            T::unpack_owned(bytes).map_err(|source| DatError::Decode { id, source })?;
-        object.set_id(id);
-        Ok(Some(object))
-    }
-
-    /// Hits, misses and evictions of the directory-node cache.
-    #[must_use]
-    pub fn node_cache_stats(&self) -> CacheStats {
-        self.nodes.stats()
-    }
-
-    /// Directory nodes the cache holds (the root is kept apart).
-    #[must_use]
-    pub fn cached_nodes(&self) -> usize {
-        self.nodes.len()
     }
 
     /// The node at `offset`: the root, a cached node, or one read now and
@@ -239,7 +410,7 @@ impl DatFile {
     /// still needed are used from the last block. The bytes are copied from
     /// the mapping into one buffer of exactly `len` bytes.
     fn read_chain(&self, start: i32, len: usize) -> Result<Vec<u8>> {
-        let data_per_block = self.header.block_size as usize - 4;
+        let data_per_block = self.block_size as usize - 4;
         let mut out = Vec::with_capacity(len);
         let mut block = start;
         while block != 0 && out.len() < len {
@@ -282,6 +453,7 @@ impl DatFile {
 /// `read` calls would. The dats are not written while the game reads them
 /// (the game's own patcher runs before it), and on Windows a mapped file
 /// cannot be shortened, so its pages stay valid for the mapping's life.
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(unsafe_code)]
 fn map_read_only(file: &File) -> std::io::Result<memmap2::Mmap> {
     // SAFETY: see above: the mapping is read-only, read by copying, and
@@ -294,10 +466,19 @@ fn map_read_only(file: &File) -> std::io::Result<memmap2::Mmap> {
 /// Yields an error and stops if a node cannot be read.
 #[derive(Debug)]
 pub struct Entries<'a> {
-    dat: &'a DatFile,
-    stack: Vec<Frame>,
+    walk: Walk<'a>,
 }
 
+#[derive(Debug)]
+enum Walk<'a> {
+    #[cfg(not(target_arch = "wasm32"))]
+    Tree { dat: &'a Mapped, stack: Vec<Frame> },
+    /// The entries a pack held when the walk began (the walk borrows the
+    /// dat as a directory walk does).
+    Pack(std::vec::IntoIter<DatEntry>, PhantomData<&'a DatFile>),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 struct Frame {
     node: Node,
@@ -311,39 +492,48 @@ impl Iterator for Entries<'_> {
     type Item = Result<DatEntry>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let top = self.stack.last_mut()?;
-            if !top.node.is_leaf() && !top.descended {
-                top.descended = true;
-                let child = top.node.child(top.next);
-                let parent = top.node.offset;
-                if !is_valid_offset(child) {
-                    self.stack.clear();
-                    return Some(Err(DatError::BadChild {
-                        offset: parent,
-                        child,
-                    }));
-                }
-                match self.dat.read_node(child) {
-                    Ok(node) => self.stack.push(Frame {
-                        node,
-                        next: 0,
-                        descended: false,
-                    }),
-                    Err(error) => {
-                        self.stack.clear();
-                        return Some(Err(error));
-                    }
-                }
-                continue;
-            }
-            if let Some(&entry) = top.node.files.get(top.next) {
-                top.next += 1;
-                top.descended = false;
-                return Some(Ok(entry));
-            }
-            self.stack.pop();
+        match &mut self.walk {
+            #[cfg(not(target_arch = "wasm32"))]
+            Walk::Tree { dat, stack } => walk_tree(dat, stack),
+            Walk::Pack(entries, _) => entries.next().map(Ok),
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn walk_tree(dat: &Mapped, stack: &mut Vec<Frame>) -> Option<Result<DatEntry>> {
+    loop {
+        let top = stack.last_mut()?;
+        if !top.node.is_leaf() && !top.descended {
+            top.descended = true;
+            let child = top.node.child(top.next);
+            let parent = top.node.offset;
+            if !is_valid_offset(child) {
+                stack.clear();
+                return Some(Err(DatError::BadChild {
+                    offset: parent,
+                    child,
+                }));
+            }
+            match dat.read_node(child) {
+                Ok(node) => stack.push(Frame {
+                    node,
+                    next: 0,
+                    descended: false,
+                }),
+                Err(error) => {
+                    stack.clear();
+                    return Some(Err(error));
+                }
+            }
+            continue;
+        }
+        if let Some(&entry) = top.node.files.get(top.next) {
+            top.next += 1;
+            top.descended = false;
+            return Some(Ok(entry));
+        }
+        stack.pop();
     }
 }
 
@@ -717,6 +907,135 @@ pub(crate) mod tests {
             dat.get_bytes(1),
             Err(DatError::Compressed { id: 1 })
         ));
+        std::fs::remove_file(path).ok();
+    }
+
+    /// A header of the given kind (the sample header's other fields).
+    pub(crate) fn pack_header(file_type: DatFileType) -> DatHeader {
+        let mut header = DatHeader::unpack(&crate::header::tests::sample_header_bytes()).unwrap();
+        header.file_type = file_type;
+        header
+    }
+
+    const _: () = {
+        const fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<DatPack>();
+    };
+
+    #[test]
+    fn a_pack_reads_the_files_put_into_it() {
+        let dat = DatFile::new_pack(pack_header(DatFileType::Portal));
+        let pack = dat.as_pack().unwrap();
+        pack.insert(7, b"seven".to_vec());
+        assert_eq!(dat.get_bytes(7).unwrap().unwrap(), b"seven");
+        let entry = dat.find_entry(7).unwrap().unwrap();
+        assert_eq!((entry.id, entry.size), (7, 5));
+        assert_eq!(dat.read_entry(&entry).unwrap(), b"seven");
+        assert!(pack.take_wanted().is_empty());
+    }
+
+    #[test]
+    fn a_pack_asks_once_for_each_file_it_lacks() {
+        let dat = DatFile::new_pack(pack_header(DatFileType::Portal));
+        let pack = dat.as_pack().unwrap();
+        assert!(pack.take_wanted().is_empty());
+        // Not loaded reads as not found, as a mapped dat answers an absent id.
+        assert_eq!(dat.get_bytes(9).unwrap(), None);
+        assert_eq!(dat.get_bytes(9).unwrap(), None);
+        assert_eq!(dat.find_entry(9).unwrap(), None);
+        assert_eq!(dat.get::<Iteration>(3).unwrap(), None);
+        assert_eq!(pack.take_wanted(), [3, 9]);
+        assert!(pack.take_wanted().is_empty());
+        // Asked for and not answered yet: not asked for again.
+        assert_eq!(dat.get_bytes(9).unwrap(), None);
+        assert!(pack.take_wanted().is_empty());
+        // The host has no such file: never asked for again.
+        pack.mark_missing(9);
+        assert_eq!(dat.get_bytes(9).unwrap(), None);
+        assert_eq!(dat.find_entry(9).unwrap(), None);
+        assert!(pack.take_wanted().is_empty());
+        // The bytes arrive: found from then on.
+        pack.insert(3, b"abc".to_vec());
+        assert_eq!(dat.get_bytes(3).unwrap().unwrap(), b"abc");
+        assert!(pack.take_wanted().is_empty());
+        // Wanted and answered before it was taken: not asked for.
+        assert_eq!(dat.get_bytes(20).unwrap(), None);
+        pack.insert(20, b"x".to_vec());
+        assert_eq!(dat.get_bytes(21).unwrap(), None);
+        pack.mark_missing(21);
+        assert!(pack.take_wanted().is_empty());
+    }
+
+    #[test]
+    fn a_pack_asks_for_ids_in_ascending_order_once_across_threads() {
+        let dat = DatFile::new_pack(pack_header(DatFileType::Local));
+        std::thread::scope(|scope| {
+            for t in 0..8u32 {
+                let dat = &dat;
+                scope.spawn(move || {
+                    for round in 0..100u32 {
+                        let id = (t * 7 + round * 13) % 50;
+                        assert_eq!(dat.get_bytes(id).unwrap(), None);
+                    }
+                });
+            }
+        });
+        assert_eq!(
+            dat.as_pack().unwrap().take_wanted(),
+            (0..50).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_pack_answers_the_directory_questions_from_what_it_holds() {
+        let header = pack_header(DatFileType::Portal);
+        let dat = DatFile::new_pack(header.clone());
+        let pack = dat.as_pack().unwrap();
+        assert_eq!(dat.header(), &header);
+        assert_eq!(dat.path(), Path::new(""));
+        assert_eq!(dat.file_len(), 0);
+        assert_eq!(dat.entries().count(), 0);
+        assert_eq!(dat.iteration(), &Iteration::default());
+        pack.insert(30, vec![1; 10]);
+        pack.insert(10, vec![2; 4]);
+        pack.mark_missing(20);
+        let walked: Vec<_> = dat.entries().map(|e| e.unwrap()).collect();
+        assert_eq!(
+            walked.iter().map(|e| (e.id, e.size)).collect::<Vec<_>>(),
+            [(10, 4), (30, 10)]
+        );
+        assert_eq!(dat.file_len(), 14);
+        assert_eq!((pack.len(), pack.is_empty()), (2, false));
+        assert!(pack.contains(10) && !pack.contains(20) && !pack.contains(40));
+        // `contains` only looks: it asks for nothing.
+        assert!(pack.take_wanted().is_empty());
+        assert_eq!(dat.node_cache_stats(), CacheStats::default());
+        assert_eq!(dat.cached_nodes(), 0);
+        // An entry for a file the pack does not hold reads as not loaded.
+        let absent = DatEntry {
+            id: 40,
+            ..walked[0]
+        };
+        assert!(matches!(
+            dat.read_entry(&absent),
+            Err(DatError::NotLoaded { id: 40 })
+        ));
+        assert_eq!(pack.take_wanted(), [40]);
+        // The iteration record is the pack's file of that id once it arrives.
+        let mut record = Vec::new();
+        for value in [5i32, -5, 1] {
+            record.extend_from_slice(&value.to_le_bytes());
+        }
+        pack.insert(ITERATION_ID, record);
+        assert_eq!(dat.iteration().current_iteration, 5);
+    }
+
+    #[test]
+    fn a_mapped_dat_is_not_a_pack() {
+        let (bytes, _) = two_level_dat();
+        let path = write_temp("not-a-pack", &bytes);
+        let dat = DatFile::open(&path).unwrap();
+        assert!(dat.as_pack().is_none());
         std::fs::remove_file(path).ok();
     }
 
