@@ -12,6 +12,18 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.6 (2026-11-11)
+
+- Navigation lines (auto-walk routes, `/nav route`, `/nav grid`) no longer
+  show through terrain, buildings and characters: whatever stands in front
+  of them hides them, and route lines follow the ground. *(code by Johan
+  Lundberg)*
+- When a combat-mode change is stuck, the client log now also lists the
+  combat-mode events that led up to it, to help explain a character stuck
+  in a combat stance.
+- The Intel Mac download is now built on an Apple-silicon Mac. Its release
+  checks run it through Rosetta when the build machine has it.
+
 ## OpenAC (Rust) 0.2.5 (2026-11-10)
 
 - When a combat-mode change has to wait on the character's body for 5
