@@ -1,9 +1,11 @@
+use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::btree::DatEntry;
 #[cfg(not(target_arch = "wasm32"))]
@@ -48,6 +50,9 @@ pub struct DatFile {
     /// A mapped dat's iteration record; a pack's until it holds one.
     iteration: Iteration,
     backing: Backing,
+    /// The ids read while recording; `None` (the default) when not
+    /// recording, so a read then takes no lock for it.
+    recorder: Option<Mutex<BTreeSet<u32>>>,
 }
 
 #[derive(Debug)]
@@ -75,6 +80,7 @@ impl DatFile {
             header,
             iteration: Iteration::default(),
             backing: Backing::Mapped(mapped),
+            recorder: None,
         };
         if let Some(iteration) = dat.get::<Iteration>(ITERATION_ID)? {
             dat.iteration = iteration;
@@ -108,6 +114,37 @@ impl DatFile {
             header,
             iteration: Iteration::default(),
             backing: Backing::Pack(DatPack::new()),
+            recorder: None,
+        }
+    }
+
+    /// Start remembering the id of every file read from now on (see
+    /// [`DatCollection::record_reads`](crate::DatCollection::record_reads)).
+    /// Not on WebAssembly.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn record_reads(&mut self) {
+        self.recorder.get_or_insert_with(Mutex::default);
+    }
+
+    /// Whether reads are being recorded.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn is_recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// The ids recorded since the last take, ascending.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn take_recorded(&self) -> Vec<u32> {
+        self.recorder.as_ref().map_or_else(Vec::new, |recorder| {
+            std::mem::take(&mut *lock(recorder)).into_iter().collect()
+        })
+    }
+
+    /// Remember that file `id` was read, when recording. When not
+    /// recording this is one test of an `Option`: no lock is taken.
+    pub(crate) fn note_read(&self, id: u32) {
+        if let Some(recorder) = &self.recorder {
+            lock(recorder).insert(id);
         }
     }
 
@@ -219,31 +256,39 @@ impl DatFile {
     /// entry's id; one it does not hold is [`DatError::NotLoaded`] (and is
     /// asked for unless known to be absent).
     pub fn read_entry(&self, entry: &DatEntry) -> Result<Vec<u8>> {
-        match &self.backing {
+        let bytes = match &self.backing {
             #[cfg(not(target_arch = "wasm32"))]
-            Backing::Mapped(mapped) => mapped.read_entry(entry),
+            Backing::Mapped(mapped) => mapped.read_entry(entry)?,
             Backing::Pack(pack) => match pack.read(entry.id) {
-                Read::Held(bytes) => Ok(bytes),
-                Read::Missing | Read::NotLoaded => Err(DatError::NotLoaded { id: entry.id }),
+                Read::Held(bytes) => bytes,
+                Read::Missing | Read::NotLoaded => {
+                    return Err(DatError::NotLoaded { id: entry.id });
+                }
             },
-        }
+        };
+        self.note_read(entry.id);
+        Ok(bytes)
     }
 
     /// Read a file's bytes by id; `None` when the directory has no such
     /// file, and for a pack when it does not hold the file (it asks for
     /// it unless the dat is known to have none).
     pub fn get_bytes(&self, id: u32) -> Result<Option<Vec<u8>>> {
-        match &self.backing {
+        let bytes = match &self.backing {
             #[cfg(not(target_arch = "wasm32"))]
             Backing::Mapped(mapped) => match mapped.find_entry(self.header.root_block, id)? {
-                Some(entry) => mapped.read_entry(&entry).map(Some),
-                None => Ok(None),
+                Some(entry) => Some(mapped.read_entry(&entry)?),
+                None => None,
             },
-            Backing::Pack(pack) => Ok(match pack.read(id) {
+            Backing::Pack(pack) => match pack.read(id) {
                 Read::Held(bytes) => Some(bytes),
                 Read::Missing | Read::NotLoaded => None,
-            }),
+            },
+        };
+        if bytes.is_some() {
+            self.note_read(id);
         }
+        Ok(bytes)
     }
 
     /// Read and decode a typed object by id; `None` when the directory has
@@ -281,6 +326,12 @@ impl DatFile {
             Backing::Pack(_) => 0,
         }
     }
+}
+
+fn lock(recorder: &Mutex<BTreeSet<u32>>) -> MutexGuard<'_, BTreeSet<u32>> {
+    // An insert or a take leaves the set whole, so a poisoned lock still
+    // holds a usable set.
+    recorder.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// What a dat knows of one id (see `DatFile::presence`).

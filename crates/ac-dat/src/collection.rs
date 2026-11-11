@@ -234,6 +234,40 @@ impl DatCollection {
         self.file(source)?.as_pack()
     }
 
+    /// Start recording: from now on every file read from any of the dats
+    /// (its bytes found, through a typed or a byte read, here or through
+    /// the dats themselves) is remembered with its dat, for building the
+    /// list of files a pack is preloaded with. Off until called; while off
+    /// a read takes no lock for it. Not on WebAssembly.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn record_reads(&mut self) {
+        self.portal.record_reads();
+        self.cell.record_reads();
+        if let Some(high_res) = &mut self.high_res {
+            high_res.record_reads();
+        }
+        self.local.record_reads();
+    }
+
+    /// Whether reads are being recorded.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[must_use]
+    pub fn is_recording(&self) -> bool {
+        self.portal.is_recording()
+    }
+
+    /// The files read since recording began or since the last take,
+    /// sorted by dat in [`DatSource`] order and then by id, each once.
+    /// Empty when not recording.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn take_recorded(&self) -> Vec<(DatSource, u32)> {
+        DatSource::ALL
+            .into_iter()
+            .filter_map(|source| Some((source, self.file(source)?)))
+            .flat_map(|(source, file)| file.take_recorded().into_iter().map(move |id| (source, id)))
+            .collect()
+    }
+
     /// The ids every pack was asked for and does not hold (see
     /// [`DatPack::take_wanted`]), sorted by dat in [`DatSource`] order and
     /// then by id, each once. Empty for mapped files.
@@ -416,6 +450,29 @@ impl CachedDats {
         self.dats.texture_source(texture)
     }
 
+    /// Start recording every file read (see
+    /// [`DatCollection::record_reads`]); an object the cache answers
+    /// counts as a read of its file, so the list is whole whenever this is
+    /// called. Not on WebAssembly.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn record_reads(&mut self) {
+        self.dats.record_reads();
+    }
+
+    /// Whether reads are being recorded.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[must_use]
+    pub fn is_recording(&self) -> bool {
+        self.dats.is_recording()
+    }
+
+    /// The files read since recording began or since the last take (see
+    /// [`DatCollection::take_recorded`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn take_recorded(&self) -> Vec<(DatSource, u32)> {
+        self.dats.take_recorded()
+    }
+
     /// Hits, misses and evictions of the caches together.
     #[must_use]
     pub fn stats(&self) -> CacheStats {
@@ -448,6 +505,7 @@ impl CachedDats {
         id: u32,
     ) -> Result<Option<Arc<T>>> {
         if let Some(object) = self.cache(source).get::<T>(id) {
+            file.note_read(id);
             return Ok(Some(object));
         }
         self.read_into_cache(file, source, id)
@@ -469,6 +527,9 @@ impl CachedDats {
             let cache = self.cache(source);
             if let Some(object) = cache.get_uncounted::<T>(id) {
                 cache.count_hit();
+                if let Some(file) = self.dats.file(source) {
+                    file.note_read(id);
+                }
                 return Ok(Some(object));
             }
         }
@@ -879,6 +940,67 @@ mod tests {
         assert_send_sync::<DatCollection>();
         assert_send_sync::<CachedDats>();
         let _ = CachedDats::new(empty_packs(true), PathBuf::new());
+    }
+
+    #[test]
+    fn the_recorder_notes_each_file_read_once_and_only_when_on() {
+        let dir = dat_dir("recorder", Some(HIGH_RES));
+        let mut dats = DatCollection::open(&dir).unwrap();
+        assert!(!dats.is_recording());
+        assert!(dats.get::<Raw>(0x0600_0001).unwrap().is_some());
+        assert!(dats.take_recorded().is_empty());
+
+        dats.record_reads();
+        assert!(dats.is_recording());
+        for _ in 0..2 {
+            assert!(dats.get::<Raw>(0x0600_0001).unwrap().is_some());
+            assert!(dats.get::<Raw>(0x0600_0002).unwrap().is_some());
+            assert!(dats.portal_bytes(0x0600_0003).unwrap().is_some());
+            assert!(dats.cell.get_bytes(0x0101_FFFF).unwrap().is_some());
+        }
+        // Not found: nothing read. Looking an id up reads nothing either.
+        assert!(dats.get::<Raw>(0x0600_0004).unwrap().is_none());
+        assert_eq!(dats.resolve(0x2300_0001).unwrap(), Some(DatSource::Local));
+        let entry = dats.local.find_entry(0x2300_0001).unwrap().unwrap();
+        assert_eq!(
+            dats.take_recorded(),
+            [
+                (DatSource::Portal, 0x0600_0002),
+                (DatSource::HighRes, 0x0600_0001),
+                (DatSource::HighRes, 0x0600_0003),
+                (DatSource::Cell, 0x0101_FFFF),
+            ]
+        );
+        assert!(dats.take_recorded().is_empty());
+        // Reading an entry's bytes is a read.
+        dats.local.read_entry(&entry).unwrap();
+        assert_eq!(dats.take_recorded(), [(DatSource::Local, 0x2300_0001)]);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn cached_dats_record_what_their_caches_answer_too() {
+        let dir = dat_dir("recorder-cached", Some(HIGH_RES));
+        let mut cached = CachedDats::open(&dir).unwrap();
+        // Cached before recording began.
+        assert!(cached.get::<Raw>(0x0600_0001).unwrap().is_some());
+        assert!(cached.take_recorded().is_empty());
+        cached.record_reads();
+        assert!(cached.get::<Raw>(0x0600_0001).unwrap().is_some()); // a hit
+        assert!(cached.get::<Raw>(0x0600_0002).unwrap().is_some()); // a miss
+        assert_eq!(
+            cached.take_recorded(),
+            [
+                (DatSource::Portal, 0x0600_0002),
+                (DatSource::HighRes, 0x0600_0001),
+            ]
+        );
+        // After a take, a hit is recorded again.
+        assert!(cached.get::<Raw>(0x0600_0002).unwrap().is_some());
+        assert_eq!(cached.take_recorded(), [(DatSource::Portal, 0x0600_0002)]);
+        let stats = cached.stats();
+        assert_eq!((stats.hits, stats.misses), (2, 2));
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
