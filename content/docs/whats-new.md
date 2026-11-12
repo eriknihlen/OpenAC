@@ -12,6 +12,13 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.8 (2026-11-12)
+
+- A weapon with a Left-hand Tether now goes into the off-hand when you
+  double-click it or use its hotkey, instead of replacing the weapon in your
+  main hand. Whatever holds the off-hand slot goes to your pack first, as
+  when you drop a weapon on that slot.
+
 ## OpenAC (Rust) 0.2.7 (2026-11-12)
 
 - A session that stays in portal space for more than 60 seconds is now
