@@ -28,7 +28,7 @@ use ac_plugin::abi::world::ItemProperties;
 
 use super::world::{Ownership, classify, is_player_owned, position_of, properties_of};
 use super::{PluginBinding, Ran};
-use crate::inventory::{BackpackPlacement, ItemCommand, ObjectRef};
+use crate::inventory::{BackpackPlacement, ItemCommand, ObjectRef, use_waits_for_target};
 use crate::session::SessionCommand;
 
 /// The public flag of a corpse.
@@ -494,7 +494,15 @@ impl PluginBinding<'_> {
         if target_id != 0 && items.get(target_id).is_none() {
             return ItemResult::of(ItemStatus::InvalidTarget);
         }
-        if target_id == 0 && item.useability.is_some_and(|u| u.is_targeted()) {
+        // A double-click on an unheld wand wields it before its own
+        // (targeted) use is considered, so only an item with no such
+        // primary use needs a target here.
+        let ground = self
+            .state
+            .inventory
+            .external_containers()
+            .current_container_id();
+        if target_id == 0 && use_waits_for_target(items, player, ground, object_id) {
             return ItemResult::because(
                 ItemStatus::Refused,
                 "This item requires a target; call Apply(objectId, targetObjectId) instead.",

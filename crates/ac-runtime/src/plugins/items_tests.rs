@@ -249,6 +249,76 @@ fn a_move_joining_a_stack_merges_into_the_stack_that_takes_it_all() {
     );
 }
 
+// A wand's own use is a targeted one, but a double-click on a wand that is
+// not held wields it before that use is considered: used alone it goes out
+// as a wield, not a refusal (a plugin's way out of a stuck combat stance).
+#[test]
+fn using_an_unheld_caster_alone_wields_it() {
+    const WAND: u32 = 0x8000_0004;
+    let mut state = packed();
+    state.world.apply(&owned(WAND, "Wand", 0x8000, |w| {
+        w.valid_locations = Some(0x0100_0000);
+        w.useability = Some(0x0006_0004 | 0x0008_0000);
+        w.stack_size = None;
+    }));
+    state.world.drain_changes().for_each(drop);
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let used = call::<calls::ItemsUse>(b, &WAND);
+        assert_eq!(used.status, ItemStatus::Started, "{:?}", used.notice);
+    });
+    let sent: Vec<Vec<u8>> = outbox.drain().map(|o| o.body).collect();
+    assert_eq!(
+        sent,
+        [ac_proto::inventory::build_get_and_wield_item(
+            1,
+            WAND,
+            0x0100_0000
+        )]
+    );
+}
+
+// A held wand used alone goes back into the pack, as a double-click on it
+// does, rather than waiting for a target.
+#[test]
+fn using_a_held_caster_alone_puts_it_away() {
+    const WAND: u32 = 0x8000_0004;
+    let mut state = packed();
+    // The character's main pack, with room for the wand.
+    let mut player = crate::world::tests::create(PLAYER, crate::world::tests::stamps(1, 1), None);
+    if let ac_proto::Inbound::CreateObject(create) = &mut player {
+        create.weenie = Some(ac_proto::PublicWeenieDesc {
+            name: "Player".into(),
+            item_type: 0x10,
+            items_capacity: Some(102),
+            containers_capacity: Some(7),
+            ..ac_proto::PublicWeenieDesc::default()
+        });
+    }
+    state.world.apply(&player);
+    state.world.apply(&owned(WAND, "Wand", 0x8000, |w| {
+        w.container_id = None;
+        w.wielder_id = Some(PLAYER);
+        w.valid_locations = Some(0x0100_0000);
+        w.currently_wielded_location = Some(0x0100_0000);
+        w.useability = Some(0x0006_0004 | 0x0008_0000);
+        w.stack_size = None;
+    }));
+    state.world.drain_changes().for_each(drop);
+    let mut outbox = Outbox::new();
+    with_binding(&mut state, &mut outbox, |b| {
+        let used = call::<calls::ItemsUse>(b, &WAND);
+        assert_eq!(used.status, ItemStatus::Started, "{:?}", used.notice);
+    });
+    let sent: Vec<Vec<u8>> = outbox.drain().map(|o| o.body).collect();
+    assert_eq!(
+        sent,
+        [ac_proto::inventory::build_put_item_in_container(
+            1, WAND, PLAYER, 0
+        )]
+    );
+}
+
 // OpenAC `DispatchItem`: an unknown item, a target that is not known, a
 // targeted item used alone.
 #[test]
