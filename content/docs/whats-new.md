@@ -12,6 +12,16 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.7 (2026-11-12)
+
+- A session that stays in portal space for more than 60 seconds is now
+  ended and logs in again, instead of sitting there with an empty window
+  while the server still holds the character.
+- A plugin that uses a weapon or wand the character isn't holding, with no
+  target, now wields it, as a double-click does; a held one is put back in
+  the pack. This makes MossTank's way out of a stuck combat stance work: it
+  wields a wand to reset the stance.
+
 ## OpenAC (Rust) 0.2.6 (2026-11-11)
 
 - Navigation lines (auto-walk routes, `/nav route`, `/nav grid`) no longer
