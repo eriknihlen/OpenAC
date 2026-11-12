@@ -304,6 +304,11 @@ pub fn run(
     let plugin_logs = session_folder
         .as_ref()
         .map(ac_host::layout::LauncherSessionFolder::plugin_logs_directory);
+    let portal_failures = crate::portal_failure::PortalFailureLog::new(
+        paths.logs_directory(),
+        format!("{}:{}", descriptor.endpoint.host, descriptor.endpoint.port),
+        &descriptor.account,
+    );
     let code: Arc<Mutex<HostExit>> = Arc::new(Mutex::new(HostExit::Runtime));
     let monitor = {
         let code = Arc::clone(&code);
@@ -321,6 +326,7 @@ pub fn run(
                     plugin_logs,
                     marks,
                     answers: window_answers,
+                    portal_failures: Some(portal_failures),
                 };
                 // A window ignores the document's bot policy.
                 let liveness = multi::Liveness::requested(Some(window.clone()));

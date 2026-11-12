@@ -20,6 +20,7 @@ use ac_proto::{GameEventType, Inbound, PlayerDescription, build_login_complete};
 
 use super::Outbox;
 use super::Queue;
+use super::portal_failure::{PortalWait, PortalWorldState};
 use super::runner::Recall;
 use super::runner::{HostEvent, ObjectSummary, SessionCommand};
 use crate::character::{CharacterOptions, OPTIONS, option_id};
@@ -767,6 +768,50 @@ impl SessionState {
         std::iter::once(entered)
             .chain(self.held_arrival())
             .collect()
+    }
+
+    /// The wait portal space is in, if it is in one: a teleport under way,
+    /// or the character's entry while login complete has not gone. The log
+    /// out's portal space is not a wait (its confirmation has a limit of
+    /// its own).
+    #[must_use]
+    pub fn portal_wait(&self) -> Option<PortalWait> {
+        if self.transit.is_teleport_active() {
+            return Some(PortalWait::Teleport);
+        }
+        match self.login_entry {
+            LoginEntry::Entering | LoginEntry::Held { .. } => Some(PortalWait::Login),
+            LoginEntry::Idle | LoginEntry::Passed => None,
+        }
+    }
+
+    /// What the world and the arrival look like now, for the record of a
+    /// portal space that did not end.
+    #[must_use]
+    pub fn portal_world_state(&self) -> PortalWorldState {
+        let player_guid = self.world.player_guid();
+        let mut parse_failures = self.world.parse_failures().clone();
+        for (code, count) in self.communication.parse_failures() {
+            *parse_failures.entry(*code).or_default() += count;
+        }
+        PortalWorldState {
+            teleport_sequence: self.transit.active_teleport_sequence(),
+            reveal: self.transit.snapshot(),
+            stale_acknowledgements: self.transit.rejection_count(),
+            player_guid,
+            player_object: player_guid.is_some_and(|guid| self.world.object(guid).is_some()),
+            player_described: self.world.player().is_some(),
+            objects: self.world.object_count(),
+            parse_failures,
+            window_attached: self.window_attached,
+            window_minimized: self.plugin_services.window_minimized,
+            held_for_window: self.held_arrival.is_some()
+                || matches!(self.login_entry, LoginEntry::Held { .. }),
+            held_for_collision: self.destination_hold.is_some(),
+            collision_ready: self.movement.destination_collision_ready(),
+            simulates_world: self.movement.has_content(),
+            player_placed: self.movement.controller().is_some(),
+        }
     }
 
     /// Whether the player is a player killer (the longer log-out hold).
@@ -3362,6 +3407,54 @@ mod tests {
             state.end_generation(0);
             assert!(state.portal_space_now().is_empty());
         }
+    }
+
+    // This client's own rule (the limit on portal space): a teleport and
+    // the character's entry are waits, to their end. The log out's portal
+    // space (the test after this one) is not.
+    #[test]
+    fn a_teleport_and_an_entry_are_portal_waits_to_their_end() {
+        let (mut state, mut outbox) = in_portal_space(true, 1);
+        assert_eq!(state.portal_wait(), Some(PortalWait::Teleport));
+        arrive_at(&mut state, &mut outbox, 1, DESTINATION);
+        assert_eq!(
+            state.portal_wait(),
+            Some(PortalWait::Teleport),
+            "the arrival waits for the window"
+        );
+        let world = state.portal_world_state();
+        assert!(world.window_attached && world.held_for_window);
+        assert!(!world.held_for_collision);
+        assert_eq!(world.teleport_sequence, 1);
+        assert_eq!(world.reveal.destination_cell(), DESTINATION);
+        assert_eq!(world.player_guid, Some(TRAVELLER));
+        assert!(world.player_object);
+        state.set_window_attached(false, &mut outbox);
+        assert_eq!(state.portal_wait(), None, "the arrival completed");
+
+        let (mut entry, _outbox) = entering(true);
+        assert_eq!(entry.portal_wait(), Some(PortalWait::Login));
+        assert!(!entry.portal_world_state().player_object);
+        assert!(entry.hold_login(LOGIN_CELL));
+        assert_eq!(entry.portal_wait(), Some(PortalWait::Login));
+        assert!(entry.portal_world_state().held_for_window);
+        entry.follow_entry(false);
+        assert_eq!(entry.portal_wait(), None, "login complete went");
+    }
+
+    #[test]
+    fn the_log_outs_portal_space_is_not_a_portal_wait() {
+        let (mut state, mut outbox) = state();
+        state.set_window_attached(true, &mut outbox);
+        assert!(state.transit.try_begin_logout_request(false));
+        let later = Clocks {
+            session: CLOCKS.session + Duration::from_secs(4),
+            ..CLOCKS
+        };
+        state.tick(&mut outbox, true, CLOCKS);
+        state.tick(&mut outbox, true, later);
+        assert_eq!(state.portal_space_now(), [PortalSpaceEvent::LogoutStarted]);
+        assert_eq!(state.portal_wait(), None);
     }
 
     const ENTERING: u32 = 0x5000_000C;

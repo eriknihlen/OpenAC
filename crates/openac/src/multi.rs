@@ -260,6 +260,11 @@ pub fn run(
                 .map(ac_host::layout::LauncherSessionFolder::plugin_logs_directory),
             marks: answers.marks,
             answers: answers.session(&id),
+            portal_failures: Some(crate::portal_failure::PortalFailureLog::new(
+                plan.paths.logs_directory(),
+                format!("{}:{}", descriptor.endpoint.host, descriptor.endpoint.port),
+                &descriptor.account,
+            )),
         };
         let notes = window_notes.remove(&id);
         let liveness = Liveness::requested(host_handle.clone());
@@ -410,6 +415,9 @@ pub(crate) struct ChatPrinter {
     pub(crate) marks: bool,
     /// When a command typed on the session's console waits for answers.
     pub(crate) answers: Arc<console::AnswerWindow>,
+    /// Where a portal space that did not end is recorded (the shared file
+    /// in the log folder). `None` without a log folder.
+    pub(crate) portal_failures: Option<crate::portal_failure::PortalFailureLog>,
 }
 
 impl ChatPrinter {
@@ -502,6 +510,12 @@ pub(crate) fn monitor(
     // The server re-sends the character list after a log off; a connection
     // is reported once, until it closes (a reconnect opens another).
     let mut reported_connection = false;
+    // Why the connection that is being closed for a re-login ended.
+    let mut loss_reason = "connection-lost";
+    // Who the session is in the world as, and the plugins it loaded (a
+    // portal failure's record names them).
+    let mut character: Option<String> = None;
+    let mut loaded_plugins: Vec<String> = Vec::new();
     let commands = handle.commands();
     let mut policy_done = false;
     let mut policy_failure: Option<String> = None;
@@ -622,7 +636,10 @@ pub(crate) fn monitor(
                             },
                         );
                     }
-                    SessionEvent::EnteredWorld(c) => status.entered_world(id, c.id, &c.name),
+                    SessionEvent::EnteredWorld(c) => {
+                        character = Some(c.name.clone());
+                        status.entered_world(id, c.id, &c.name);
+                    }
                     _ => {}
                 }
                 outln!("[{id}] {event:?}");
@@ -669,6 +686,9 @@ pub(crate) fn monitor(
                 match &event {
                     PluginEvent::Report(PluginReport::Loaded { id: plugin }) => {
                         status.plugin_loaded(id, plugin);
+                        if !loaded_plugins.contains(plugin) {
+                            loaded_plugins.push(plugin.clone());
+                        }
                     }
                     PluginEvent::Report(PluginReport::Failed { id: plugin, error }) => {
                         status.plugin_failed(id, plugin, error);
@@ -727,11 +747,28 @@ pub(crate) fn monitor(
                 // records it as `connection-lost`); the next login opens
                 // another.
                 if matches!(relogin, session::Relogin::Scheduled { .. }) && reported_connection {
-                    status.disconnected(id, "connection-lost");
+                    status.disconnected(id, loss_reason);
                     reported_connection = false;
                 }
+                loss_reason = "connection-lost";
                 for line in console::event_lines(&HostEvent::Relogin(relogin), tag) {
                     errln!("{line}");
+                }
+            }
+            Some(HostEvent::PortalFailure(failure)) => {
+                // The log keeps what was missing; the shared file keeps all
+                // of it. The connection ends next: a session that logs in
+                // again closes this one in its status file with the reason.
+                loss_reason = "portal-failure";
+                let line = console::notice(&crate::portal_failure::summary(&failure), tag);
+                printer.print_logged(kind, &line);
+                if let Some(log) = &printer.portal_failures {
+                    let note = match log.record(id, character.as_deref(), &loaded_plugins, &failure)
+                    {
+                        Ok(file) => format!("portal failure: recorded in {}", file.display()),
+                        Err(error) => format!("portal failure: not recorded ({error})"),
+                    };
+                    printer.print_logged(kind, &console::notice(&note, tag));
                 }
             }
             Some(HostEvent::Ended(summary)) => break summary,

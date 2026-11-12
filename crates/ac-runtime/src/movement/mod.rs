@@ -638,6 +638,17 @@ impl Movement {
         self.content.is_some()
     }
 
+    /// Whether the collision of the destination a teleport's placement
+    /// waits for is loaded (diagnostics). `None` while no placement waits.
+    #[must_use]
+    pub fn destination_collision_ready(&self) -> Option<bool> {
+        let pending = self.pending_place?;
+        Some(
+            self.residency
+                .is_ready(&self.engine, pending.accepted.cell_id),
+        )
+    }
+
     /// The physics engine (diagnostics and tests).
     #[must_use]
     pub fn engine(&self) -> &PhysicsEngine {

@@ -1529,6 +1529,9 @@ pub fn event_lines(event: &HostEvent, session: Option<&str>) -> Vec<String> {
         HostEvent::Logout(stage) => vec![notice(&format!("logout: {stage:?}"), session)],
         HostEvent::Plugin(event) => vec![notice(&crate::plugins::event_line(event), session)],
         HostEvent::Relogin(relogin) => vec![notice(&relogin_line(relogin), session)],
+        HostEvent::PortalFailure(failure) => {
+            vec![notice(&crate::portal_failure::summary(failure), session)]
+        }
         _ => Vec::new(),
     }
 }

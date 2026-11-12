@@ -17,6 +17,7 @@ use ac_plugin::{HostVersion, PluginEngine, PluginSessionOptions};
 use super::test_server::{bind_pair, is_login_request, recv_from_client, recv_until};
 use super::*;
 use crate::plugins::{PluginEvent, PluginSetup};
+use crate::session::PortalWait;
 
 const SERVER_SEED: u32 = 0x0BAD_F00D;
 const CLIENT_SEED: u32 = 0x0D15_EA5E;
@@ -28,6 +29,15 @@ const NAME: &str = "+Relogged";
 const TIMING: Timing = Timing {
     server_silence: Duration::from_millis(1500),
     relogin_interval: Duration::from_millis(700),
+    portal_space: PORTAL_SPACE_LIMIT,
+};
+
+/// Portal space may last 1 s; the server's silence (20 s) is not what ends
+/// these sessions.
+const PORTAL_TIMING: Timing = Timing {
+    server_silence: Duration::from_secs(20),
+    relogin_interval: Duration::from_millis(700),
+    portal_space: Duration::from_secs(1),
 };
 
 fn connect_request() -> Vec<u8> {
@@ -191,6 +201,15 @@ impl Connected<'_> {
         self.send(&words(&[0xF745, PLAYER, 0x11, 0, 0, 0, 0, 0, 0, 0]));
         Instant::now()
     }
+
+    /// Into the world as +Relogged, but the character's own object never
+    /// comes: the client stays in portal space.
+    fn enter_world_without_the_character(&mut self) {
+        self.send_selection(NAME);
+        self.wait_for(0xF7C8);
+        self.send(&words(&[0xF7DF]));
+        self.wait_for(0xF657);
+    }
 }
 
 fn config(address: SocketAddr, plugins: Option<PluginSetup>) -> SessionConfig {
@@ -238,6 +257,10 @@ struct Seen {
     plugin_events: Vec<String>,
     /// The lifecycle states reported.
     lifecycle: Vec<LifecycleState>,
+    /// Login completes sent.
+    login_completes: usize,
+    /// What the session knew when portal space ran out.
+    portal_failures: Vec<PortalFailure>,
 }
 
 impl Seen {
@@ -250,6 +273,8 @@ impl Seen {
                 self.entered += 1;
             }
             HostEvent::Lifecycle(lifecycle) => self.lifecycle.push(lifecycle.state),
+            HostEvent::Session(SessionEvent::LoginCompleteSent) => self.login_completes += 1,
+            HostEvent::PortalFailure(failure) => self.portal_failures.push(*failure),
             HostEvent::Plugin(PluginEvent::Log { message, .. })
                 if message.starts_with("probe event: login complete")
                     || message.starts_with("probe event: logoff") =>
@@ -660,5 +685,151 @@ fn a_window_sees_the_connecting_screen_and_its_cancel_ends_the_attempt() {
     assert!(
         ended_after < LOGIN_TIMEOUT / 2,
         "the cancel took {ended_after:?}"
+    );
+}
+
+// This client's own rule (the game waits in portal space without a limit):
+// a session whose character never arrives ends its connection once portal
+// space has lasted longer than the limit, after telling what it knew. With
+// no window attached it then logs in again, as after a lost server.
+#[test]
+fn a_windowless_session_stuck_in_portal_space_tells_why_and_logs_in_again() {
+    let (ports, address) = Ports::new();
+    let server = thread::spawn(move || {
+        let (mut first, _) = ports.accept();
+        // Portal space begins after this: the character is not yet chosen.
+        let before_entry = Instant::now();
+        first.enter_world_without_the_character();
+        let (second, logoff) =
+            ports.listen(Instant::now() + Duration::from_secs(20), Some(first.client));
+        let (client, second_login) = second.expect("the client logged in again");
+        assert!(!logoff, "no log off went to the connection given up");
+        let mut again = ports.answer(client);
+        again.enter_world();
+        again.wait_for(0xF653);
+        again.send(&words(&[0xF653]));
+        second_login.saturating_duration_since(before_entry)
+    });
+
+    let handle = spawn_timed(config(address, None), PORTAL_TIMING).unwrap();
+    let mut seen = Seen::default();
+    seen.until(&handle, |s| s.login_completes == 1);
+    handle.commands().send(SessionCommand::Shutdown).unwrap();
+    let summary = seen.end(&handle);
+    let waited = server.join().unwrap();
+    handle.join();
+
+    assert_eq!(summary.error, None, "a re-login is not a failure");
+    assert_eq!(summary.connections, 2);
+    assert_eq!(seen.entered, 2);
+    assert_eq!(
+        seen.failures,
+        [SessionError::PortalSpaceTimeout { limit_seconds: 1 }]
+    );
+    assert_eq!(
+        seen.relogins,
+        [Relogin::Scheduled {
+            after: PORTAL_TIMING.relogin_interval
+        }]
+    );
+    assert!(
+        waited >= PORTAL_TIMING.portal_space + PORTAL_TIMING.relogin_interval,
+        "logged in again {waited:?} after the connection was accepted"
+    );
+    // The record: which wait, how long, and what was missing.
+    let [failure] = &seen.portal_failures[..] else {
+        panic!("one record: {:?}", seen.portal_failures);
+    };
+    assert_eq!(failure.wait, PortalWait::Login);
+    assert_eq!(failure.limit, PORTAL_TIMING.portal_space);
+    assert!(failure.waited > failure.limit, "{:?}", failure.waited);
+    assert_eq!(failure.phase, Phase::InWorld);
+    assert!(!failure.login_complete_sent);
+    assert!(!failure.world.player_object, "the character never came");
+    assert!(!failure.world.player_described);
+    assert!(!failure.world.window_attached);
+    assert!(failure.link.stats.packets_received > 0);
+    // The last messages show where the login stopped: the server's word
+    // that it is ready came, the character's object did not.
+    let opcodes: Vec<u32> = failure.recent.iter().map(|note| note.opcode).collect();
+    assert_eq!(opcodes.last(), Some(&0xF7DF), "{opcodes:#06x?}");
+    assert!(!opcodes.contains(&0xF745), "{opcodes:#06x?}");
+    assert!(failure.recent.iter().all(|note| note.bytes >= 4));
+}
+
+// With a window attached the session ends (its window shows the end, and a
+// launcher starts the client again).
+#[test]
+fn a_session_with_a_window_attached_ends_when_portal_space_does_not() {
+    let (ports, address) = Ports::new();
+    let server = thread::spawn(move || {
+        let (mut first, _) = ports.accept();
+        first.enter_world_without_the_character();
+        // Long enough for a re-login to have come.
+        let wait =
+            PORTAL_TIMING.portal_space + PORTAL_TIMING.relogin_interval + Duration::from_secs(2);
+        let (again, _) = ports.listen(Instant::now() + wait, None);
+        again.is_none()
+    });
+
+    let handle = spawn_timed(config(address, None), PORTAL_TIMING).unwrap();
+    let mut seen = Seen::default();
+    seen.until(&handle, |s| s.entered == 1);
+    let (to_window, _window) = mpsc::channel();
+    handle
+        .commands()
+        .send(SessionCommand::Attach(to_window))
+        .unwrap();
+    let summary = seen.end(&handle);
+    let no_second_login = server.join().unwrap();
+    handle.join();
+
+    assert_eq!(
+        summary.error.as_deref(),
+        Some("portal space did not end within 1 s")
+    );
+    assert_eq!(summary.connections, 1);
+    assert!(seen.relogins.is_empty(), "{:?}", seen.relogins);
+    assert!(no_second_login, "the session did not log in again");
+    let [failure] = &seen.portal_failures[..] else {
+        panic!("one record: {:?}", seen.portal_failures);
+    };
+    assert_eq!(failure.wait, PortalWait::Login);
+    assert!(failure.world.window_attached);
+}
+
+// A login that completes in time is left alone, however short the limit
+// was while it ran: the watch starts over once portal space ends.
+#[test]
+fn a_login_that_completes_is_not_ended_by_the_portal_space_limit() {
+    let (ports, address) = Ports::new();
+    let server = thread::spawn(move || {
+        let (mut first, _) = ports.accept();
+        first.enter_world();
+        first.wait_for(0xF653);
+        first.send(&words(&[0xF653]));
+    });
+
+    let handle = spawn_timed(config(address, None), PORTAL_TIMING).unwrap();
+    let mut seen = Seen::default();
+    seen.until(&handle, |s| s.login_completes == 1);
+    // In the world for longer than the limit.
+    let stay = Instant::now() + PORTAL_TIMING.portal_space + Duration::from_millis(500);
+    while Instant::now() < stay {
+        if let Some(event) = handle.next_event(Duration::from_millis(50)) {
+            assert!(seen.take(event).is_none(), "the session ended");
+        }
+    }
+    handle.commands().send(SessionCommand::Shutdown).unwrap();
+    let summary = seen.end(&handle);
+    server.join().unwrap();
+    handle.join();
+
+    assert_eq!(summary.error, None);
+    assert_eq!(summary.connections, 1);
+    assert!(
+        seen.portal_failures.is_empty(),
+        "{:?}",
+        seen.portal_failures
     );
 }
