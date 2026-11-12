@@ -678,6 +678,83 @@ fn a_second_weapon_first_clears_the_shield_hand() {
     assert_eq!(f.sent(), [build_get_and_wield_item(2, SWORD, 0x0020_0000)]);
 }
 
+/// A dagger in the main pack carrying the left-hand tether's flag.
+fn with_tethered_dagger(f: &mut Fixture) -> u32 {
+    const DAGGER: u32 = 0x6000_0013;
+    f.world.apply(&create(DAGGER, "Dagger", |d| {
+        d.item_type = ItemType::MELEE_WEAPON.bits();
+        d.valid_locations = Some(EquipMask::MELEE_WEAPON.bits());
+        d.combat_use = Some(1);
+        d.useability = Some(ItemUseable::NO.bits());
+        d.object_description_flags = PublicWeenieFlags::WIELD_LEFT.bits();
+    }));
+    let body = crate::world::tests::game_event(
+        GameEventType::INVENTORY_PUT_OBJ_IN_CONTAINER,
+        &[DAGGER, PLAYER, 0, 0],
+    );
+    f.world.apply(&Inbound::parse(&body).unwrap());
+    f.world.take_table_events();
+    DAGGER
+}
+
+// Not an OpenAC test (OpenAC wielded a left-hand weapon like any other): a
+// weapon flagged to wield left, used from the pack (a double-click or a
+// hotkey), goes to the shield hand and leaves the main-hand axe alone.
+#[test]
+fn using_a_left_hand_weapon_wields_it_in_the_shield_slot() {
+    let mut f = Fixture::new();
+    let dagger = with_tethered_dagger(&mut f);
+    assert!(f.run(ItemCommand::Use(guid(dagger))));
+    assert_eq!(
+        f.sent(),
+        [build_get_and_wield_item(
+            1,
+            dagger,
+            EquipMask::SHIELD.bits()
+        )]
+    );
+}
+
+#[test]
+fn using_a_left_hand_weapon_first_moves_the_shield_to_the_pack() {
+    const SHIELD: u32 = 0x6000_0010;
+    let mut f = Fixture::new();
+    f.world.apply(&create(SHIELD, "Buckler", |d| {
+        d.item_type = ItemType::ARMOR.bits();
+        d.valid_locations = Some(EquipMask::SHIELD.bits());
+    }));
+    let body = crate::world::tests::game_event(
+        GameEventType::WIELD_OBJECT,
+        &[SHIELD, EquipMask::SHIELD.bits()],
+    );
+    f.world.apply(&Inbound::parse(&body).unwrap());
+    let dagger = with_tethered_dagger(&mut f);
+    assert!(f.run(ItemCommand::Use(guid(dagger))));
+    assert_eq!(
+        f.sent(),
+        [build_put_item_in_container(1, SHIELD, PLAYER, 0)]
+    );
+    f.server(
+        GameEventType::INVENTORY_PUT_OBJ_IN_CONTAINER,
+        &[SHIELD, PLAYER, 0, 0],
+    );
+    assert_eq!(
+        f.sent(),
+        [build_get_and_wield_item(
+            2,
+            dagger,
+            EquipMask::SHIELD.bits()
+        )]
+    );
+}
+
+#[test]
+fn using_an_untethered_weapon_still_replaces_the_main_hand() {
+    let mut f = Fixture::new();
+    assert!(f.run(ItemCommand::Use(guid(SWORD))));
+    assert_eq!(f.sent(), [build_put_item_in_container(1, AXE, PLAYER, 0)]);
+}
+
 // OpenAC issue #225
 // `HandleDropRelease_meleeWeaponOnShieldSlot_wieldsItInTheShieldSlot`: the
 // paperdoll's off-hand drop reaches the runtime as a command; with the

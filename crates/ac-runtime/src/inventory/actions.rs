@@ -1456,8 +1456,14 @@ impl Inventory {
                 K::PlaceInBackpack => {
                     acted |= self.place_world_item_in_backpack(action.object_id, ctx);
                 }
-                K::WieldRight | K::WieldLeft | K::AutoSort => {
+                K::WieldRight | K::AutoSort => {
                     acted |= self.try_wield(action.object_id, EquipMask::NONE, ctx);
+                }
+                // A weapon flagged to wield left (a left-hand tether) goes to
+                // the shield hand, the way dropping it on the off-hand slot
+                // does.
+                K::WieldLeft => {
+                    acted |= self.try_wield_secondary(action.object_id, ctx);
                 }
                 K::OpenContainedContainer => {
                     // A pack the character carries opens in the inventory
