@@ -530,6 +530,9 @@ pub(crate) fn monitor(
     // launcher shows the client as not responding.
     let mut heartbeat = HeartbeatGate::new(std::time::Instant::now(), handle.progress());
     let mut window_open = false;
+    // A failed cast the server answers again and again is printed once,
+    // then counted once a minute.
+    let mut fold = console::RepeatFold::default();
     // A policy acts on its clock between events too; it is stepped at least
     // every 50 ms (OpenAC ticks it once per host frame).
     let poll = if policy.is_some() {
@@ -789,7 +792,9 @@ pub(crate) fn monitor(
             }
             Some(other) => {
                 for line in console::event_lines(&other, tag) {
-                    printer.print_as(kind, &line);
+                    for line in fold.take(line, std::time::Instant::now()) {
+                        printer.print_as(kind, &line);
+                    }
                 }
             }
             None => {}
