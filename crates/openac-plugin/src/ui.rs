@@ -1430,10 +1430,11 @@ impl Host<'_> {
         decode::<ImageInfo>(Import::UiImageRgba, &reply).into()
     }
 
-    /// The plugin's own art as a file (PNG, JPEG, BMP, TGA or GIF; a GIF's
-    /// first frame) under its own name for it, decoded by the client
-    /// (OpenAC `IPluginImages.FromStream`); asking again under the same
-    /// name is the same image held once more. Refused (handle 0) for a file
+    /// The plugin's own art as a file (PNG, JPEG, BMP, TGA, GIF or WebP; a
+    /// GIF's or an animated WebP's first frame) under its own name for it,
+    /// decoded by the client (OpenAC `IPluginImages.FromStream`, which did
+    /// not read WebP); asking again under the same name is the same image
+    /// held once more. Refused (handle 0) for a file
     /// that does not decode or is over the image budget.
     pub fn image_decode(&mut self, name: &str, bytes: &[u8]) -> Image {
         let request = EncodedImage {

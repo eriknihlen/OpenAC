@@ -1,18 +1,24 @@
 //! A plugin's own art decoded by the client (OpenAC `IPluginImages.FromStream`:
-//! "PNG, JPEG, BMP, TGA or GIF"), to 8-bit RGBA rows from the top.
+//! "PNG, JPEG, BMP, TGA or GIF", and WebP, which the C# client did not
+//! read), to 8-bit RGBA rows from the top.
 //!
 //! PNG is the plugin icon reader ([`crate::icon::decode_png`]) and JPEG the
 //! dat texture decoder (`ac_dat::texture::jpeg`); BMP, TGA and GIF are read
-//! here, written from the formats' specifications. A GIF gives its first
-//! frame on a canvas of its logical screen size, transparent where the frame
-//! draws nothing. Malformed input is an error, never a panic, and nothing is
-//! allocated for more than [`MAXIMUM_PIXELS`].
+//! here, written from the formats' specifications, and WebP's lossy and
+//! lossless codecs by the `image-webp` crate. A GIF or an animated WebP gives
+//! its first frame on a canvas of its declared size, transparent where the
+//! frame draws nothing. Malformed input is an error, never a panic, and
+//! no image or frame is allocated for more than [`MAXIMUM_PIXELS`]. (A
+//! WebP decode also holds its compressed data, in buffers the file's
+//! headers size up to 16 MiB each, and a lossless image's code tables,
+//! which grow with the file's own length.)
 
 mod bmp;
 mod gif;
 #[cfg(test)]
 mod tests;
 mod tga;
+mod webp;
 
 /// The most pixels a decoder here allocates for. The image table refuses
 /// an image wider or taller than its budget (2048) on the header's word
@@ -66,6 +72,8 @@ pub enum ImageFormat {
     Bmp,
     /// GIF 87a or 89a.
     Gif,
+    /// WebP: lossy, lossless or extended (alpha, animation).
+    Webp,
     /// Truevision TGA (no signature: recognised by a header that makes
     /// sense, so it is tried last).
     Tga,
@@ -82,6 +90,8 @@ pub fn detect(bytes: &[u8]) -> Option<ImageFormat> {
         Some(ImageFormat::Bmp)
     } else if gif::is_gif(bytes) {
         Some(ImageFormat::Gif)
+    } else if webp::is_webp(bytes) {
+        Some(ImageFormat::Webp)
     } else if bytes.starts_with(&[0xFF, 0xD8]) {
         Some(ImageFormat::Jpeg)
     } else if tga::is_tga(bytes) {
@@ -105,6 +115,7 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         ImageFormat::Jpeg => jpeg_dimensions(bytes),
         ImageFormat::Bmp => bmp::dimensions(bytes),
         ImageFormat::Gif => gif::dimensions(bytes),
+        ImageFormat::Webp => webp::dimensions(bytes),
         ImageFormat::Tga => tga::dimensions(bytes),
     }
 }
@@ -137,6 +148,7 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded> {
         }
         ImageFormat::Bmp => bmp::decode(bytes),
         ImageFormat::Gif => gif::decode(bytes),
+        ImageFormat::Webp => webp::decode(bytes),
         ImageFormat::Tga => tga::decode(bytes),
     }
 }
