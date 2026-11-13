@@ -844,3 +844,26 @@ fn a_webp_is_read_to_its_riff_end_with_its_chunks_as_the_decoder_reads_them() {
         decode(WEBP_LOSSLESS).unwrap().rgba
     );
 }
+
+#[test]
+fn a_still_webp_with_a_stray_animation_frame_allocates_for_its_canvas_only() {
+    // A still extended image may carry an animation frame chunk; the
+    // decoder then reads a lossless bitstream inside it in place of the
+    // image's lossy one, at the canvas's size. One of another size (here
+    // 16383 x 16383 in a 16 x 8 canvas) is refused, not allocated for.
+    let colour = webp_chunk(b"VP8 ", webp_payload(WEBP_LOSSY, b"VP8 "));
+    let bits: u32 = 0x3FFE | (0x3FFE << 14);
+    let mut huge = vec![0x2F];
+    huge.extend_from_slice(&bits.to_le_bytes());
+    huge.extend_from_slice(&[0; 11]);
+    let mut frame = vec![0; 16];
+    frame.extend_from_slice(&webp_chunk(b"VP8L", &huge));
+    let still = webp_file(&[vp8x(0, 16, 8), colour.clone()]);
+    assert_eq!(
+        decode(&still).unwrap().rgba,
+        decode(WEBP_LOSSY).unwrap().rgba
+    );
+    let file = webp_file(&[vp8x(0, 16, 8), colour, webp_chunk(b"ANMF", &frame)]);
+    assert_eq!(dimensions(&file), Some((16, 8)));
+    assert!(matches!(decode(&file), Err(CodecError::Corrupt("WebP", _))));
+}
