@@ -208,10 +208,32 @@ mod tests {
     /// API 1.8 (the status board's change notices) again, API 1.9 (a
     /// creature's appraisal profile on the item properties) again, API
     /// 1.10 (every enchantment on the character, an import) again, API
-    /// 1.11 (who changed the selection, on the selection event) again, and
+    /// 1.11 (who changed the selection, on the selection event) again,
     /// API 1.12 (a projectile path query's launch speed, canvases in markup
-    /// windows, resizing a canvas) again.
+    /// windows, resizing a canvas) again, and API 1.13 published the same
+    /// value as 1.12: it added WebP to the image formats the client
+    /// decodes, not a shape.
     const PUBLISHED: u64 = 0x4ae5_d2f7_29f5_02b6;
+
+    /// The fingerprint API 1.12 was published with.
+    const PUBLISHED_1_12: u64 = 0x4ae5_d2f7_29f5_02b6;
+
+    /// API 1.12 is published: it keeps the fingerprint it was published
+    /// with, whatever later versions add. API 1.13 changed no shape, so a
+    /// plugin built for 1.12 carries the current core and every import as
+    /// it is now.
+    #[test]
+    fn api_1_12_keeps_its_published_fingerprint() {
+        let v1_12 = ApiVersion::new(1, 12);
+        let fingerprint = fingerprint_at(v1_12);
+        assert_eq!(
+            fingerprint, PUBLISHED_1_12,
+            "API 1.12's layout changed (fingerprint {fingerprint:016x}, published {PUBLISHED_1_12:016x}): \
+             mark what was added `since` the version that adds it"
+        );
+        assert_eq!(core_shape(v1_12), CORE_SHAPE);
+        assert_eq!(section_at(v1_12), LAYOUT_SECTION_BYTES.to_vec());
+    }
 
     /// The fingerprint API 1.11 was published with.
     const PUBLISHED_1_11: u64 = 0x27ec_8bdc_27cc_d94c;

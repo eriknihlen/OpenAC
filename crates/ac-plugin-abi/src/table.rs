@@ -157,7 +157,7 @@ macro_rules! import_table {
             /// The plugin's own pixels.
             UiImageRgba = ui_image_rgba($crate::ui::RgbaImage) -> $crate::ui::ImageInfo,
                 permission: None, window: false, since: (1, 0);
-            /// The plugin's own art as a PNG, JPEG, BMP, TGA or GIF file,
+            /// The plugin's own art as a PNG, JPEG, BMP, TGA, GIF or WebP file,
             /// decoded by the client (OpenAC `FromStream`); a second request
             /// under the same name is the same image held once more.
             UiImageDecode = ui_image_decode($crate::ui::EncodedImage) -> $crate::ui::ImageInfo,
