@@ -272,6 +272,7 @@ fn run_session(
     let mut shutdown_sent = false;
     // Who the session is in the world as (a portal failure's record names it).
     let mut character: Option<String> = None;
+    let mut fold = console::RepeatFold::default();
     let summary = loop {
         if let (Some(since), Some(duration)) = (in_world_since, options.duration)
             && !shutdown_sent
@@ -349,7 +350,9 @@ fn run_session(
             }
             Some(other) => {
                 for line in console::event_lines(&other, None) {
-                    outln!("{line}");
+                    for line in fold.take(line, Instant::now()) {
+                        outln!("{line}");
+                    }
                 }
             }
             None => {}

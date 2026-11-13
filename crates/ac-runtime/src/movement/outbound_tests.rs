@@ -261,3 +261,25 @@ fn a_charge_begun_while_moving_is_not_a_standing_long_jump() {
 
     assert_eq!(movement_flags(&mut player, &movement), 0x01);
 }
+
+#[test]
+fn every_position_sent_waits_for_the_session_with_its_counters_records_kept_or_not() {
+    let mut engine = flat_engine();
+    let mut player = grounded_player(&mut engine);
+    let at = player.try_get_outbound_position().unwrap();
+    let mut outbox = Outbox::new();
+    let mut sender = LocalPlayerOutbound::new(false);
+    sender.send_immediate_position(&mut outbox, &mut player, &STAMPS);
+    let sent: Vec<OutboundRecord> = sender.drain_sent().collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].kind, OutboundKind::AutonomousPosition);
+    assert_eq!(sent[0].sequence, 1);
+    assert_eq!(sent[0].position.cell_id, at.obj_cell_id);
+    assert_eq!(sent[0].timestamps, STAMPS);
+    assert!(sent[0].contact);
+    assert!(
+        sender.take_records().is_empty(),
+        "records were not asked for"
+    );
+    assert_eq!(sender.drain_sent().count(), 0, "taken once");
+}

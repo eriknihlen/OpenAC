@@ -12,6 +12,18 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.9 (2026-11-13)
+
+- A spell the server keeps refusing is now written to the client log once,
+  then as one count a minute, instead of the same line several times a
+  second. A stuck caster used to fill the log so fast that everything
+  written before the trouble began was rotated away.
+- When the server answers a spell your character casts at itself with
+  "target not found" (the server has lost track of the character, which
+  then stands still until it logs in again), the client writes the
+  positions it sent and received in the last two minutes to its log, at
+  most once every ten minutes. This is to find out why it happens.
+
 ## OpenAC (Rust) 0.2.8 (2026-11-12)
 
 - A weapon with a Left-hand Tether now goes into the off-hand when you
