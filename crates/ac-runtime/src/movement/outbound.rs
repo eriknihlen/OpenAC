@@ -44,6 +44,8 @@ pub struct OutboundRecord {
     pub contact: bool,
     /// The forward command it carried (move-to-state only).
     pub forward_command: u32,
+    /// The counters it carried.
+    pub timestamps: MotionTimestamps,
 }
 
 fn hold_key(key: HoldKey) -> u32 {
@@ -104,7 +106,15 @@ pub fn wire_position(p: &CellPosition) -> Position {
 pub struct LocalPlayerOutbound {
     records: Vec<OutboundRecord>,
     keep_records: bool,
+    /// The positions sent since the session last took them, for its
+    /// position trail (it takes them every pass, so this stays short).
+    sent: Vec<OutboundRecord>,
 }
+
+/// How many sent positions wait for the session at most; more are
+/// dropped (the session takes them every pass, so this is never reached
+/// in play).
+const SENT_LIMIT: usize = 64;
 
 impl LocalPlayerOutbound {
     /// A sender; with `keep_records` every message sent is remembered for
@@ -114,6 +124,7 @@ impl LocalPlayerOutbound {
         Self {
             records: Vec::new(),
             keep_records,
+            sent: Vec::new(),
         }
     }
 
@@ -122,7 +133,16 @@ impl LocalPlayerOutbound {
         std::mem::take(&mut self.records)
     }
 
+    /// The positions sent since the last call, oldest first (always kept,
+    /// for the session's position trail).
+    pub fn drain_sent(&mut self) -> std::vec::Drain<'_, OutboundRecord> {
+        self.sent.drain(..)
+    }
+
     fn record(&mut self, record: OutboundRecord) {
+        if self.sent.len() < SENT_LIMIT {
+            self.sent.push(record);
+        }
         if self.keep_records {
             self.records.push(record);
         }
@@ -169,6 +189,7 @@ impl LocalPlayerOutbound {
                 position: wire,
                 contact: false,
                 forward_command: 0,
+                timestamps: *timestamps,
             });
         }
     }
@@ -206,6 +227,7 @@ impl LocalPlayerOutbound {
             position: wire,
             contact,
             forward_command: 0,
+            timestamps: *timestamps,
         });
         let plane = controller.contact_plane();
         let now = controller.sim_time_seconds();
@@ -235,6 +257,7 @@ impl LocalPlayerOutbound {
             position: wire,
             contact: true,
             forward_command: 0,
+            timestamps: *timestamps,
         });
         let plane = controller.contact_plane();
         let now = controller.sim_time_seconds();
@@ -267,6 +290,7 @@ impl LocalPlayerOutbound {
             position: wire,
             contact,
             forward_command: raw.forward_command,
+            timestamps: *timestamps,
         });
         let now = controller.sim_time_seconds();
         controller.note_movement_sent(now, movement.is_mouse_look_movement_event);

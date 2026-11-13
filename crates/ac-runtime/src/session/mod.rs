@@ -11,6 +11,7 @@ mod link;
 mod outbox;
 pub mod policy;
 mod portal_failure;
+mod position_trail;
 pub mod pregame;
 mod relogin;
 #[cfg(test)]
@@ -30,6 +31,10 @@ pub use link::{LinkStatus, PingClock};
 pub use outbox::{Outbox, Outgoing, Queue};
 pub use portal_failure::{
     InboundNote, PORTAL_SPACE_LIMIT, PortalFailure, PortalWait, PortalWorldState, RECENT_INBOUND,
+};
+pub use position_trail::{
+    Acceptance, POSITION_TRAIL_CAP, POSITION_TRAIL_WINDOW, PlayerNotFound, TARGET_NOT_ACQUIRED,
+    TrailEntry, TrailEvent, TrailMessage, TrailPosition, TrailStamps,
 };
 pub use relogin::{LOST_CONNECTION_RETRY_INTERVAL, Relogin};
 pub use runner::{

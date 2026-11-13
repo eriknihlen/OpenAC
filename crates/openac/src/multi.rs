@@ -605,7 +605,8 @@ pub(crate) fn monitor(
                 event @ (HostEvent::Portal(_)
                 | HostEvent::Logout(_)
                 | HostEvent::CharacterSelection(_)
-                | HostEvent::CharacterCreation(_)),
+                | HostEvent::CharacterCreation(_)
+                | HostEvent::PlayerNotFound(_)),
             ) => {
                 for line in console::event_lines(&event, tag) {
                     printer.print_logged(kind, &line);

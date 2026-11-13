@@ -725,6 +725,12 @@ impl Movement {
         self.outbound.take_records()
     }
 
+    /// The player's positions sent since the last call, oldest first
+    /// (always kept, for the session's position trail).
+    pub fn drain_sent_positions(&mut self) -> std::vec::Drain<'_, OutboundRecord> {
+        self.outbound.drain_sent()
+    }
+
     /// Objects the world forgot on its own (their time out of range ran
     /// out, recorded after `mark`) lose their bodies.
     pub fn observe_expiry(&mut self, world: &mut World, mark: usize) {

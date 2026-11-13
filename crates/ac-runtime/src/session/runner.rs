@@ -549,6 +549,11 @@ pub enum HostEvent {
     /// knew at that moment. Its connection ends next (a session with no
     /// window attached logs in again, one with a window ends).
     PortalFailure(Box<PortalFailure>),
+    /// The server answered a spell the player cast at themselves as if the
+    /// player were not there, the first time since such a cast went
+    /// through: the positions sent and received for the player just
+    /// before.
+    PlayerNotFound(Box<super::PlayerNotFound>),
     /// The session ended; nothing follows.
     Ended(SessionSummary),
 }
