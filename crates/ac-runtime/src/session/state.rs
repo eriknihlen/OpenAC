@@ -366,7 +366,10 @@ impl SessionState {
             self.gameplay.complete_cast_use(code);
             let completion = self.gameplay.spell_cast().last_completion();
             let player = self.world.player_guid().unwrap_or(0);
-            if completion.revision != answered && self.self_cast_watch.observe(&completion, player)
+            if completion.revision != answered
+                && self
+                    .self_cast_watch
+                    .observe(&completion, player, self.session_now)
             {
                 player_not_found = Some(completion);
             }
@@ -485,10 +488,13 @@ impl SessionState {
             (Some(before), Some(after)) => {
                 if before.instance != after.instance {
                     Acceptance::Taken
-                } else if before.position == after.position {
-                    Acceptance::RefusedAsOlder
-                } else if before.force_position != after.force_position {
+                } else if before.force_position != after.force_position
+                    && after.force_position == stamps.force_position
+                    && after.teleport == before.teleport
+                {
                     Acceptance::Forced
+                } else if before.position == after.position {
+                    Acceptance::Refused
                 } else {
                     Acceptance::Taken
                 }
@@ -5590,14 +5596,15 @@ mod player_not_found_tests {
                     CELL,
                     9.0,
                     Some(1),
-                    Acceptance::RefusedAsOlder
+                    Acceptance::Refused
                 ),
             ]
         );
         // Once per episode, until a self cast goes through again.
         assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 24).is_none());
         assert!(cast_answered(&mut state, &mut outbox, 0, 25).is_none());
-        assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 26).is_some());
+        // After the report interval, the next episode is reported again.
+        assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 623).is_some());
     }
 
     #[test]
@@ -5605,9 +5612,10 @@ mod player_not_found_tests {
         let (mut state, mut outbox) = caster();
         assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 20).is_some());
         assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 21).is_none());
+        state.apply(&moved(3, 4.0), &mut outbox, true, clocks(590));
         state.end_generation(0);
-        enter(&mut state, &mut outbox, 25);
-        let lost = cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 30)
+        enter(&mut state, &mut outbox, 600);
+        let lost = cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 640)
             .expect("a new generation re-arms the report");
         assert!(
             lost.trail

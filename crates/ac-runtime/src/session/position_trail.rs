@@ -46,12 +46,14 @@ pub enum TrailMessage {
 /// What the client's world did with a position the server sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Acceptance {
-    /// It moved the player.
+    /// Its counters were taken (the player moved there, unless the world
+    /// could not place it).
     Taken,
     /// It forced the player there.
     Forced,
-    /// Its counters were not newer than the ones the world had.
-    RefusedAsOlder,
+    /// The world kept the position it had (counters not newer, or for
+    /// another incarnation).
+    Refused,
     /// The world does not know the player's object.
     NoObject,
 }
@@ -203,24 +205,40 @@ pub struct PlayerNotFound {
     pub trail: Vec<TrailEntry>,
 }
 
+/// The shortest time between two reports, so a character whose self casts
+/// keep alternating between going through and being refused does not write
+/// the trail again and again.
+pub const PLAYER_NOT_FOUND_REPORT_INTERVAL: Duration = Duration::from_secs(600);
+
 /// Decides when a self cast's refusal opens an episode: the first
 /// [`TARGET_NOT_ACQUIRED`] answer since a self cast went through (or since
-/// the generation began); later ones wait until one goes through again.
+/// the generation began); later ones wait until one goes through again. An
+/// episode within [`PLAYER_NOT_FOUND_REPORT_INTERVAL`] of the last report is
+/// not reported.
 #[derive(Debug, Clone)]
 pub(crate) struct SelfCastWatch {
     armed: bool,
+    last_report: Option<Duration>,
 }
 
 impl Default for SelfCastWatch {
     fn default() -> Self {
-        Self { armed: true }
+        Self {
+            armed: true,
+            last_report: None,
+        }
     }
 }
 
 impl SelfCastWatch {
-    /// A cast's answer, `player` being the local player's id: true when it
-    /// opens an episode.
-    pub(crate) fn observe(&mut self, completion: &SpellCastCompletion, player: u32) -> bool {
+    /// A cast's answer at session time `now`, `player` being the local
+    /// player's id: true when it opens an episode to report.
+    pub(crate) fn observe(
+        &mut self,
+        completion: &SpellCastCompletion,
+        player: u32,
+        now: Duration,
+    ) -> bool {
         if player == 0 || completion.target_id != player {
             return false;
         }
@@ -229,7 +247,18 @@ impl SelfCastWatch {
                 self.armed = true;
                 false
             }
-            TARGET_NOT_ACQUIRED => std::mem::replace(&mut self.armed, false),
+            TARGET_NOT_ACQUIRED if std::mem::replace(&mut self.armed, false) => {
+                // A session clock that started again (a new connection)
+                // counts as a long time.
+                let due = self.last_report.is_none_or(|last| {
+                    now.checked_sub(last)
+                        .is_none_or(|since| since >= PLAYER_NOT_FOUND_REPORT_INTERVAL)
+                });
+                if due {
+                    self.last_report = Some(now);
+                }
+                due
+            }
             _ => false,
         }
     }
@@ -305,36 +334,51 @@ mod tests {
     #[test]
     fn the_first_refusal_of_a_self_cast_opens_an_episode_once() {
         let mut watch = SelfCastWatch::default();
-        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
-        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
+        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
         // Another error does not end the episode.
-        assert!(!watch.observe(&answer(PLAYER, 0x0400), PLAYER));
-        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
+        assert!(!watch.observe(&answer(PLAYER, 0x0400), PLAYER, at(0)));
+        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
     }
 
     #[test]
     fn a_self_cast_that_goes_through_ends_the_episode() {
         let mut watch = SelfCastWatch::default();
-        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
-        assert!(!watch.observe(&answer(PLAYER, 0), PLAYER));
-        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
+        assert!(!watch.observe(&answer(PLAYER, 0), PLAYER, at(1_000)));
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(600_000)));
+    }
+
+    #[test]
+    fn episodes_are_reported_at_most_once_per_interval() {
+        let mut watch = SelfCastWatch::default();
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
+        assert!(!watch.observe(&answer(PLAYER, 0), PLAYER, at(1_000)));
+        // A second episode inside the interval is not reported...
+        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(2_000)));
+        assert!(!watch.observe(&answer(PLAYER, 0), PLAYER, at(3_000)));
+        // ...the next one after it is.
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(600_000)));
+        // A session clock that started again counts as long enough.
+        assert!(!watch.observe(&answer(PLAYER, 0), PLAYER, at(600_500)));
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(5_000)));
     }
 
     #[test]
     fn a_new_generation_ends_the_episode() {
         let mut watch = SelfCastWatch::default();
-        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
         watch.rearm();
-        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(600_000)));
     }
 
     #[test]
     fn a_cast_at_someone_else_neither_opens_nor_ends_an_episode() {
         let mut watch = SelfCastWatch::default();
-        assert!(!watch.observe(&answer(0x8000_0002, TARGET_NOT_ACQUIRED), PLAYER));
-        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), 0));
-        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
-        assert!(!watch.observe(&answer(0x8000_0002, 0), PLAYER));
-        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER));
+        assert!(!watch.observe(&answer(0x8000_0002, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
+        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), 0, at(0)));
+        assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
+        assert!(!watch.observe(&answer(0x8000_0002, 0), PLAYER, at(0)));
+        assert!(!watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
     }
 }

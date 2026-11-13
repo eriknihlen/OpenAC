@@ -1545,7 +1545,9 @@ pub const REPEAT_FOLD_WINDOW: std::time::Duration = std::time::Duration::from_se
 /// retrying a spell the server keeps refusing, several times a second) into
 /// one line, then one count a minute. Without it a stuck caster writes tens
 /// of thousands of identical lines an hour and the log rotates away what
-/// came before. Other lines pass through, and never end the fold.
+/// came before. Other lines pass through, and never end the fold; a cast
+/// that went through ends it, so a later run of the same refusal shows its
+/// first line again.
 #[derive(Debug, Default)]
 pub struct RepeatFold {
     /// The failed-cast line last printed.
@@ -1554,25 +1556,34 @@ pub struct RepeatFold {
     folded: u64,
     /// When the first held-back copy came.
     since: Option<std::time::Instant>,
+    /// When the latest held-back copy came.
+    latest: Option<std::time::Instant>,
 }
 
 impl RepeatFold {
     /// The lines to print for `line`, which came at `now`.
     pub fn take(&mut self, line: String, now: std::time::Instant) -> Vec<String> {
         let mut out = Vec::new();
-        if !is_failed_cast(&line) {
-            self.count_if_due(now, &mut out);
-            out.push(line);
-            return out;
+        match cast_line(&line) {
+            None => {
+                self.count_if_due(now, &mut out);
+            }
+            Some(false) => {
+                self.count(&mut out);
+                self.last = None;
+            }
+            Some(true) if self.last.as_deref() == Some(line.as_str()) => {
+                self.folded += 1;
+                self.since.get_or_insert(now);
+                self.latest = Some(now);
+                self.count_if_due(now, &mut out);
+                return out;
+            }
+            Some(true) => {
+                self.count(&mut out);
+                self.last = Some(line.clone());
+            }
         }
-        if self.last.as_deref() == Some(line.as_str()) {
-            self.folded += 1;
-            self.since.get_or_insert(now);
-            self.count_if_due(now, &mut out);
-            return out;
-        }
-        self.count(now, &mut out);
-        self.last = Some(line.clone());
         out.push(line);
         out
     }
@@ -1582,28 +1593,38 @@ impl RepeatFold {
             .since
             .is_some_and(|since| now.duration_since(since) >= REPEAT_FOLD_WINDOW)
         {
-            self.count(now, out);
+            self.count(out);
         }
     }
 
-    fn count(&mut self, now: std::time::Instant, out: &mut Vec<String>) {
+    fn count(&mut self, out: &mut Vec<String>) {
         if self.folded > 0
-            && let (Some(last), Some(since)) = (&self.last, self.since)
+            && let (Some(last), Some(since), Some(latest)) = (&self.last, self.since, self.latest)
         {
             out.push(format!(
-                "{last} ({} more times in {} s)",
+                "{last} ({} more {} in {} s)",
                 self.folded,
-                now.duration_since(since).as_secs().max(1)
+                if self.folded == 1 { "time" } else { "times" },
+                latest.duration_since(since).as_secs().max(1)
             ));
         }
         self.folded = 0;
         self.since = None;
+        self.latest = None;
     }
 }
 
-/// A cast-finished line carrying an error.
-fn is_failed_cast(line: &str) -> bool {
-    line.contains("-- cast of spell ") && line.contains(" finished with error 0x")
+/// A cast-finished line (with or without a session id after the dashes):
+/// `Some(true)` when it carries an error, `Some(false)` when the cast went
+/// through, `None` for any other line.
+fn cast_line(line: &str) -> Option<bool> {
+    let rest = line.strip_prefix(NOTICE_PREFIX)?;
+    let rest = match rest.strip_prefix('[') {
+        Some(tagged) => tagged.split_once("] ")?.1,
+        None => rest,
+    };
+    rest.starts_with("cast of spell ")
+        .then(|| rest.contains(" finished with error 0x"))
 }
 
 /// The server could not find the player: a header naming the cast, then
@@ -1660,7 +1681,7 @@ fn trail_line(entry: &TrailEntry) -> String {
             match acceptance {
                 Acceptance::Taken => "taken",
                 Acceptance::Forced => "forced",
-                Acceptance::RefusedAsOlder => "refused as older",
+                Acceptance::Refused => "refused",
                 Acceptance::NoObject => "no player object",
             }
         ),
@@ -2781,7 +2802,7 @@ mod tests {
             out,
             [
                 REFUSED.to_owned(),
-                format!("{REFUSED} (2 more times in 3 s)"),
+                format!("{REFUSED} (2 more times in 2 s)"),
                 other.to_owned(),
                 ok.to_owned(),
                 ok.to_owned(),
@@ -2798,8 +2819,43 @@ mod tests {
             out,
             [
                 REFUSED.to_owned(),
-                format!("{REFUSED} (1 more times in 69 s)"),
+                format!("{REFUSED} (1 more time in 1 s)"),
                 status.to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_cast_with_a_session_id_folds_too() {
+        let mut fold = RepeatFold::default();
+        let tagged = notice(
+            "cast of spell 48 at 0x5004492A finished with error 0x042C",
+            Some("bot"),
+        );
+        let out = fold_all(&mut fold, &[(&tagged, 0), (&tagged, 1), (&tagged, 2)]);
+        assert_eq!(out, std::slice::from_ref(&tagged));
+        let chat = "c[General] someone says, \"-- cast of spell 1 finished with error 0x1\"";
+        assert_eq!(
+            fold.take(chat.to_owned(), std::time::Instant::now()),
+            [chat]
+        );
+    }
+
+    #[test]
+    fn a_refusal_after_a_cast_that_went_through_is_printed_again() {
+        let mut fold = RepeatFold::default();
+        let ok = "-- cast of spell 48 at 0x5004492A finished";
+        let out = fold_all(
+            &mut fold,
+            &[(REFUSED, 0), (REFUSED, 1), (ok, 2), (REFUSED, 3)],
+        );
+        assert_eq!(
+            out,
+            [
+                REFUSED.to_owned(),
+                format!("{REFUSED} (1 more time in 1 s)"),
+                ok.to_owned(),
+                REFUSED.to_owned(),
             ]
         );
     }
@@ -2858,7 +2914,7 @@ mod tests {
                             teleport: 41,
                             force_position: 2,
                         },
-                        acceptance: Acceptance::RefusedAsOlder,
+                        acceptance: Acceptance::Refused,
                     },
                 },
                 TrailEntry {
@@ -2877,7 +2933,7 @@ mod tests {
                 "-- [bot]   s=5741.078 sent AutonomousPosition cell 0xC8E9002A (101.20, 34.55, \
                  12.00) inst 3 ctl 1 tele 41 force 2 action 212 contact",
                 "-- [bot]   s=5741.300 got UpdatePosition cell 0xC8E9002A (101.20, 34.55, 12.00) \
-                 inst 3 pos 907 tele 41 force 2 refused as older",
+                 inst 3 pos 907 tele 41 force 2 refused",
                 "-- [bot]   s=5741.400 generation ended",
             ]
         );
@@ -2895,6 +2951,6 @@ mod tests {
         let lines = event_lines(&HostEvent::PlayerNotFound(Box::new(lost)), None);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1], "--   none");
-        assert!(!is_failed_cast(&lines[0]), "the report is never folded");
+        assert!(cast_line(&lines[0]).is_none(), "the report is never folded");
     }
 }
