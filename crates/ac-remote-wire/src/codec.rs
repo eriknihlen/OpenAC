@@ -879,12 +879,18 @@ mod tests {
         let earlier = sender_epoch - Duration::from_micros(7);
         let back: Instant = from_bytes(&to_bytes(&earlier, &e).unwrap(), &d).unwrap();
         assert_eq!(receiver_epoch - back, Duration::from_micros(7));
-        // An offset no clock can hold is an error, not a panic.
+        // The farthest offset never panics. Whether a clock can hold it is
+        // the platform's: Windows' cannot (an error); Linux' and macOS'
+        // count seconds in 64 bits and hold any 64-bit microsecond offset.
         let far = i64::MIN.to_le_bytes();
-        assert_eq!(
-            from_bytes::<Instant>(&far, &d),
-            Err(DecodeError::OutOfRange("instant"))
-        );
+        match from_bytes::<Instant>(&far, &d) {
+            Err(DecodeError::OutOfRange("instant")) => {}
+            Ok(back) => assert_eq!(
+                receiver_epoch - back,
+                Duration::from_micros(i64::MIN.unsigned_abs())
+            ),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
