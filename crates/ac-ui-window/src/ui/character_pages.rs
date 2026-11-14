@@ -63,6 +63,13 @@ impl WindowUi {
         self.character_pages.titles.resolve(strings, id)
     }
 
+    /// The ids of the titles named `names` (their texts), ascending: a
+    /// character report names titles by their text.
+    pub fn title_ids_named(&mut self, names: &[String]) -> Vec<u32> {
+        let strings = self.content.strings();
+        self.character_pages.titles.ids_named(strings, names)
+    }
+
     /// OpenAC `RetailUiRuntime.MountCharacterInformationPanel`.
     pub(super) fn mount_character_info(&mut self) {
         match self.mount_character_info_window() {

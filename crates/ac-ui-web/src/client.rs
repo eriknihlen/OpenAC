@@ -312,15 +312,37 @@ impl ClientPanels {
             offline.revision,
             before,
         );
+        let mut titles = None;
         if offline.kind == OfflineKind::Character
             && let Some(ui) = self.ui.as_mut()
         {
             ui.set_reported_sheet(Some(data.stats.reported.clone()));
+            // The titles page: the report names titles by their text.
+            // The title shown is one earned, whether or not the report
+            // named it.
+            let mut title_ids = ui.title_ids_named(&data.stats.titles);
+            if let Some(current) = data.stats.current_title
+                && !title_ids.contains(&current)
+            {
+                title_ids.push(current);
+                title_ids.sort_unstable();
+            }
+            titles = Some(ac_runtime::session::interface::TitleFacts {
+                display_title_id: data.stats.current_title.unwrap_or(0),
+                title_ids,
+                revision: offline.revision,
+                table_generation: 1,
+            });
         }
         offline.shown = Some((data.player, data.object_ids()));
         let scene = self.scene.get_or_insert_with(Scene::default);
         for event in events {
             scene.apply(event);
+        }
+        if let Some(titles) = titles {
+            scene.apply(ac_runtime::session::PresentationEvent::Interface(
+                ac_runtime::session::interface::InterfaceEvent::Titles(Box::new(titles)),
+            ));
         }
     }
 

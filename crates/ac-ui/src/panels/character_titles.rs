@@ -271,6 +271,32 @@ impl TitleNames {
         self.cache.retain(|_, name| name.is_some());
     }
 
+    /// The ids of the titles whose text is one of `names`, ascending (a
+    /// report that names titles by their text). A name no title has is
+    /// left out.
+    pub fn ids_named(
+        &mut self,
+        strings: &crate::strings::StringResolver,
+        names: &[String],
+    ) -> Vec<u32> {
+        let wanted: std::collections::HashSet<&str> = names.iter().map(String::as_str).collect();
+        let all: Vec<u32> = self
+            .mapper
+            .as_ref()
+            .map(|m| m.id_to_string.iter().map(|(id, _)| *id).collect())
+            .unwrap_or_default();
+        let mut ids: Vec<u32> = all
+            .into_iter()
+            .filter(|&id| {
+                self.resolve(strings, id)
+                    .is_some_and(|text| wanted.contains(text.as_str()))
+            })
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
     /// Title `id`'s text (`None` for 0 or an id with no name).
     pub fn resolve(&mut self, strings: &crate::strings::StringResolver, id: u32) -> Option<String> {
         if id == 0 {

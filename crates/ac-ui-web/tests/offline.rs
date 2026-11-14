@@ -209,6 +209,8 @@ fn real_data_shows_in_both_windows() {
         if kind == OfflineKind::Character {
             click(&mut page, (143.0, 18.0));
             picture(&page, "real-character-skills");
+            click(&mut page, (235.0, 18.0));
+            picture(&page, "real-character-titles");
         } else {
             // Examine each worn item in turn (the paperdoll's slots).
             for (n, at) in [(178.0, 215.0), (213.0, 125.0), (104.0, 70.0), (68.0, 110.0)]

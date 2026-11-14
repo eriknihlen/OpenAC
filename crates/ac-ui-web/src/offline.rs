@@ -184,6 +184,10 @@ pub struct Stats {
     pub strength_now: Option<u32>,
     /// What the character sheet shows of the stats over the numbers.
     pub reported: ReportedSheet,
+    /// The titles earned, by their text.
+    pub titles: Vec<String>,
+    /// The title shown (its id).
+    pub current_title: Option<u32>,
 }
 
 /// Reading the page's JSON failed.
@@ -454,12 +458,27 @@ fn player_numbers(stats: &Value) -> Stats {
         .zip(attributes[0])
         .filter(|&(now, (ranks, start))| now > i64::from(ranks + start))
         .map(|(now, _)| now as u32);
+    let titles = stats
+        .get("titles")
+        .and_then(Value::as_array)
+        .map(|t| {
+            t.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let current_title = number(stats, "current_title")
+        .filter(|&t| t > 0)
+        .map(|t| t as u32);
     Stats {
         ints,
         int64s,
         attributes,
         strength_now,
         reported,
+        titles,
+        current_title,
     }
 }
 
