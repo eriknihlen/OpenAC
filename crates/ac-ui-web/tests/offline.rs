@@ -172,3 +172,38 @@ fn the_character_window_shows_alone() {
     picture(&page, "character-skills");
     assert!(page.sent_stamped().is_empty());
 }
+
+/// A real character's data (the `ui_offline_data` JSON a dashboard sends,
+/// in the file `OPENAC_OFFLINE_DATA` names) through both windows.
+#[test]
+#[ignore = "reads the installed dats and a data file"]
+fn real_data_shows_in_both_windows() {
+    let Ok(path) = std::env::var("OPENAC_OFFLINE_DATA") else {
+        return;
+    };
+    let json = std::fs::read(&path).expect("the data file");
+    for (kind, name) in [
+        (OfflineKind::Inventory, "real-inventory"),
+        (OfflineKind::Character, "real-character"),
+    ] {
+        let mut page = Page::open();
+        page.module.panels().set_offline(kind);
+        page.module
+            .panels()
+            .offline_data(&json)
+            .expect("the data reads");
+        for (source, id) in page.module.panels().dat_preload() {
+            page.answer(source, id);
+        }
+        page.module.panels().init(WIDTH, HEIGHT, 1.0, 0.0);
+        page.settle(400);
+        page.settle(50);
+        picture(&page, name);
+        if kind == OfflineKind::Character {
+            click(&mut page, (143.0, 18.0));
+            picture(&page, "real-character-skills");
+        }
+        println!("{}", page.log);
+        assert!(page.sent_stamped().is_empty());
+    }
+}
