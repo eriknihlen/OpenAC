@@ -142,6 +142,9 @@ pub struct RemoteDescriptor {
     pub url: String,
     /// Where the session's token for the relay comes from (`credential`).
     pub credential: CredentialReference,
+    /// Whether the session connects to the relay (`enabled`, default
+    /// `true`): `false` keeps the address and token for `/remoteac enable`.
+    pub enabled: bool,
 }
 
 /// The login server.
@@ -348,6 +351,7 @@ struct RawSession {
 struct RawRemote {
     url: Option<String>,
     credential: (CredentialProvider, Option<String>),
+    enabled: Option<bool>,
 }
 
 /// Reads a credential reference: a provider and what it looks up.
@@ -580,8 +584,13 @@ impl RawSession {
             let mut remote = ObjectReader::new(node)?;
             let url = required_nullable(&mut remote, "url", string)?;
             let credential = credential_reference(remote.required("credential")?)?;
+            let enabled = optional(&mut remote, "enabled", json::boolean)?;
             remote.finish()?;
-            Ok(RawRemote { url, credential })
+            Ok(RawRemote {
+                url,
+                credential,
+                enabled,
+            })
         })?;
         object.finish()?;
         Ok(Self {
@@ -1012,6 +1021,7 @@ fn validate_remote(
                 provider,
                 reference,
             },
+            enabled: remote.enabled.unwrap_or(true),
         })),
         _ => Err(invalid(format!(
             "Session '{id}' remote requires a credential reference."

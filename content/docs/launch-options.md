@@ -183,17 +183,37 @@ comments and trailing commas are refused:
 - `plugins`, `pluginTags`, `pluginSettings`: see [Plugins](#plugins).
 - `sessions[].remote` (optional): a relay the session offers itself to, so it
   can be shown and played somewhere else:
-  `{ "url": "wss://…", "credential": { "provider": …, "reference": … } }`.
+  `{ "url": "wss://…", "enabled": true, "credential": { "provider": …, "reference": … } }`.
   The client dials out to `url` (a `wss://` address; `ws://` only for this
   computer) and keeps the link open; the credential names where the
   session's token for the relay comes from, read as the login credential is,
-  so the token is never in the document. Without the member nothing connects
-  anywhere. A relay can never stop a session: an address or token that
+  so the token is never in the document. `enabled` (optional, default
+  `true`) set to `false` keeps the block without connecting. Without the
+  member, and without a setting made with `/remoteac` (below), nothing
+  connects anywhere. A relay can never stop a session: an address or token that
   cannot be used, a relay that is down, a lost link or a closed remote
   window leave the session playing, with a line on the console when the
   endpoint could not start. A remote window that takes control loses it
   after a second without input, and the movement keys are let go. Not
   started for `mode: "probe"`.
+- `/remoteac`, typed in the chat box, on the console or as a login command,
+  sets the remote window while the session runs; it never reaches the
+  server, the plugins or the chat. `/remoteac url "<wss url>"` sets the
+  address (the same rules as `url`), `/remoteac secret "<token>"` the token
+  (answered `secret set` only, never recalled with the up arrow, and
+  starred out in the draft an attached browser sees while it is typed),
+  `/remoteac enable` and `/remoteac disable` connect and leave (a browser
+  attached is let go; the address and token are kept), and
+  `/remoteac status` says whether it is on, the address, the link
+  (connected, refused or trying again) and whether a browser is attached,
+  never the token. A session whose document has a `remote` block keeps the
+  settings in that block. Every other session keeps them in
+  `<config>/remote.json`, by server, account and character, since the
+  launcher writes a new document for every start; that file holds where
+  the token is, never the token. The token is written to
+  `<config>/remote/<server>/<account>/<character>.token`, readable only by
+  its owner on Unix. Turned on in the middle of a session, a browser sees
+  the world from that point on.
 - `process.content.preparedAssetPath` and the overlay members are parsed and
   checked but not used: this client reads the dats directly and has no
   prepared asset package.

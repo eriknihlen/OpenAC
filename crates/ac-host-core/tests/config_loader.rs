@@ -774,6 +774,27 @@ fn a_remote_block_names_the_relay_and_where_its_token_comes_from() {
     assert_eq!(remote.url, "wss://relay.example/client/ws");
     assert_eq!(remote.credential.provider, CredentialProvider::File);
     assert_eq!(remote.credential.reference, "remote-token");
+    // A block written before `enabled` existed connects, as it always did.
+    assert!(remote.enabled);
+}
+
+#[test]
+fn a_remote_block_can_be_kept_but_switched_off() {
+    for (enabled, expected) in [("false", false), ("true", true), ("null", true)] {
+        let block = format!(
+            r#""remote":{{"url":"wss://relay.example/ws","enabled":{enabled},
+            "credential":{{"provider":"file","reference":"t"}}}}"#
+        );
+        let config = load(&with_bot(&block)).unwrap();
+        assert_eq!(
+            single(&config).remote.as_ref().unwrap().enabled,
+            expected,
+            "{enabled}"
+        );
+    }
+    assert!(is_json_error(&load(&with_bot(
+        r#""remote":{"url":"wss://relay.example/ws","enabled":"yes","credential":{"provider":"file","reference":"t"}}"#,
+    ))));
 }
 
 #[test]

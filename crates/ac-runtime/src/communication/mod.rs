@@ -26,6 +26,7 @@ mod log_file;
 mod login_commands;
 mod outbound;
 mod poses;
+pub mod remote_command;
 mod router;
 mod turbine;
 

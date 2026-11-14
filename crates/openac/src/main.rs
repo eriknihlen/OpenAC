@@ -8,6 +8,7 @@ mod multi;
 mod options;
 mod plugins;
 mod remote;
+mod remote_settings;
 mod session_config;
 mod stdio;
 mod window_state;

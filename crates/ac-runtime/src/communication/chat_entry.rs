@@ -180,7 +180,10 @@ impl ChatEntryState {
             tell_target_guid: self.tell_target_guid,
         };
         let outcome = route(&line, defaults);
-        self.remember(line);
+        // A line that may carry the relay token is never recalled.
+        if !super::remote_command::kept_out_of_history(&line) {
+            self.remember(line);
+        }
         self.clear();
         outcome
     }
@@ -387,6 +390,18 @@ mod tests {
             sent.iter().map(|r| r.line.as_str()).collect::<Vec<_>>(),
             ["first", "second", "third", "second"]
         );
+    }
+
+    #[test]
+    fn a_relay_secret_line_is_sent_but_never_recalled() {
+        let mut entry = ChatEntryState::default();
+        let mut sent = Vec::new();
+        send(&mut entry, Some("/remoteac status"), &mut sent);
+        send(&mut entry, Some("/remoteac secret hunter2"), &mut sent);
+        send(&mut entry, Some("/remoteac secert hunter2"), &mut sent);
+        assert_eq!(sent.len(), 3);
+        assert_eq!(entry.count(), 1);
+        assert_eq!(entry.recall_previous().as_deref(), Some("/remoteac status"));
     }
 
     #[test]

@@ -7,9 +7,9 @@
 //! the relay failing leaves the session playing with nothing attached.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -17,8 +17,9 @@ use ac_runtime::session::world_tap::{WorldTapBatch, WorldTapCommand};
 use ac_runtime::session::{PresentationEvent, SessionCommand};
 
 use crate::endpoint::{Action, Codec, Endpoint};
-use crate::link::{Inbound, Link, LinkConfig};
+use crate::link::{Inbound, Link, LinkConfig, LinkLoss};
 use crate::protocol::Status;
+use crate::ws::HandshakeError;
 
 /// The largest frame sent to the relay.
 const MAX_FRAME: usize = 4 * 1024 * 1024;
@@ -33,10 +34,62 @@ const WORLD_BATCHES_PER_PASS: usize = 64;
 /// keep the link's messages waiting.
 const EVENTS_PER_PASS: usize = 4096;
 
+/// Where the link to the relay stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkState {
+    /// The first attempt has not ended yet.
+    Connecting,
+    /// The relay accepted the hello.
+    Connected,
+    /// The relay turned the endpoint away (the token, or the relay's own
+    /// refusal); the link tries again after `retry_in`.
+    Refused {
+        /// Why, never the token.
+        reason: String,
+        /// The wait before the next attempt.
+        retry_in: Duration,
+    },
+    /// The relay could not be reached or the link was lost; the link tries
+    /// again after `retry_in`.
+    BackingOff {
+        /// Why, never the token.
+        reason: String,
+        /// The wait before the next attempt.
+        retry_in: Duration,
+    },
+}
+
+impl LinkState {
+    /// The state after a failed attempt or a lost link.
+    #[must_use]
+    pub fn lost(loss: &LinkLoss, retry_in: Duration) -> Self {
+        let reason = loss.to_string();
+        let refused = matches!(
+            loss,
+            LinkLoss::Refused(_) | LinkLoss::Handshake(HandshakeError::Status(401 | 403))
+        );
+        if refused {
+            Self::Refused { reason, retry_in }
+        } else {
+            Self::BackingOff { reason, retry_in }
+        }
+    }
+}
+
+/// What a running endpoint can say of itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteState {
+    /// The link to the relay.
+    pub link: LinkState,
+    /// Whether a browser is attached to the session.
+    pub attached: bool,
+}
+
 /// A running endpoint. Dropping it stops it.
 #[derive(Debug)]
 pub struct Remote {
     stop: Arc<AtomicBool>,
+    state: Arc<Mutex<RemoteState>>,
     status: Sender<Status>,
     notes: Receiver<String>,
     thread: Option<JoinHandle<()>>,
@@ -51,6 +104,10 @@ impl Remote {
         commands: Sender<SessionCommand>,
     ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(Mutex::new(RemoteState {
+            link: LinkState::Connecting,
+            attached: false,
+        }));
         let (status, changes) = mpsc::channel();
         let (to_console, notes) = mpsc::channel();
         let link = Link::start(link)?;
@@ -68,12 +125,14 @@ impl Remote {
             world: None,
             to_console,
             stop: Arc::clone(&stop),
+            state: Arc::clone(&state),
         };
         let thread = std::thread::Builder::new()
             .name("remote-endpoint".into())
             .spawn(move || worker.run())?;
         Ok(Self {
             stop,
+            state,
             status,
             notes,
             thread: Some(thread),
@@ -90,6 +149,15 @@ impl Remote {
     /// ended by a fault.
     pub fn take_notes(&self) -> Vec<String> {
         self.notes.try_iter().collect()
+    }
+
+    /// Where the link stands and whether a browser is attached.
+    #[must_use]
+    pub fn state(&self) -> RemoteState {
+        match self.state.lock() {
+            Ok(state) => state.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
     }
 
     /// Detach from the session and stop.
@@ -127,6 +195,8 @@ struct Worker<C> {
     /// Lines for the client's console.
     to_console: Sender<String>,
     stop: Arc<AtomicBool>,
+    /// What [`Remote::state`] reads.
+    state: Arc<Mutex<RemoteState>>,
 }
 
 impl<C: Codec> Worker<C> {
@@ -156,13 +226,34 @@ impl<C: Codec> Worker<C> {
             actions.extend(self.world_messages());
             actions.extend(self.endpoint.tick(Instant::now()));
             self.carry_out(actions);
+            let attached = self.presentation.is_some();
+            self.set_state(|state| state.attached = attached);
         }
-        // Stopping: the session is left with nothing attached.
+        // Stopping: the session is left with nothing attached, and keeps the
+        // world's messages no longer.
         let actions = self.endpoint.link_lost();
         self.carry_out(actions.into());
+        let keep = WorldTapCommand::Keep(false);
+        let _ = self.commands.send(SessionCommand::WorldTap(keep));
+    }
+
+    fn set_state(&self, change: impl FnOnce(&mut RemoteState)) {
+        match self.state.lock() {
+            Ok(mut state) => change(&mut state),
+            Err(poisoned) => change(&mut poisoned.into_inner()),
+        }
     }
 
     fn heard(&mut self, inbound: Inbound) -> Vec<Action> {
+        match &inbound {
+            Inbound::Connected { .. } => self.set_state(|s| s.link = LinkState::Connected),
+            Inbound::Disconnected { loss, retry_in }
+            | Inbound::ConnectFailed { loss, retry_in } => {
+                let link = LinkState::lost(loss, *retry_in);
+                self.set_state(|s| s.link = link);
+            }
+            Inbound::Control(_) | Inbound::Binary(_) => {}
+        }
         match inbound {
             Inbound::Control(message) => self.endpoint.relay(message, Instant::now()),
             Inbound::Binary(frame) => self.endpoint.frame(&frame, Instant::now()),

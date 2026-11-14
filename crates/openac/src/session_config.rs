@@ -260,7 +260,13 @@ pub fn run(
     };
     drop(password);
     let commands = handle.commands();
-    let remote = relay.and_then(|relay| crate::remote::start(relay, &descriptor, commands.clone()));
+    let remote = Some(crate::remote::RemoteControl::new(
+        &descriptor,
+        std::path::Path::new(path),
+        &paths.config_directory,
+        relay,
+        commands.clone(),
+    ));
     // Which session the window is on, told to the status file.
     let (tracker, mut notes) = WindowTracker::new([descriptor.id.as_str()]);
     let notes = notes.remove(&descriptor.id);

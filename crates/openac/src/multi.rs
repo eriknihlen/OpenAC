@@ -253,10 +253,16 @@ pub fn run(
         };
         sessions.insert(descriptor.id.clone(), handle.commands());
         // A probe has nothing to show.
-        let remote = relays
-            .remove(&descriptor.id)
-            .filter(|_| enter_world)
-            .and_then(|relay| crate::remote::start(relay, &descriptor, handle.commands()));
+        let relay = relays.remove(&descriptor.id);
+        let remote = enter_world.then(|| {
+            crate::remote::RemoteControl::new(
+                &descriptor,
+                &plan.config_path,
+                &plan.paths.config_directory,
+                relay,
+                handle.commands(),
+            )
+        });
         let status = StatusWriter::for_file(descriptor.status_file.as_deref());
         let codes = Arc::clone(&exit_codes);
         let id = descriptor.id.clone();
@@ -503,8 +509,9 @@ pub(crate) struct Beside {
     pub(crate) window: Option<std::sync::mpsc::Receiver<WindowNote>>,
     /// What the session's heartbeat watches.
     pub(crate) liveness: Option<Liveness>,
-    /// The session's endpoint at its relay; it stops with the monitor.
-    pub(crate) remote: Option<ac_remote::remote::Remote>,
+    /// The session's remote window (none for a probe); its endpoint stops
+    /// with the monitor.
+    pub(crate) remote: Option<crate::remote::RemoteControl>,
 }
 
 /// Print one session's events with its id, keep its status file, run its
@@ -520,7 +527,7 @@ pub(crate) fn monitor(
     let Beside {
         window,
         liveness,
-        remote,
+        mut remote,
     } = beside;
     status.started(id);
     // A notice names its session only when several share the console, as
@@ -602,11 +609,11 @@ pub(crate) fn monitor(
         }
         // The session's relay follows what it is doing. The endpoint stops
         // with this monitor, when the session has ended.
-        if let Some(remote) = &remote {
+        if let Some(remote) = &mut remote {
             if let Some(event) = &event {
-                crate::remote::follow(remote, event);
+                remote.observe(event);
             }
-            crate::remote::print_notes(id, remote);
+            remote.print_notes(id);
         }
         // What a player would see of the event, when the launcher marks lines.
         let kind = event.as_ref().and_then(|event| printer.kind_of(event));
