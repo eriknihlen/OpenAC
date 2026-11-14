@@ -12,6 +12,25 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.10 (2026-11-14)
+
+- A session can now be shown and played in a web browser, through a relay
+  you run: the client's own windows (vitals, chat, inventory, spell bars,
+  plugin windows) over the 3D world, with the keyboard and mouse once you
+  take control. It is off unless you set it up. Turn it on in the session
+  with `/remoteac url "wss://..."`, `/remoteac secret "<token>"` and
+  `/remoteac enable`; `/remoteac status` says whether the relay link is up
+  and a browser attached, and `/remoteac disable` lets the browser go while
+  the game plays on. The token is never shown, written to the chat or
+  recalled with the up arrow, and each character keeps its own. See
+  `sessions[].remote` in the launch options.
+- Plugins can ship their own art as WebP images (lossy, lossless, with
+  transparency; an animation shows its first frame): plugin API 1.13. Code
+  by David Smith (#313).
+- A close request from outside the client (such as `taskkill` without
+  `/F`) while no game window is open no longer leaves the client unable to
+  exit once its session has ended.
+
 ## OpenAC (Rust) 0.2.9 (2026-11-13)
 
 - A spell the server keeps refusing is now written to the client log once,
