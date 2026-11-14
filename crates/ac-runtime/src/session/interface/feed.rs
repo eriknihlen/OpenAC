@@ -21,7 +21,9 @@ impl ChatEntryView {
         let entry = state.communication.chat_entry();
         let targets = state.communication.targets();
         Self {
-            draft: entry.draft().to_owned(),
+            // A relay token being typed is never shown to a view (an
+            // attached browser sees the draft as it is typed).
+            draft: crate::communication::remote_command::masked_draft(entry.draft()).into_owned(),
             shown_revision: entry.shown_revision(),
             composed: entry.is_input_active(),
             channel: entry.active_channel(),

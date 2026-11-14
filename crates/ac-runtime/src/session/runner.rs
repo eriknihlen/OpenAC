@@ -214,6 +214,9 @@ pub enum HostEvent {
     /// A command could not be carried out (it named nothing known, the
     /// client's checks refused it, or it named an ended generation).
     CommandRefused(String),
+    /// The player typed `/remoteac`: a request for the host that owns the
+    /// session's relay link. It never reaches the server.
+    RemoteCommand(crate::communication::remote_command::RemoteCommand),
     /// Something the gameplay owners show (selection, spells, combat, book,
     /// fellowship, allegiance, house).
     Gameplay(Box<GameplayEvent>),

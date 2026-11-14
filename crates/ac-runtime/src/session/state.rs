@@ -951,6 +951,19 @@ impl SessionState {
         active: bool,
         clocks: Clocks,
     ) -> bool {
+        // `/remoteac` is the host's, before the plugins' interceptors see
+        // the line: it may carry the relay token.
+        if let Some(request) = crate::communication::remote_command::parse(line) {
+            match request {
+                Ok(command) => self.host_events.push(HostEvent::RemoteCommand(command)),
+                Err(answer) => self.communication.show_text(
+                    clocks.wall_unix_ms,
+                    &answer,
+                    ac_core::chat::LogTextType::Default,
+                ),
+            }
+            return true;
+        }
         if crate::communication::is_client_command(line) {
             return false;
         }
@@ -2737,6 +2750,48 @@ mod tests {
         assert!(outbox.is_empty());
         assert!(!is_status_verb("/statusx"));
         assert!(!is_status_verb("status"));
+    }
+
+    #[test]
+    fn remoteac_goes_to_the_host_and_never_to_the_server_the_chat_or_the_history() {
+        use crate::communication::ChatEntryCommand;
+        use crate::communication::remote_command::RemoteCommand;
+        let (mut state, mut outbox) = state();
+        let typed =
+            |line: &str| SessionCommand::ChatEntry(ChatEntryCommand::Submit(Some(line.to_owned())));
+        state.command(typed("/remoteac status"), &mut outbox, true, CLOCKS);
+        state.command(typed("/remoteac secret hunter2"), &mut outbox, true, CLOCKS);
+        state.command(
+            SessionCommand::Chat("@remoteac url \"wss://relay.example/ws\"".into()),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        state.command(typed("/remoteac hunter2"), &mut outbox, true, CLOCKS);
+        assert!(outbox.is_empty(), "nothing goes to the server");
+        let events = state.drain_host_events();
+        let requests: Vec<&RemoteCommand> = events
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::RemoteCommand(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(requests.len(), 3, "{events:?}");
+        assert_eq!(requests[0], &RemoteCommand::Status);
+        assert!(matches!(requests[1], RemoteCommand::Secret(s) if s.reveal() == "hunter2"));
+        assert_eq!(
+            requests[2],
+            &RemoteCommand::Url("wss://relay.example/ws".into())
+        );
+        // The mistyped line is answered with the help, which repeats nothing
+        // of it; no event shows the token, not even in its debug form.
+        let shown = format!("{events:?}");
+        assert!(!shown.contains("hunter2"), "{shown}");
+        assert!(shown.contains("/remoteac status"), "{shown}");
+        let entry = state.communication.chat_entry_mut();
+        assert_eq!(entry.count(), 1, "only /remoteac status is recalled");
+        assert_eq!(entry.recall_previous().as_deref(), Some("/remoteac status"));
     }
 
     #[test]
