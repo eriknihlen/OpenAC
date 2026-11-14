@@ -993,6 +993,57 @@ impl WindowUi {
         &self.mounted
     }
 
+    /// Show `window` alone, at the top left, every other window hidden:
+    /// the one window a page shows without a session. `panel` names it as
+    /// a main panel, which is shown through the panel switcher. The
+    /// inventory shows the paperdoll's slot view (the figure is a 3-D view
+    /// the page does not draw). Called every frame: whatever showed
+    /// another window meanwhile is undone. Where the window resizes it
+    /// fills `fill`, the canvas in UI units.
+    pub fn present_only(&mut self, window: &str, panel: Option<u32>, fill: (f32, f32)) {
+        let others: Vec<String> = self
+            .host
+            .root
+            .windows()
+            .iter()
+            .filter(|w| w.name != window)
+            .map(|w| w.name.clone())
+            .collect();
+        for name in others {
+            if self.host.root.is_window_visible(&name) {
+                self.host.root.hide_window(&name);
+            }
+        }
+        if !self.host.root.is_window_visible(window) {
+            match panel {
+                Some(panel) => {
+                    self.panels.set_visibility(&mut self.host.root, panel, true);
+                }
+                None => {
+                    self.host.root.show_window(window);
+                }
+            }
+        }
+        self.host.root.move_window(window, 0.0, 0.0);
+        self.host.root.resize_window(window, fill.0, fill.1);
+        if window == INVENTORY_WINDOW {
+            self.host
+                .with_controller::<InventoryWindowController, _>(INVENTORY_WINDOW, |c, ui| {
+                    c.paperdoll.set_slot_view(ui, true);
+                });
+        }
+    }
+
+    /// The size `window` was mounted at (its frame included), in UI
+    /// units.
+    #[must_use]
+    pub fn natural_size(&self, window: &str) -> Option<(f32, f32)> {
+        self.host
+            .root
+            .window(window)
+            .map(|w| (w.authored_width, w.authored_height))
+    }
+
     /// The UI host (input goes through [`WindowUi::key`] and
     /// [`super::input`]).
     pub fn host_mut(&mut self) -> &mut UiHost {

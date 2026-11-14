@@ -1,0 +1,377 @@
+{
+ "character": {
+  "character_name": "Offline Tester",
+  "level": 126,
+  "attributes": {
+   "strength": {
+    "base": 200,
+    "creation": 100
+   },
+   "endurance": {
+    "base": 180,
+    "creation": 100
+   },
+   "quickness": {
+    "base": 150,
+    "creation": 60
+   },
+   "coordination": {
+    "base": 160,
+    "creation": 60
+   },
+   "focus": {
+    "base": 140,
+    "creation": 40
+   },
+   "self": {
+    "base": 140,
+    "creation": 40
+   }
+  },
+  "encumbrance_capacity": 45000,
+  "burden_units": 12000,
+  "properties": {
+   "230": 0
+  }
+ },
+ "player_id": 1342177281,
+ "items": [
+  {
+   "Id": -2147483647,
+   "Icon": 5506,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 600,
+    "10": 6144,
+    "19": 360,
+    "218103809": 5506,
+    "218103810": 1342177281,
+    "218103822": 6144,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Chainmail Sleeves"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483646,
+   "Icon": 4014,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 420,
+    "10": 256,
+    "19": 70,
+    "218103809": 4014,
+    "218103810": 1342177281,
+    "218103822": 384,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Leather Boots"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483645,
+   "Icon": 4074,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 135,
+    "10": 64,
+    "19": 30,
+    "218103809": 4074,
+    "218103810": 1342177281,
+    "218103822": 196,
+    "218103834": 4
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Pants"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483644,
+   "Icon": 4080,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 75,
+    "10": 2,
+    "19": 15,
+    "218103809": 4080,
+    "218103810": 1342177281,
+    "218103822": 30,
+    "218103834": 4
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Shirt"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483643,
+   "Icon": 4044,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 270,
+    "10": 32,
+    "19": 0,
+    "218103809": 4044,
+    "218103810": 1342177281,
+    "218103822": 32,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Leather Gauntlets"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483642,
+   "Icon": 8400,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 450,
+    "10": 1048576,
+    "19": 2000,
+    "218103809": 8400,
+    "218103810": 1342177281,
+    "218103822": 1048576,
+    "218103834": 1
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Dagger of the Quiddity"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483392,
+   "Icon": 7087,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 15,
+    "19": 65,
+    "218103809": 7087,
+    "218103810": 1342177281,
+    "218103812": 24,
+    "218103813": 0,
+    "218103834": 512
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Backpack"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483641,
+   "Icon": 5506,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 600,
+    "19": 360,
+    "218103809": 5506,
+    "218103810": 1342177281,
+    "218103822": 6144,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Chainmail Sleeves"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483640,
+   "Icon": 4014,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 420,
+    "19": 70,
+    "218103809": 4014,
+    "218103810": 1342177281,
+    "218103822": 384,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Leather Boots"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483639,
+   "Icon": 4074,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 135,
+    "19": 30,
+    "218103809": 4074,
+    "218103810": 1342177281,
+    "218103822": 196,
+    "218103834": 4
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Pants"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483638,
+   "Icon": 4080,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 75,
+    "19": 15,
+    "218103809": 4080,
+    "218103810": 1342177281,
+    "218103822": 30,
+    "218103834": 4
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Shirt"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483637,
+   "Icon": 4044,
+   "ObjectClass": 0,
+   "ContainerId": 1342177281,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 270,
+    "19": 0,
+    "218103809": 4044,
+    "218103810": 1342177281,
+    "218103822": 32,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Leather Gauntlets"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483636,
+   "Icon": 5506,
+   "ObjectClass": 0,
+   "ContainerId": -2147483392,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 600,
+    "19": 360,
+    "218103809": 5506,
+    "218103810": -2147483392,
+    "218103822": 6144,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Chainmail Sleeves"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483635,
+   "Icon": 4014,
+   "ObjectClass": 0,
+   "ContainerId": -2147483392,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 420,
+    "19": 70,
+    "218103809": 4014,
+    "218103810": -2147483392,
+    "218103822": 384,
+    "218103834": 2
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Leather Boots"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  },
+  {
+   "Id": -2147483634,
+   "Icon": 4074,
+   "ObjectClass": 0,
+   "ContainerId": -2147483392,
+   "HasIdData": false,
+   "IntValues": {
+    "5": 135,
+    "19": 30,
+    "218103809": 4074,
+    "218103810": -2147483392,
+    "218103822": 196,
+    "218103834": 4
+   },
+   "DoubleValues": {},
+   "StringValues": {
+    "1": "Pants"
+   },
+   "BoolValues": {},
+   "ActiveSpells": [],
+   "Spells": []
+  }
+ ]
+}

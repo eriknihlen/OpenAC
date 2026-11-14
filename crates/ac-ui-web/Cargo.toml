@@ -30,10 +30,12 @@ ac-plugin-ui.workspace = true
 # The stream and the commands, and their encoding.
 ac-remote-wire.workspace = true
 ac-runtime.workspace = true
+# The window without a session reads its data as JSON.
+serde_json.workspace = true
+# The player object a window without a session puts in the world.
+ac-proto.workspace = true
 
 [dev-dependencies]
-# The stream a test session sends.
-ac-proto.workspace = true
 # The replay harness writes its pictures as PNG files.
 ac-bits.workspace = true
 
