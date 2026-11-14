@@ -22,6 +22,11 @@ use super::Outbox;
 use super::Queue;
 use super::Recall;
 use super::SessionCommand;
+use super::portal_failure::{PortalWait, PortalWorldState};
+use super::position_trail::{
+    Acceptance, PlayerNotFound, PositionTrail, SelfCastWatch, TrailEvent, TrailMessage,
+    TrailPosition, TrailStamps,
+};
 use super::runner::{HostEvent, ObjectSummary};
 use crate::character::{CharacterOptions, OPTIONS, option_id};
 use crate::communication::{
@@ -169,6 +174,13 @@ pub struct SessionState {
     /// The plugins' UI: their windows, canvases, images, labels and lines
     /// (session state a window only draws, `crate::plugins::ui`).
     pub plugin_ui: ac_plugin_ui::PluginUi,
+    /// The session time of the call being handled (the position trail is
+    /// stamped with it).
+    session_now: Duration,
+    /// The positions sent and received for the player lately.
+    position_trail: PositionTrail,
+    /// When a refused self cast reports the trail.
+    self_cast_watch: SelfCastWatch,
 }
 
 impl SessionState {
@@ -212,6 +224,9 @@ impl SessionState {
             plugin_lines: crate::plugins::PluginLines::default(),
             plugin_services: crate::plugins::PluginServices::default(),
             plugin_ui: ac_plugin_ui::PluginUi::new(),
+            session_now: Duration::ZERO,
+            position_trail: PositionTrail::default(),
+            self_cast_watch: SelfCastWatch::default(),
         }
     }
 
@@ -251,9 +266,18 @@ impl SessionState {
         clocks: Clocks,
     ) {
         self.wall_unix_ms = clocks.wall_unix_ms;
+        self.session_now = clocks.session;
         let selected = self.gameplay.selected_presence(&self.world);
         let mark = self.world.change_count();
+        // Only a message that can carry the player's position needs them.
+        let player_stamps = matches!(
+            message,
+            Inbound::UpdatePosition(_) | Inbound::CreateObject(_) | Inbound::UpdateObject(_)
+        )
+        .then(|| self.player_stamps())
+        .flatten();
         self.world.apply(message);
+        self.note_received_position(message, player_stamps);
         self.follow_transit(message);
         self.movement
             .observe(&mut self.world, message, mark, outbox, clocks.session);
@@ -334,8 +358,19 @@ impl SessionState {
             approach: None,
         };
         self.inventory.apply(message, &mut ctx);
+        let mut player_not_found = None;
         if let Some(code) = cast_use_done {
+            let answered = self.gameplay.spell_cast().last_completion().revision;
             self.gameplay.complete_cast_use(code);
+            let completion = self.gameplay.spell_cast().last_completion();
+            let player = self.world.player_guid().unwrap_or(0);
+            if completion.revision != answered
+                && self
+                    .self_cast_watch
+                    .observe(&completion, player, self.session_now)
+            {
+                player_not_found = Some(completion);
+            }
         }
         let teleporting =
             self.transit.is_teleport_active() || self.transit.has_pending_teleport_start();
@@ -365,6 +400,145 @@ impl SessionState {
             self.seed_options(&steps, outbox, active, clocks);
         }
         self.forward();
+        // After the cast's own line, so the log reads in order.
+        if let Some(completion) = player_not_found {
+            self.host_events
+                .push(HostEvent::PlayerNotFound(Box::new(PlayerNotFound {
+                    at: self.session_now,
+                    spell_id: completion.spell_id,
+                    target: completion.target_id,
+                    weenie_error: completion.weenie_error,
+                    trail: self.position_trail.snapshot(self.session_now),
+                })));
+        }
+    }
+
+    /// The local player's counters as the world has them now.
+    fn player_stamps(&self) -> Option<ac_core::physics::PhysicsTimestamps> {
+        let player = self.world.player_guid()?;
+        self.world.object(player).map(|o| o.timestamps())
+    }
+
+    /// A position the server sent for the player (or its teleport start)
+    /// joins the trail, with what the world did with it: `before` are the
+    /// player's counters before the world took the message.
+    fn note_received_position(
+        &mut self,
+        message: &Inbound<'_>,
+        before: Option<ac_core::physics::PhysicsTimestamps>,
+    ) {
+        let Some(player) = self.world.player_guid() else {
+            return;
+        };
+        let (message, position, stamps) = match message {
+            Inbound::PlayerTeleport(teleport) => {
+                self.position_trail.push(
+                    self.session_now,
+                    TrailEvent::TeleportStarted {
+                        teleport: teleport.teleport_sequence,
+                    },
+                );
+                return;
+            }
+            Inbound::UpdatePosition(update) if update.guid == player => (
+                TrailMessage::UpdatePosition,
+                &update.position,
+                TrailStamps {
+                    instance: update.instance_sequence,
+                    position: Some(update.position_sequence),
+                    server_control: None,
+                    teleport: update.teleport_sequence,
+                    force_position: update.force_position_sequence,
+                },
+            ),
+            Inbound::CreateObject(create) | Inbound::UpdateObject(create)
+                if create.guid == player =>
+            {
+                let Some(position) = &create.physics.position else {
+                    return;
+                };
+                let kind = if matches!(message, Inbound::CreateObject(_)) {
+                    TrailMessage::CreateObject
+                } else {
+                    TrailMessage::UpdateObject
+                };
+                let ts = create.physics.timestamps;
+                (
+                    kind,
+                    position,
+                    TrailStamps {
+                        instance: ts.instance,
+                        position: Some(ts.position),
+                        server_control: None,
+                        teleport: ts.teleport,
+                        force_position: ts.force_position,
+                    },
+                )
+            }
+            _ => return,
+        };
+        let after = self.player_stamps();
+        let acceptance = match (before, after) {
+            (_, None) => Acceptance::NoObject,
+            (None, Some(_)) => Acceptance::Taken,
+            // A description sent again replaces the object outright.
+            _ if message == TrailMessage::UpdateObject => Acceptance::Taken,
+            (Some(before), Some(after)) => {
+                if before.instance != after.instance {
+                    Acceptance::Taken
+                } else if before.force_position != after.force_position
+                    && after.force_position == stamps.force_position
+                    && after.teleport == before.teleport
+                {
+                    Acceptance::Forced
+                } else if before.position == after.position {
+                    Acceptance::Refused
+                } else {
+                    Acceptance::Taken
+                }
+            }
+        };
+        self.position_trail.push(
+            self.session_now,
+            TrailEvent::Received {
+                message,
+                position: TrailPosition::from(position),
+                stamps,
+                acceptance,
+            },
+        );
+    }
+
+    /// The positions the movement owner sent since the last call join the
+    /// trail, stamped with the time of the call being handled.
+    fn follow_sent_positions(&mut self) {
+        let at = self.session_now;
+        for record in self.movement.drain_sent_positions() {
+            let message = match record.kind {
+                crate::movement::OutboundKind::MoveToState => TrailMessage::MoveToState,
+                crate::movement::OutboundKind::AutonomousPosition => {
+                    TrailMessage::AutonomousPosition
+                }
+                crate::movement::OutboundKind::Jump => TrailMessage::Jump,
+            };
+            let stamps = record.timestamps;
+            self.position_trail.push(
+                at,
+                TrailEvent::Sent {
+                    message,
+                    action: record.sequence,
+                    position: TrailPosition::from(&record.position),
+                    stamps: TrailStamps {
+                        instance: stamps.instance,
+                        position: None,
+                        server_control: Some(stamps.server_control),
+                        teleport: stamps.teleport,
+                        force_position: stamps.force_position,
+                    },
+                    contact: record.contact,
+                },
+            );
+        }
     }
 
     /// Portal space follows the server: its teleport start queues and (with
@@ -525,6 +699,13 @@ impl SessionState {
                 teleport_sequence,
                 destination_cell,
             });
+            self.position_trail.push(
+                self.session_now,
+                TrailEvent::TeleportArrived {
+                    teleport: teleport_sequence,
+                    cell_id: destination_cell,
+                },
+            );
         }
         self.transit.end_teleport();
     }
@@ -778,6 +959,50 @@ impl SessionState {
             .collect()
     }
 
+    /// The wait portal space is in, if it is in one: a teleport under way,
+    /// or the character's entry while login complete has not gone. The log
+    /// out's portal space is not a wait (its confirmation has a limit of
+    /// its own).
+    #[must_use]
+    pub fn portal_wait(&self) -> Option<PortalWait> {
+        if self.transit.is_teleport_active() {
+            return Some(PortalWait::Teleport);
+        }
+        match self.login_entry {
+            LoginEntry::Entering | LoginEntry::Held { .. } => Some(PortalWait::Login),
+            LoginEntry::Idle | LoginEntry::Passed => None,
+        }
+    }
+
+    /// What the world and the arrival look like now, for the record of a
+    /// portal space that did not end.
+    #[must_use]
+    pub fn portal_world_state(&self) -> PortalWorldState {
+        let player_guid = self.world.player_guid();
+        let mut parse_failures = self.world.parse_failures().clone();
+        for (code, count) in self.communication.parse_failures() {
+            *parse_failures.entry(*code).or_default() += count;
+        }
+        PortalWorldState {
+            teleport_sequence: self.transit.active_teleport_sequence(),
+            reveal: self.transit.snapshot(),
+            stale_acknowledgements: self.transit.rejection_count(),
+            player_guid,
+            player_object: player_guid.is_some_and(|guid| self.world.object(guid).is_some()),
+            player_described: self.world.player().is_some(),
+            objects: self.world.object_count(),
+            parse_failures,
+            window_attached: self.window_attached,
+            window_minimized: self.plugin_services.window_minimized,
+            held_for_window: self.held_arrival.is_some()
+                || matches!(self.login_entry, LoginEntry::Held { .. }),
+            held_for_collision: self.destination_hold.is_some(),
+            collision_ready: self.movement.destination_collision_ready(),
+            simulates_world: self.movement.has_content(),
+            player_placed: self.movement.controller().is_some(),
+        }
+    }
+
     /// Whether the player is a player killer (the longer log-out hold).
     #[must_use]
     pub fn is_player_killer(&self) -> bool {
@@ -813,6 +1038,9 @@ impl SessionState {
         self.portal_events.clear();
         self.last_tick = None;
         self.forward();
+        self.position_trail
+            .push(self.session_now, TrailEvent::GenerationEnded);
+        self.self_cast_watch.rearm();
     }
 
     /// The inventory's auto-wield follows the combat owner: a stance the
@@ -874,6 +1102,7 @@ impl SessionState {
     /// advance, and the positions reach the world.
     pub fn advance_movement(&mut self, outbox: &mut Outbox, in_world: bool, clocks: Clocks) {
         self.wall_unix_ms = clocks.wall_unix_ms;
+        self.session_now = clocks.session;
         if in_world {
             // A walk moves the body through the scripted moves the input
             // source reads next.
@@ -1005,6 +1234,7 @@ impl SessionState {
         clocks: Clocks,
         act: impl FnOnce(&mut crate::navigation::RuntimeSurface<'_, '_>) -> R,
     ) -> R {
+        self.session_now = clocks.session;
         let in_world = active && self.world.player_guid().is_some();
         let Self {
             world,
@@ -1025,6 +1255,7 @@ impl SessionState {
     /// the options block saves itself when its time is due.
     pub fn tick(&mut self, outbox: &mut Outbox, in_world: bool, clocks: Clocks) {
         self.wall_unix_ms = clocks.wall_unix_ms;
+        self.session_now = clocks.session;
         let elapsed = self
             .last_tick
             .map_or(Duration::ZERO, |last| clocks.session.saturating_sub(last));
@@ -1203,6 +1434,7 @@ impl SessionState {
     ) -> Option<SessionCommand> {
         let wall = clocks.wall_unix_ms;
         self.wall_unix_ms = wall;
+        self.session_now = clocks.session;
         match command {
             SessionCommand::Item(ItemCommand::GiveSelectedToPrevious { amount }) => {
                 self.give_selection_to_previous(amount, outbox, active, clocks);
@@ -2157,6 +2389,7 @@ impl SessionState {
     }
 
     fn forward(&mut self) {
+        self.follow_sent_positions();
         self.follow_destruction_queue();
         // A pose in speech plays on the body; a refusal is silent.
         for motion in self.communication.take_pose_motions() {
@@ -3529,6 +3762,54 @@ mod tests {
             state.end_generation(0);
             assert!(state.portal_space_now().is_empty());
         }
+    }
+
+    // This client's own rule (the limit on portal space): a teleport and
+    // the character's entry are waits, to their end. The log out's portal
+    // space (the test after this one) is not.
+    #[test]
+    fn a_teleport_and_an_entry_are_portal_waits_to_their_end() {
+        let (mut state, mut outbox) = in_portal_space(true, 1);
+        assert_eq!(state.portal_wait(), Some(PortalWait::Teleport));
+        arrive_at(&mut state, &mut outbox, 1, DESTINATION);
+        assert_eq!(
+            state.portal_wait(),
+            Some(PortalWait::Teleport),
+            "the arrival waits for the window"
+        );
+        let world = state.portal_world_state();
+        assert!(world.window_attached && world.held_for_window);
+        assert!(!world.held_for_collision);
+        assert_eq!(world.teleport_sequence, 1);
+        assert_eq!(world.reveal.destination_cell(), DESTINATION);
+        assert_eq!(world.player_guid, Some(TRAVELLER));
+        assert!(world.player_object);
+        state.set_window_attached(false, &mut outbox);
+        assert_eq!(state.portal_wait(), None, "the arrival completed");
+
+        let (mut entry, _outbox) = entering(true);
+        assert_eq!(entry.portal_wait(), Some(PortalWait::Login));
+        assert!(!entry.portal_world_state().player_object);
+        assert!(entry.hold_login(LOGIN_CELL));
+        assert_eq!(entry.portal_wait(), Some(PortalWait::Login));
+        assert!(entry.portal_world_state().held_for_window);
+        entry.follow_entry(false);
+        assert_eq!(entry.portal_wait(), None, "login complete went");
+    }
+
+    #[test]
+    fn the_log_outs_portal_space_is_not_a_portal_wait() {
+        let (mut state, mut outbox) = state();
+        state.set_window_attached(true, &mut outbox);
+        assert!(state.transit.try_begin_logout_request(false));
+        let later = Clocks {
+            session: CLOCKS.session + Duration::from_secs(4),
+            ..CLOCKS
+        };
+        state.tick(&mut outbox, true, CLOCKS);
+        state.tick(&mut outbox, true, later);
+        assert_eq!(state.portal_space_now(), [PortalSpaceEvent::LogoutStarted]);
+        assert_eq!(state.portal_wait(), None);
     }
 
     const ENTERING: u32 = 0x5000_000C;
@@ -5316,6 +5597,198 @@ mod list_tests {
                 .drain_host_events()
                 .iter()
                 .any(|e| matches!(e, HostEvent::CommandRefused(_)))
+        );
+    }
+}
+
+#[cfg(test)]
+mod player_not_found_tests {
+    //! The position trail wired to the session: what the server sent for
+    //! the player, and the self cast's refusal that reports it.
+
+    use super::*;
+    use crate::session::{TARGET_NOT_ACQUIRED, TrailEvent, TrailMessage};
+    use crate::world::tests::{create, empty_description, game_event, position, stamps};
+    use ac_core::spells::{SpellFlags, SpellMetadata, SpellTable};
+
+    const PLAYER: u32 = 0x5000_000C;
+    const CELL: u32 = 0xA9B4_0031;
+
+    fn clocks(seconds: u64) -> Clocks {
+        Clocks {
+            wall_unix_ms: 1_790_000_000_000,
+            session: Duration::from_secs(seconds),
+        }
+    }
+
+    fn moved(position_sequence: u16, x: f32) -> Inbound<'static> {
+        Inbound::UpdatePosition(ac_proto::UpdatePosition {
+            guid: PLAYER,
+            flags: 0,
+            position: position(CELL, x),
+            velocity: None,
+            placement_id: None,
+            instance_sequence: 1,
+            position_sequence,
+            teleport_sequence: 0,
+            force_position_sequence: 0,
+        })
+    }
+
+    /// A player in the world who knows one self spell and needs no
+    /// components for it.
+    fn caster() -> (SessionState, Outbox) {
+        let mut state = SessionState::new(CommunicationPaths::default());
+        let mut outbox = Outbox::new();
+        enter(&mut state, &mut outbox, 10);
+        (state, outbox)
+    }
+
+    /// The player enters the world at `at` seconds, knowing one self spell
+    /// and needing no components for it.
+    fn enter(state: &mut SessionState, outbox: &mut Outbox, at: u64) {
+        let spell = SpellMetadata {
+            flags: SpellFlags::SELF_TARGETED,
+            ..SpellMetadata::new(2, "Strength Self I", 1)
+        };
+        state
+            .world
+            .install_player_rules(Arc::new(SpellTable::create([spell]).unwrap()), None);
+        state.world.set_player(PLAYER);
+        state.apply(
+            &create(PLAYER, stamps(1, 1), Some(position(CELL, 1.0))),
+            outbox,
+            true,
+            clocks(at),
+        );
+        let mut description = empty_description();
+        description.spells.insert(2, 0.0);
+        state.world.apply_player_description(&description);
+        crate::gameplay::magic::apply_description(&mut state.world, &description, 0.0);
+        state.apply(
+            &Inbound::PrivateUpdatePropertyBool(ac_proto::PrivateUpdatePropertyBool {
+                sequence: 1,
+                property: PropertyBool::SPELL_COMPONENTS_REQUIRED.0,
+                value: false,
+            }),
+            outbox,
+            true,
+            clocks(at),
+        );
+    }
+
+    /// The self spell cast at `at` seconds and answered with `error`: the
+    /// report it brought, if any.
+    fn cast_answered(
+        state: &mut SessionState,
+        outbox: &mut Outbox,
+        error: u32,
+        at: u64,
+    ) -> Option<PlayerNotFound> {
+        state.command(
+            SessionCommand::Gameplay(GameplayCommand::Cast {
+                spell: "2".into(),
+                target: None,
+            }),
+            outbox,
+            true,
+            clocks(at),
+        );
+        let body = game_event(GameEventType::USE_DONE, &[error]);
+        state.apply(&Inbound::parse(&body).unwrap(), outbox, true, clocks(at));
+        state
+            .drain_host_events()
+            .into_iter()
+            .find_map(|event| match event {
+                HostEvent::PlayerNotFound(lost) => Some(*lost),
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn the_first_refused_self_cast_reports_the_positions_the_server_sent() {
+        let (mut state, mut outbox) = caster();
+        state.apply(&moved(2, 3.0), &mut outbox, true, clocks(20));
+        // An older position the world refuses.
+        state.apply(&moved(1, 9.0), &mut outbox, true, clocks(21));
+        assert!(cast_answered(&mut state, &mut outbox, 0, 22).is_none());
+        let lost = cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 23)
+            .expect("the first refusal reports");
+        assert_eq!(
+            (lost.at, lost.spell_id, lost.target, lost.weenie_error),
+            (Duration::from_secs(23), 2, PLAYER, TARGET_NOT_ACQUIRED)
+        );
+        let received: Vec<_> = lost
+            .trail
+            .iter()
+            .filter_map(|entry| match entry.event {
+                TrailEvent::Received {
+                    message,
+                    position,
+                    stamps,
+                    acceptance,
+                } => Some((
+                    entry.at.as_secs(),
+                    message,
+                    position.cell_id,
+                    position.origin[0],
+                    stamps.position,
+                    acceptance,
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            received,
+            [
+                (
+                    10,
+                    TrailMessage::CreateObject,
+                    CELL,
+                    1.0,
+                    Some(1),
+                    Acceptance::Taken
+                ),
+                (
+                    20,
+                    TrailMessage::UpdatePosition,
+                    CELL,
+                    3.0,
+                    Some(2),
+                    Acceptance::Taken
+                ),
+                (
+                    21,
+                    TrailMessage::UpdatePosition,
+                    CELL,
+                    9.0,
+                    Some(1),
+                    Acceptance::Refused
+                ),
+            ]
+        );
+        // Once per episode, until a self cast goes through again.
+        assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 24).is_none());
+        assert!(cast_answered(&mut state, &mut outbox, 0, 25).is_none());
+        // After the report interval, the next episode is reported again.
+        assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 623).is_some());
+    }
+
+    #[test]
+    fn a_new_generation_reports_the_next_refusal_again() {
+        let (mut state, mut outbox) = caster();
+        assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 20).is_some());
+        assert!(cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 21).is_none());
+        state.apply(&moved(3, 4.0), &mut outbox, true, clocks(590));
+        state.end_generation(0);
+        enter(&mut state, &mut outbox, 600);
+        let lost = cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 640)
+            .expect("a new generation re-arms the report");
+        assert!(
+            lost.trail
+                .iter()
+                .any(|entry| entry.event == TrailEvent::GenerationEnded),
+            "the trail marks where the generation ended"
         );
     }
 }

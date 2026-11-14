@@ -25,6 +25,8 @@ ac-plugin-manifest.workspace = true
 ac-plugin-net.workspace = true
 # Decodes a plugin's own JPEG art with the dat texture decoder (image_codec).
 ac-dat.workspace = true
+# Decodes a plugin's own WebP art (image_codec).
+image-webp.workspace = true
 # .NET's `StringComparer.OrdinalIgnoreCase`, the order storage listings are sorted in.
 openac-plugin-compat.workspace = true
 thiserror.workspace = true

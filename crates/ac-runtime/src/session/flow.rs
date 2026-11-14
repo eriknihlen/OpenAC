@@ -104,6 +104,13 @@ pub enum SessionError {
     /// The server did not get ready for the character in time.
     #[error("enter world timed out: server ready not received")]
     EnterWorldTimeout,
+    /// The session stayed in portal space (entering the world, or in a
+    /// teleport) for longer than this client allows.
+    #[error("portal space did not end within {limit_seconds} s")]
+    PortalSpaceTimeout {
+        /// The limit it ran over, in whole seconds.
+        limit_seconds: u64,
+    },
     /// A request came at a time it does not fit.
     #[error("{request} is not possible while {phase:?}")]
     WrongPhase {
@@ -881,6 +888,18 @@ impl SessionFlow {
         }
         self.pending_enter_world = None;
         self.fail(SessionError::ConnectionLost);
+    }
+
+    /// Portal space lasted longer than `limit`: the connection ends, as it
+    /// does when the server is found gone.
+    pub fn fail_portal_space(&mut self, limit: Duration) {
+        if matches!(self.phase, Phase::LoggedOff | Phase::Failed) {
+            return;
+        }
+        self.pending_enter_world = None;
+        self.fail(SessionError::PortalSpaceTimeout {
+            limit_seconds: limit.as_secs(),
+        });
     }
 
     fn on_character_error(&mut self, error: CharacterError) {

@@ -45,7 +45,7 @@ use crate::session::Outbox;
 use crate::world::World;
 use crate::world::liveness::QueueNote;
 
-pub use actions::{REQUEST_NOT_SENT, plan_join_stack, target_compatible};
+pub use actions::{REQUEST_NOT_SENT, plan_join_stack, target_compatible, use_waits_for_target};
 pub use approach::{
     APPROACH_NEVER_COMPLETED, ApproachCompletion, ApproachPlan, ApproachSource, ApproachToken,
     CHARGE_DISTANCE, DEFAULT_USE_RADIUS, STALLED_APPROACH_GIVE_UP_TICKS,

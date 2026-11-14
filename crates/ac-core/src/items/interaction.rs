@@ -296,6 +296,15 @@ pub fn determine_use_result(
     ItemPrimaryUseResult::None
 }
 
+/// Whether a double-click carries out `primary` itself (picking up,
+/// wielding in the right hand, sorting, trading, salvaging or joining a
+/// game) instead of the item's own use. A left-hand wield is not one of
+/// them.
+#[must_use]
+pub fn is_classified_use(primary: ItemPrimaryUseResult) -> bool {
+    (ItemPrimaryUseResult::PlaceInBackpack..=ItemPrimaryUseResult::BeginGame).contains(&primary)
+}
+
 /// Using an item: the readiness and vendor gates, the primary
 /// classification, then trade and wield gates, target mode or a use with
 /// the selected target, the confirmations, a plain use, and finally the
@@ -312,9 +321,7 @@ pub fn decide_use(input: &ItemUsePolicyInput) -> ItemUsePolicyDecision {
 
     if !input.bypass_classification {
         let primary = determine_use_result(source, input.player_id, input.ground_object_id);
-        if (ItemPrimaryUseResult::PlaceInBackpack..=ItemPrimaryUseResult::BeginGame)
-            .contains(&primary)
-        {
+        if is_classified_use(primary) {
             return consumed(build_using_item_actions(
                 source,
                 input.ground_object_id,

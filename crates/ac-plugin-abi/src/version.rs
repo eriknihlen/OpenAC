@@ -13,7 +13,7 @@ pub use ac_plugin_version::version::{
 };
 
 /// The API version this build of the ABI provides.
-pub const API_CURRENT: ApiVersion = ApiVersion::new(1, 12);
+pub const API_CURRENT: ApiVersion = ApiVersion::new(1, 13);
 
 /// The oldest API version a client built on this ABI still loads.
 pub const API_MINIMUM: ApiVersion = ApiVersion::new(1, 0);
@@ -41,11 +41,11 @@ mod tests {
             API_CURRENT.minor + 1
         )));
         assert!(!is_supported(ApiVersion::new(0, 9)));
-        assert_eq!(API_CURRENT.to_string(), "1.12");
+        assert_eq!(API_CURRENT.to_string(), "1.13");
         assert_eq!(API_MINIMUM.to_string(), "1.0");
         assert_eq!(
             API_RANGE.to_file_text(),
-            "{\"schemaVersion\":1,\"minimum\":\"1.0\",\"current\":\"1.12\"}\n"
+            "{\"schemaVersion\":1,\"minimum\":\"1.0\",\"current\":\"1.13\"}\n"
         );
     }
 }

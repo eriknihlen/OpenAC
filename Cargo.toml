@@ -5,7 +5,7 @@ exclude = ["vendor"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.6"
+version = "0.2.9"
 edition = "2024"
 rust-version = "1.95"
 publish = false
@@ -153,6 +153,12 @@ regex-automata = { version = "0.4.18", default-features = false, features = ["st
 # stb_truetype does (the glyf header boxes, hhea), and `opentype-layout` reads kerning from GPOS.
 fontdue = { version = "0.9.4", default-features = false }
 ttf-parser = { version = "0.25.1", default-features = false, features = ["opentype-layout"] }
+# WebP decoding for a plugin's own images (ac-plugin's image_codec): lossy (VP8), lossless (VP8L)
+# and the extended format with alpha and animation. image-rs's pure-Rust decoder, `forbid(unsafe_code)`,
+# no build script, fuzzed upstream; its two dependencies (byteorder-lite, quick-error) are pure Rust
+# too. The other plugin image formats are written here from their specifications; WebP's two
+# codecs are far larger, so the maintained crate is used instead. MIT OR Apache-2.0.
+image-webp = "0.2.4"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

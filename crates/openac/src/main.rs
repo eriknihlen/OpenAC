@@ -7,6 +7,7 @@ mod movement_verbs;
 mod multi;
 mod options;
 mod plugins;
+mod portal_failure;
 mod remote;
 mod remote_settings;
 mod session_config;
@@ -271,6 +272,9 @@ fn run_session(
 
     let mut in_world_since: Option<Instant> = None;
     let mut shutdown_sent = false;
+    // Who the session is in the world as (a portal failure's record names it).
+    let mut character: Option<String> = None;
+    let mut fold = console::RepeatFold::default();
     let summary = loop {
         if let (Some(since), Some(duration)) = (in_world_since, options.duration)
             && !shutdown_sent
@@ -285,8 +289,9 @@ fn run_session(
         }
         match handle.next_event(Duration::from_millis(250)) {
             Some(HostEvent::Session(event)) => {
-                if matches!(event, SessionEvent::EnteredWorld(_)) {
+                if let SessionEvent::EnteredWorld(entered) = &event {
                     in_world_since = Some(Instant::now());
+                    character = Some(entered.name.clone());
                 }
                 log.session_event(&event);
             }
@@ -317,6 +322,26 @@ fn run_session(
                     outln!("{line}");
                 }
             }
+            Some(HostEvent::PortalFailure(failure)) => {
+                // The log keeps what was missing; the shared file in the log
+                // folder keeps all of it.
+                log.warn(&portal_failure::summary(&failure));
+                if let Some(paths) = &paths {
+                    let record = portal_failure::PortalFailureLog::new(
+                        paths.logs_directory(),
+                        options.server.to_string(),
+                        &options.account,
+                    );
+                    match record.record("session", character.as_deref(), &[], &failure) {
+                        Ok(file) => {
+                            log.info(&format!("portal failure: recorded in {}", file.display()));
+                        }
+                        Err(error) => {
+                            log.warn(&format!("portal failure: not recorded ({error})"));
+                        }
+                    }
+                }
+            }
             Some(HostEvent::Ended(summary)) => break summary,
             None if handle.is_finished() => {
                 // The session thread stopped without ending: it faulted
@@ -327,7 +352,9 @@ fn run_session(
             }
             Some(other) => {
                 for line in console::event_lines(&other, None) {
-                    outln!("{line}");
+                    for line in fold.take(line, Instant::now()) {
+                        outln!("{line}");
+                    }
                 }
             }
             None => {}

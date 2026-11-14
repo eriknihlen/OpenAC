@@ -38,6 +38,9 @@ use super::diagnostics::{
 };
 use super::generation::{Generation, Lifecycle, LifecycleState};
 use super::interface::{InterfaceEvent, InterfaceFeed};
+use super::portal_failure::{
+    InboundNote, PORTAL_SPACE_LIMIT, PortalFailure, PortalWatch, RecentInbound,
+};
 use super::pregame::{
     ConnectionStatus, ConnectionView, PreGameEvent, PreGamePresenter, PreGameSource,
     connection_status,
@@ -230,6 +233,15 @@ pub enum HostEvent {
     /// The server fell silent with no window attached: the session logs in
     /// again, or an attempt to log in again failed.
     Relogin(Relogin),
+    /// Portal space lasted longer than this client allows: what the session
+    /// knew at that moment. Its connection ends next (a session with no
+    /// window attached logs in again, one with a window ends).
+    PortalFailure(Box<PortalFailure>),
+    /// The server answered a spell the player cast at themselves as if the
+    /// player were not there, the first time since such a cast went
+    /// through: the positions sent and received for the player just
+    /// before.
+    PlayerNotFound(Box<super::PlayerNotFound>),
     /// The session ended; nothing follows.
     Ended(SessionSummary),
 }
@@ -428,12 +440,15 @@ struct Timing {
     server_silence: Duration,
     /// The wait before each attempt to log in again after a loss.
     relogin_interval: Duration,
+    /// How long portal space may last before the connection is ended.
+    portal_space: Duration,
 }
 
 impl Timing {
     const GAME: Self = Self {
         server_silence: ac_net::SERVER_SILENCE_TIMEOUT,
         relogin_interval: LOST_CONNECTION_RETRY_INTERVAL,
+        portal_space: PORTAL_SPACE_LIMIT,
     };
 }
 
@@ -665,6 +680,9 @@ fn run(
                     plugin_feed_closed: false,
                     ended_by: None,
                     logged_in: false,
+                    portal_watch: PortalWatch::new(timing.portal_space),
+                    portal_limit: timing.portal_space,
+                    recent_inbound: RecentInbound::default(),
                 };
                 if let Some(window) = connecting.window.take() {
                     session.dispatch(
@@ -1078,6 +1096,13 @@ struct Drive<'a> {
     /// (or, for a session started without a character, at character
     /// selection waiting for the player; for a probe, the character list).
     logged_in: bool,
+    /// Times the stay in portal space.
+    portal_watch: PortalWatch,
+    /// How long that stay may last.
+    portal_limit: Duration,
+    /// The latest inbound messages (what they were, not what they said),
+    /// for the record of a portal space that did not end.
+    recent_inbound: RecentInbound,
 }
 
 impl Drive<'_> {
@@ -1281,6 +1306,9 @@ impl Drive<'_> {
             if let Some(error) = self.forward() {
                 return self.end_with(error);
             }
+            if let Some(end) = self.watch_portal_space(driver, connection, pending.len()) {
+                return end;
+            }
             let now_lifecycle = self.lifecycle();
             // `/status` reads where the session is in its life.
             self.state.lifecycle_state = now_lifecycle.state;
@@ -1301,6 +1329,51 @@ impl Drive<'_> {
                 _ => {}
             }
         }
+    }
+
+    /// Portal space (the character's entry, or a teleport) that has lasted
+    /// longer than the limit ends the connection: the host hears what the
+    /// session knew, then the connection ends as it does when the server is
+    /// found gone (with no window attached the session logs in again, with
+    /// one it ends). A session already asked to end is left to end.
+    fn watch_portal_space(
+        &mut self,
+        driver: &UdpDriver,
+        connection: &Connection,
+        unhandled_inbound: usize,
+    ) -> Option<Result<DriveEnd, String>> {
+        let now = driver.now().as_duration();
+        let wait = self
+            .state
+            .portal_wait()
+            .filter(|_| !self.shutdown_requested);
+        let waited = self.portal_watch.observe(wait.is_some(), now)?;
+        let wait = wait?;
+        let window_attached = self.attached.is_some();
+        let failure = PortalFailure {
+            wait,
+            waited,
+            limit: self.portal_limit,
+            at: now,
+            phase: self.flow.phase(),
+            login_complete_sent: self.flow.login_complete_sent(),
+            login_complete_held: self.flow.login_complete_held(),
+            world: self.state.portal_world_state(),
+            link: connection.snapshot(),
+            since_last_packet: now.saturating_sub(connection.last_packet_at().as_duration()),
+            unhandled_inbound,
+            recent: self.recent_inbound.to_vec(),
+        };
+        let _ = self
+            .events
+            .send(HostEvent::PortalFailure(Box::new(failure)));
+        self.flow.fail_portal_space(self.portal_limit);
+        let error = self.forward()?;
+        let next = after_loss(self.config.enter_world, window_attached, false);
+        if next == AfterLoss::LogInAgain {
+            return Some(Ok(DriveEnd::Lost));
+        }
+        Some(self.end_with(error))
     }
 
     /// The inbound messages of this pass, in order. In the world, handling
@@ -1324,7 +1397,18 @@ impl Drive<'_> {
         let mut effects: Vec<PresentationEvent> = Vec::new();
         while let Some(message) = pending.pop_front() {
             let now = driver.now().as_duration();
-            match Inbound::parse(&message.body) {
+            let parsed = Inbound::parse(&message.body);
+            self.recent_inbound.push(InboundNote {
+                at: now,
+                opcode: read_opcode(&message.body).unwrap_or(0),
+                game_event: match &parsed {
+                    Ok(Inbound::GameEvent(event)) => Some(event.event_type.0),
+                    _ => None,
+                },
+                bytes: message.body.len(),
+                parsed: parsed.is_ok(),
+            });
+            match parsed {
                 Ok(parsed) => {
                     self.dump(&parsed, message.body.len());
                     self.state.world_tap.inbound(&parsed, &message.body);

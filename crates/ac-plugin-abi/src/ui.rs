@@ -1113,8 +1113,9 @@ wire_record! {
 
 wire_record! {
     /// The plugin's own art as a file ([`crate::Import::UiImageDecode`]):
-    /// PNG, JPEG, BMP, TGA or GIF bytes, under the plugin's own name for
-    /// them. The client decodes them; a GIF gives its first frame.
+    /// PNG, JPEG, BMP, TGA, GIF or WebP bytes, under the plugin's own name
+    /// for them. The client decodes them; a GIF or an animated WebP gives
+    /// its first frame.
     pub struct EncodedImage {
         /// The plugin's name for the image (unique within the plugin, such
         /// as its file path).

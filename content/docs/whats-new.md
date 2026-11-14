@@ -12,6 +12,35 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.9 (2026-11-13)
+
+- A spell the server keeps refusing is now written to the client log once,
+  then as one count a minute, instead of the same line several times a
+  second. A stuck caster used to fill the log so fast that everything
+  written before the trouble began was rotated away.
+- When the server answers a spell your character casts at itself with
+  "target not found" (the server has lost track of the character, which
+  then stands still until it logs in again), the client writes the
+  positions it sent and received in the last two minutes to its log, at
+  most once every ten minutes. This is to find out why it happens.
+
+## OpenAC (Rust) 0.2.8 (2026-11-12)
+
+- A weapon with a Left-hand Tether now goes into the off-hand when you
+  double-click it or use its hotkey, instead of replacing the weapon in your
+  main hand. Whatever holds the off-hand slot goes to your pack first, as
+  when you drop a weapon on that slot.
+
+## OpenAC (Rust) 0.2.7 (2026-11-12)
+
+- A session that stays in portal space for more than 60 seconds is now
+  ended and logs in again, instead of sitting there with an empty window
+  while the server still holds the character.
+- A plugin that uses a weapon or wand the character isn't holding, with no
+  target, now wields it, as a double-click does; a held one is put back in
+  the pack. This makes MossTank's way out of a stuck combat stance work: it
+  wields a wand to reset the stance.
+
 ## OpenAC (Rust) 0.2.6 (2026-11-11)
 
 - Navigation lines (auto-walk routes, `/nav route`, `/nav grid`) no longer

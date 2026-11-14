@@ -20,7 +20,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "ac-audio"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-dat",
  "cpal",
@@ -32,18 +32,18 @@ dependencies = [
 
 [[package]]
 name = "ac-bits"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "ac-clock"
-version = "0.2.6"
+version = "0.2.9"
 
 [[package]]
 name = "ac-core"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "glam",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "ac-dat"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "ac-host"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-host-core",
  "thiserror 2.0.21",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "ac-host-core"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "ac-launcher-core"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-host-core",
  "ac-plugin-icon",
@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "ac-launcher-net"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-host-core",
  "ac-launcher-core",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "ac-motion"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-dat",
  "glam",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "ac-nav"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-core",
  "ac-dat",
@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "ac-net"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "thiserror 2.0.21",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "ac-physics"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-core",
  "ac-dat",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "ac-dat",
@@ -156,6 +156,7 @@ dependencies = [
  "ac-plugin-manifest",
  "ac-plugin-net",
  "ac-plugin-ui",
+ "image-webp",
  "openac-plugin-compat",
  "sha2 0.11.0",
  "thiserror 2.0.21",
@@ -164,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-abi"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-plugin-ui",
  "ac-plugin-version",
@@ -172,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-icon"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "miniz_oxide",
  "thiserror 2.0.21",
@@ -180,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-manifest"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-host-core",
  "ac-plugin-version",
@@ -189,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-net"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-plugin-abi",
  "ac-proxy",
@@ -199,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-ui"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-plugin-icon",
  "fontdue",
@@ -210,11 +211,11 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-version"
-version = "0.2.6"
+version = "0.2.9"
 
 [[package]]
 name = "ac-proto"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "thiserror 2.0.21",
@@ -222,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "ac-proxy"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "sha2 0.11.0",
  "windows-sys 0.61.2",
@@ -230,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "ac-remote"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-host-core",
  "ac-remote-wire",
@@ -241,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "ac-remote-wire"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-clock",
  "ac-core",
@@ -260,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "ac-render"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-audio",
  "ac-bits",
@@ -291,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "ac-runtime"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "ac-clock",
@@ -314,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "ac-ui"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-clock",
  "ac-core",
@@ -331,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "ac-ui-web"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "ac-clock",
@@ -349,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "ac-ui-window"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-clock",
  "ac-core",
@@ -367,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "ac-vfx"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -387,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "actool"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "ac-dat",
@@ -679,6 +680,12 @@ dependencies = [
  "quote",
  "syn 3.0.8",
 ]
+
+[[package]]
+name = "byteorder-lite"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 
 [[package]]
 name = "bytes"
@@ -1711,6 +1718,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2497,7 +2514,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openac"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -2517,7 +2534,7 @@ dependencies = [
 
 [[package]]
 name = "openac-launcher"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-host-core",
  "ac-launcher-core",
@@ -2534,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-plugin-abi",
  "ac-plugin-ui",
@@ -2545,7 +2562,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin-compat"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "fancy-regex",
  "regex-automata",
@@ -2705,7 +2722,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plugincheck"
-version = "0.2.6"
+version = "0.2.9"
 dependencies = [
  "ac-host",
  "ac-launcher-core",
@@ -2815,6 +2832,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quick-xml"

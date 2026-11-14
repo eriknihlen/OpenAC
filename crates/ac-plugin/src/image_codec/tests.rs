@@ -1,6 +1,7 @@
 //! The plugin image formats (OpenAC `IPluginImages.FromStream`: "PNG,
-//! JPEG, BMP, TGA or GIF"). Files are built here byte by byte from the
-//! formats' specifications, each with the pixels it must give.
+//! JPEG, BMP, TGA or GIF", and WebP). Files are built here byte by byte from
+//! the formats' specifications, each with the pixels it must give; the WebP
+//! files are made by libwebp's tools from images described with their tests.
 
 use super::*;
 
@@ -503,4 +504,366 @@ fn jpeg_is_the_dat_texture_decoder_with_its_frame_size_read_alone() {
     assert_eq!((image.width, image.height), (8, 8));
     assert_eq!(image.rgba, reference.rgba);
     assert!(matches!(decode(&file[..40]), Err(CodecError::Jpeg(_))));
+}
+
+// ── WebP ────────────────────────────────────────────────────────────────
+//
+// Made with libwebp 1.6's `cwebp` and `img2webp` from PNGs whose pixels the
+// tests below spell out: `cwebp -lossless -exact` (lossless), `cwebp -q 90`
+// (lossy, lossy_alpha) and `img2webp -lossy -q 90` (animated, two frames).
+
+const WEBP_LOSSLESS: &[u8] = include_bytes!("../../tests/data/webp/lossless.webp");
+const WEBP_LOSSY: &[u8] = include_bytes!("../../tests/data/webp/lossy.webp");
+const WEBP_LOSSY_ALPHA: &[u8] = include_bytes!("../../tests/data/webp/lossy_alpha.webp");
+const WEBP_ANIMATED: &[u8] = include_bytes!("../../tests/data/webp/animated.webp");
+
+/// The lossless file's source: 7 x 5, no two pixels alike, alpha included.
+fn gradient_pixel(x: u8, y: u8) -> [u8; 4] {
+    [x * 36, y * 60, 255 - x * 20 - y * 10, 255 - (x + y * 7) * 7]
+}
+
+/// Whether `actual` is within `tolerance` of `expected` in every channel
+/// (lossy compression moves colours a little).
+fn near(actual: [u8; 4], expected: [u8; 4], tolerance: u8) -> bool {
+    actual
+        .iter()
+        .zip(expected)
+        .all(|(a, e)| a.abs_diff(e) <= tolerance)
+}
+
+#[test]
+fn lossless_webp_gives_its_source_pixel_for_pixel() {
+    assert_eq!(detect(WEBP_LOSSLESS), Some(ImageFormat::Webp));
+    assert_eq!(&WEBP_LOSSLESS[12..16], b"VP8L");
+    assert_eq!(dimensions(WEBP_LOSSLESS), Some((7, 5)));
+    let image = decode(WEBP_LOSSLESS).unwrap();
+    assert_eq!((image.width, image.height), (7, 5));
+    let source: Vec<u8> = (0..5)
+        .flat_map(|y| (0..7).flat_map(move |x| gradient_pixel(x, y)))
+        .collect();
+    assert_eq!(image.rgba, source);
+}
+
+#[test]
+fn lossy_webp_is_opaque_and_close_to_its_source() {
+    // 16 x 8: red left half, blue right half.
+    assert_eq!(detect(WEBP_LOSSY), Some(ImageFormat::Webp));
+    assert_eq!(&WEBP_LOSSY[12..16], b"VP8 ");
+    assert_eq!(dimensions(WEBP_LOSSY), Some((16, 8)));
+    let image = decode(WEBP_LOSSY).unwrap();
+    assert_eq!((image.width, image.height), (16, 8));
+    assert_eq!(image.rgba.len(), 16 * 8 * 4);
+    assert!(image.rgba.chunks_exact(4).all(|p| p[3] == 255));
+    for y in 0..8 {
+        assert!(
+            near(pixel(&image, 2, y), RED, 24),
+            "{:?}",
+            pixel(&image, 2, y)
+        );
+        assert!(
+            near(pixel(&image, 13, y), BLUE, 24),
+            "{:?}",
+            pixel(&image, 13, y)
+        );
+    }
+}
+
+#[test]
+fn lossy_webp_with_alpha_keeps_its_alpha_exactly() {
+    // 16 x 8 green: the left half opaque, the right half clear. The alpha
+    // plane is stored losslessly beside the lossy colour.
+    assert_eq!(detect(WEBP_LOSSY_ALPHA), Some(ImageFormat::Webp));
+    assert_eq!(&WEBP_LOSSY_ALPHA[12..16], b"VP8X");
+    assert_eq!(dimensions(WEBP_LOSSY_ALPHA), Some((16, 8)));
+    let image = decode(WEBP_LOSSY_ALPHA).unwrap();
+    assert_eq!((image.width, image.height), (16, 8));
+    for y in 0..8 {
+        for x in 0..16 {
+            let alpha = pixel(&image, x, y)[3];
+            assert_eq!(alpha, if x < 8 { 255 } else { 0 }, "({x}, {y})");
+        }
+        assert!(
+            near(pixel(&image, 2, y), GREEN, 24),
+            "{:?}",
+            pixel(&image, 2, y)
+        );
+    }
+}
+
+#[test]
+fn an_animated_webp_gives_its_first_frame() {
+    // 8 x 8: a red frame, then a blue one.
+    assert_eq!(detect(WEBP_ANIMATED), Some(ImageFormat::Webp));
+    assert_eq!(dimensions(WEBP_ANIMATED), Some((8, 8)));
+    let image = decode(WEBP_ANIMATED).unwrap();
+    assert_eq!((image.width, image.height), (8, 8));
+    for y in 0..8 {
+        for x in 0..8 {
+            assert!(
+                near(pixel(&image, x, y), RED, 24),
+                "{:?}",
+                pixel(&image, x, y)
+            );
+        }
+    }
+}
+
+#[test]
+fn webp_header_sizes_agree_with_the_decoded_images() {
+    for file in [WEBP_LOSSLESS, WEBP_LOSSY, WEBP_LOSSY_ALPHA, WEBP_ANIMATED] {
+        let image = decode(file).unwrap();
+        assert_eq!(dimensions(file), Some((image.width, image.height)));
+        // The size is read from the header alone.
+        assert_eq!(dimensions(&file[..30]), Some((image.width, image.height)));
+    }
+}
+
+#[test]
+fn a_webp_larger_than_the_budget_is_refused_from_its_header() {
+    // An extended header for 8192 x 8192 (64 Mi pixels) and nothing else.
+    let mut file = b"RIFF".to_vec();
+    file.extend_from_slice(&22u32.to_le_bytes());
+    file.extend_from_slice(b"WEBPVP8X");
+    file.extend_from_slice(&10u32.to_le_bytes());
+    file.extend_from_slice(&[0; 4]);
+    file.extend_from_slice(&[0xFF, 0x1F, 0x00, 0xFF, 0x1F, 0x00]);
+    assert_eq!(dimensions(&file), Some((8192, 8192)));
+    assert_eq!(decode(&file), Err(CodecError::TooLarge));
+}
+
+#[test]
+fn malformed_webps_are_errors_never_panics() {
+    // A RIFF file of another form is not WebP.
+    let mut wave = WEBP_LOSSY.to_vec();
+    wave[8..12].copy_from_slice(b"WAVE");
+    assert_eq!(detect(&wave), None);
+    assert_eq!(decode(&wave), Err(CodecError::UnknownFormat));
+    // A lossy frame without its start code.
+    let mut bent = WEBP_LOSSY.to_vec();
+    bent[23] = 0;
+    assert_eq!(dimensions(&bent), None);
+    assert!(decode(&bent).is_err());
+    // Cut short, with the pixels missing.
+    let half = &WEBP_LOSSLESS[..WEBP_LOSSLESS.len() / 2];
+    assert!(matches!(
+        decode(half),
+        Err(CodecError::Truncated("WebP") | CodecError::Corrupt("WebP", _))
+    ));
+    // Cut anywhere: an error, or (a lossy frame missing only the end of its
+    // last partition reads it as zeros) the image at its declared size.
+    // Every byte flipped in turn: never a panic.
+    for file in [WEBP_LOSSLESS, WEBP_LOSSY, WEBP_LOSSY_ALPHA, WEBP_ANIMATED] {
+        let size = dimensions(file).unwrap();
+        for end in 0..file.len() {
+            if let Ok(image) = decode(&file[..end]) {
+                assert_eq!((image.width, image.height), size, "{end} of {}", file.len());
+                assert_eq!(image.rgba.len(), (size.0 * size.1 * 4) as usize);
+            }
+        }
+        for at in 0..file.len() {
+            let mut bent = file.to_vec();
+            bent[at] ^= 0xA5;
+            let _ = decode(&bent);
+        }
+    }
+}
+
+/// A chunk: its name, payload size, payload and the pad to an even length.
+fn webp_chunk(name: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+    let mut v = name.to_vec();
+    v.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    v.extend_from_slice(payload);
+    if payload.len() % 2 == 1 {
+        v.push(0);
+    }
+    v
+}
+
+/// A WebP file of these chunks.
+fn webp_file(chunks: &[Vec<u8>]) -> Vec<u8> {
+    let body: Vec<u8> = chunks.concat();
+    let mut v = b"RIFF".to_vec();
+    v.extend_from_slice(&(4 + body.len() as u32).to_le_bytes());
+    v.extend_from_slice(b"WEBP");
+    v.extend_from_slice(&body);
+    v
+}
+
+/// The payload of the first chunk named `name` in a fixture.
+fn webp_payload<'a>(file: &'a [u8], name: &[u8; 4]) -> &'a [u8] {
+    let mut at = 12;
+    loop {
+        let size = u32::from_le_bytes(file[at + 4..at + 8].try_into().unwrap()) as usize;
+        if &file[at..at + 4] == name {
+            return &file[at + 8..at + 8 + size];
+        }
+        at += 8 + size + (size & 1);
+    }
+}
+
+fn le24(value: u32) -> [u8; 3] {
+    let b = value.to_le_bytes();
+    [b[0], b[1], b[2]]
+}
+
+/// An extended header: `flags`, then the canvas size.
+fn vp8x(flags: u8, width: u32, height: u32) -> Vec<u8> {
+    let mut payload = vec![flags, 0, 0, 0];
+    payload.extend_from_slice(&le24(width - 1));
+    payload.extend_from_slice(&le24(height - 1));
+    webp_chunk(b"VP8X", &payload)
+}
+
+/// An animation of one frame at the canvas's corner, declared `width` x
+/// `height`, holding `inner` chunks.
+fn one_frame_animation(canvas: (u32, u32), width: u32, height: u32, inner: &[Vec<u8>]) -> Vec<u8> {
+    // Alpha (0x10) and animation (0x02).
+    let header = vp8x(0x12, canvas.0, canvas.1);
+    let anim = webp_chunk(b"ANIM", &[0; 6]);
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&le24(0));
+    frame.extend_from_slice(&le24(0));
+    frame.extend_from_slice(&le24(width - 1));
+    frame.extend_from_slice(&le24(height - 1));
+    frame.extend_from_slice(&le24(100));
+    // Not blended onto the (clear) canvas, so its pixels come out as they
+    // are; blending rounds a partly clear pixel's colour.
+    frame.push(0x02);
+    frame.extend_from_slice(&inner.concat());
+    webp_file(&[header, anim, webp_chunk(b"ANMF", &frame)])
+}
+
+/// An uncompressed alpha chunk (a header byte of 0, then one byte a
+/// pixel): opaque in the left half, clear in the right.
+fn raw_alpha(width: u32, height: u32) -> Vec<u8> {
+    let mut payload = vec![0];
+    for _ in 0..height {
+        payload.extend((0..width).map(|x| if x < width / 2 { 255 } else { 0 }));
+    }
+    webp_chunk(b"ALPH", &payload)
+}
+
+#[test]
+fn an_animation_frame_with_alpha_decodes_at_its_declared_size_only() {
+    // lossy_alpha's 16 x 8 colour, with its alpha, as an animation's frame.
+    let colour = webp_chunk(b"VP8 ", webp_payload(WEBP_LOSSY_ALPHA, b"VP8 "));
+    let file = one_frame_animation((16, 8), 16, 8, &[raw_alpha(16, 8), colour.clone()]);
+    let image = decode(&file).unwrap();
+    assert_eq!((image.width, image.height), (16, 8));
+    assert_eq!(pixel(&image, 2, 3)[3], 255);
+    assert_eq!(pixel(&image, 13, 3)[3], 0);
+    // The frame and its alpha declared 8 x 8 while its colour is 16 x 8:
+    // the decoder would write the larger frame into the smaller buffer.
+    let file = one_frame_animation((16, 8), 8, 8, &[raw_alpha(8, 8), colour]);
+    assert!(matches!(decode(&file), Err(CodecError::Corrupt("WebP", _))));
+}
+
+#[test]
+fn a_bitstream_larger_than_its_canvas_is_refused_before_decoding() {
+    let colour = webp_payload(WEBP_LOSSY, b"VP8 ");
+    // A 2 x 2 canvas holding the 16 x 8 frame.
+    let file = webp_file(&[vp8x(0, 2, 2), webp_chunk(b"VP8 ", colour)]);
+    assert_eq!(dimensions(&file), Some((2, 2)));
+    assert!(matches!(decode(&file), Err(CodecError::Corrupt("WebP", _))));
+    // The same frame's header saying 16383 x 16383: refused as too large,
+    // before the decoder allocates its planes.
+    let mut huge = colour.to_vec();
+    huge[6..10].copy_from_slice(&[0xFF, 0x3F, 0xFF, 0x3F]);
+    let file = webp_file(&[vp8x(0, 2, 2), webp_chunk(b"VP8 ", &huge)]);
+    assert_eq!(decode(&file), Err(CodecError::TooLarge));
+    // And inside an animation's frame.
+    let file = one_frame_animation((2, 2), 2, 2, &[webp_chunk(b"VP8 ", &huge)]);
+    assert_eq!(decode(&file), Err(CodecError::TooLarge));
+}
+
+#[test]
+fn webp_headers_are_read_inside_their_chunks_and_checked() {
+    // A lossless header with a version other than 0.
+    let mut versioned = WEBP_LOSSLESS.to_vec();
+    versioned[24] |= 0x20;
+    assert_eq!(dimensions(&versioned), None);
+    assert!(matches!(
+        decode(&versioned),
+        Err(CodecError::Corrupt("WebP", _))
+    ));
+    // A lossy chunk declaring fewer bytes than its header needs.
+    let colour = webp_payload(WEBP_LOSSY, b"VP8 ");
+    let mut short = webp_file(&[webp_chunk(b"VP8 ", &colour[..6])]);
+    short.extend_from_slice(&colour[6..]);
+    assert_eq!(dimensions(&short), None);
+    assert!(decode(&short).is_err());
+    // A lossy frame 0 pixels wide.
+    let mut empty = colour.to_vec();
+    empty[6..8].copy_from_slice(&[0, 0]);
+    let file = webp_file(&[webp_chunk(b"VP8 ", &empty)]);
+    assert_eq!(dimensions(&file), None);
+    assert!(matches!(decode(&file), Err(CodecError::Corrupt("WebP", _))));
+    // A lossless image 16384 x 1, the most its header can say, which the
+    // decoder would read as 0 wide.
+    let bits: u32 = 0x3FFF;
+    let mut header = vec![0x2F];
+    header.extend_from_slice(&bits.to_le_bytes());
+    let file = webp_file(&[webp_chunk(b"VP8L", &header)]);
+    assert_eq!(dimensions(&file), Some((16384, 1)));
+    assert_eq!(
+        decode(&file),
+        Err(CodecError::Unsupported(
+            "WebP",
+            "images 16384 or more pixels across"
+        ))
+    );
+}
+
+#[test]
+fn a_webp_is_read_to_its_riff_end_with_its_chunks_as_the_decoder_reads_them() {
+    // Bytes after the RIFF end are not read; a RIFF end past the file's is
+    // a short file.
+    let mut trailed = WEBP_LOSSLESS.to_vec();
+    trailed.extend_from_slice(b"VP8X");
+    assert_eq!(decode(&trailed), decode(WEBP_LOSSLESS));
+    let mut long = WEBP_LOSSLESS.to_vec();
+    long[4] += 2;
+    assert_eq!(decode(&long), Err(CodecError::Truncated("WebP")));
+    // A lossy frame whose first partition runs past its chunk.
+    let mut colour = webp_payload(WEBP_LOSSY, b"VP8 ").to_vec();
+    colour[0] |= 0xE0;
+    colour[1] = 0xFF;
+    colour[2] = 0xFF;
+    let file = webp_file(&[webp_chunk(b"VP8 ", &colour)]);
+    assert_eq!(dimensions(&file), Some((16, 8)));
+    assert_eq!(decode(&file), Err(CodecError::Truncated("WebP")));
+    // Alpha followed by lossless colour, which the decoder would read as
+    // lossy.
+    let lossless = webp_chunk(b"VP8L", webp_payload(WEBP_LOSSLESS, b"VP8L"));
+    let file = one_frame_animation((7, 5), 7, 5, &[raw_alpha(7, 5), lossless.clone()]);
+    assert!(matches!(decode(&file), Err(CodecError::Corrupt("WebP", _))));
+    // Without alpha, lossless colour is a frame.
+    let file = one_frame_animation((7, 5), 7, 5, &[lossless]);
+    assert_eq!(
+        decode(&file).unwrap().rgba,
+        decode(WEBP_LOSSLESS).unwrap().rgba
+    );
+}
+
+#[test]
+fn a_still_webp_with_a_stray_animation_frame_allocates_for_its_canvas_only() {
+    // A still extended image may carry an animation frame chunk; the
+    // decoder then reads a lossless bitstream inside it in place of the
+    // image's lossy one, at the canvas's size. One of another size (here
+    // 16383 x 16383 in a 16 x 8 canvas) is refused, not allocated for.
+    let colour = webp_chunk(b"VP8 ", webp_payload(WEBP_LOSSY, b"VP8 "));
+    let bits: u32 = 0x3FFE | (0x3FFE << 14);
+    let mut huge = vec![0x2F];
+    huge.extend_from_slice(&bits.to_le_bytes());
+    huge.extend_from_slice(&[0; 11]);
+    let mut frame = vec![0; 16];
+    frame.extend_from_slice(&webp_chunk(b"VP8L", &huge));
+    let still = webp_file(&[vp8x(0, 16, 8), colour.clone()]);
+    assert_eq!(
+        decode(&still).unwrap().rgba,
+        decode(WEBP_LOSSY).unwrap().rgba
+    );
+    let file = webp_file(&[vp8x(0, 16, 8), colour, webp_chunk(b"ANMF", &frame)]);
+    assert_eq!(dimensions(&file), Some((16, 8)));
+    assert!(matches!(decode(&file), Err(CodecError::Corrupt("WebP", _))));
 }

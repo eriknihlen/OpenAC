@@ -29,7 +29,8 @@ use ac_runtime::session::creation::{
 };
 use ac_runtime::session::selection::{SelectionOperation, SelectionSnapshot};
 use ac_runtime::session::{
-    CharacterSelector, HostEvent, LifecycleCommand, Relogin, SessionCommand,
+    Acceptance, CharacterSelector, HostEvent, LifecycleCommand, POSITION_TRAIL_WINDOW,
+    PlayerNotFound, Relogin, SessionCommand, TrailEntry, TrailEvent, TrailPosition, TrailStamps,
 };
 
 /// What a typed line asks for. `session` is the session a line was
@@ -1529,10 +1530,187 @@ pub fn event_lines(event: &HostEvent, session: Option<&str>) -> Vec<String> {
         HostEvent::Logout(stage) => vec![notice(&format!("logout: {stage:?}"), session)],
         HostEvent::Plugin(event) => vec![notice(&crate::plugins::event_line(event), session)],
         HostEvent::Relogin(relogin) => vec![notice(&relogin_line(relogin), session)],
+        HostEvent::PortalFailure(failure) => {
+            vec![notice(&crate::portal_failure::summary(failure), session)]
+        }
+        HostEvent::PlayerNotFound(lost) => player_not_found_lines(lost, session),
         _ => Vec::new(),
     }
 }
 
+/// How long a repeated failed cast is folded before its count is printed.
+pub const REPEAT_FOLD_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Folds a failed cast answered the same way again and again (a caster
+/// retrying a spell the server keeps refusing, several times a second) into
+/// one line, then one count a minute. Without it a stuck caster writes tens
+/// of thousands of identical lines an hour and the log rotates away what
+/// came before. Other lines pass through, and never end the fold; a cast
+/// that went through ends it, so a later run of the same refusal shows its
+/// first line again.
+#[derive(Debug, Default)]
+pub struct RepeatFold {
+    /// The failed-cast line last printed.
+    last: Option<String>,
+    /// Copies of it held back since the last count.
+    folded: u64,
+    /// When the first held-back copy came.
+    since: Option<std::time::Instant>,
+    /// When the latest held-back copy came.
+    latest: Option<std::time::Instant>,
+}
+
+impl RepeatFold {
+    /// The lines to print for `line`, which came at `now`.
+    pub fn take(&mut self, line: String, now: std::time::Instant) -> Vec<String> {
+        let mut out = Vec::new();
+        match cast_line(&line) {
+            None => {
+                self.count_if_due(now, &mut out);
+            }
+            Some(false) => {
+                self.count(&mut out);
+                self.last = None;
+            }
+            Some(true) if self.last.as_deref() == Some(line.as_str()) => {
+                self.folded += 1;
+                self.since.get_or_insert(now);
+                self.latest = Some(now);
+                self.count_if_due(now, &mut out);
+                return out;
+            }
+            Some(true) => {
+                self.count(&mut out);
+                self.last = Some(line.clone());
+            }
+        }
+        out.push(line);
+        out
+    }
+
+    fn count_if_due(&mut self, now: std::time::Instant, out: &mut Vec<String>) {
+        if self
+            .since
+            .is_some_and(|since| now.duration_since(since) >= REPEAT_FOLD_WINDOW)
+        {
+            self.count(out);
+        }
+    }
+
+    fn count(&mut self, out: &mut Vec<String>) {
+        if self.folded > 0
+            && let (Some(last), Some(since), Some(latest)) = (&self.last, self.since, self.latest)
+        {
+            out.push(format!(
+                "{last} ({} more {} in {} s)",
+                self.folded,
+                if self.folded == 1 { "time" } else { "times" },
+                latest.duration_since(since).as_secs().max(1)
+            ));
+        }
+        self.folded = 0;
+        self.since = None;
+        self.latest = None;
+    }
+}
+
+/// A cast-finished line (with or without a session id after the dashes):
+/// `Some(true)` when it carries an error, `Some(false)` when the cast went
+/// through, `None` for any other line.
+fn cast_line(line: &str) -> Option<bool> {
+    let rest = line.strip_prefix(NOTICE_PREFIX)?;
+    let rest = match rest.strip_prefix('[') {
+        Some(tagged) => tagged.split_once("] ")?.1,
+        None => rest,
+    };
+    rest.starts_with("cast of spell ")
+        .then(|| rest.contains(" finished with error 0x"))
+}
+
+/// The server could not find the player: a header naming the cast, then
+/// one line per position sent or received, oldest first.
+#[must_use]
+pub fn player_not_found_lines(lost: &PlayerNotFound, session: Option<&str>) -> Vec<String> {
+    let mut lines = vec![notice(
+        &format!(
+            "the server could not find the player: spell {} at 0x{:08X} came back 0x{:04X}; \
+             positions of the last {} s, oldest first:",
+            lost.spell_id,
+            lost.target,
+            lost.weenie_error,
+            POSITION_TRAIL_WINDOW.as_secs()
+        ),
+        session,
+    )];
+    if lost.trail.is_empty() {
+        lines.push(notice("  none", session));
+    }
+    lines.extend(
+        lost.trail
+            .iter()
+            .map(|entry| notice(&format!("  {}", trail_line(entry)), session)),
+    );
+    lines
+}
+
+/// One entry of the position trail.
+fn trail_line(entry: &TrailEntry) -> String {
+    let at = entry.at.as_secs_f64();
+    match entry.event {
+        TrailEvent::Sent {
+            message,
+            action,
+            position,
+            stamps,
+            contact,
+        } => format!(
+            "s={at:.3} sent {message:?} {} {} action {action}{}",
+            trail_position(position),
+            trail_stamps(stamps),
+            if contact { " contact" } else { "" }
+        ),
+        TrailEvent::Received {
+            message,
+            position,
+            stamps,
+            acceptance,
+        } => format!(
+            "s={at:.3} got {message:?} {} {} {}",
+            trail_position(position),
+            trail_stamps(stamps),
+            match acceptance {
+                Acceptance::Taken => "taken",
+                Acceptance::Forced => "forced",
+                Acceptance::Refused => "refused",
+                Acceptance::NoObject => "no player object",
+            }
+        ),
+        TrailEvent::TeleportStarted { teleport } => {
+            format!("s={at:.3} teleport {teleport} started")
+        }
+        TrailEvent::TeleportArrived { teleport, cell_id } => {
+            format!("s={at:.3} teleport {teleport} arrived in cell 0x{cell_id:08X}")
+        }
+        TrailEvent::GenerationEnded => format!("s={at:.3} generation ended"),
+    }
+}
+
+fn trail_position(p: TrailPosition) -> String {
+    let [x, y, z] = p.origin;
+    format!("cell 0x{:08X} ({x:.2}, {y:.2}, {z:.2})", p.cell_id)
+}
+
+fn trail_stamps(s: TrailStamps) -> String {
+    let mut text = format!("inst {}", s.instance);
+    if let Some(position) = s.position {
+        text.push_str(&format!(" pos {position}"));
+    }
+    if let Some(control) = s.server_control {
+        text.push_str(&format!(" ctl {control}"));
+    }
+    text.push_str(&format!(" tele {} force {}", s.teleport, s.force_position));
+    text
+}
 /// A session logging in again after its server fell silent.
 fn relogin_line(relogin: &Relogin) -> String {
     match relogin {
@@ -2554,5 +2732,225 @@ mod tests {
         ] {
             assert!(matches!(parse(raw, &[]), ConsoleInput::Usage(_)), "{raw}");
         }
+    }
+
+    const REFUSED: &str = "-- cast of spell 48 at 0x5004492A finished with error 0x042C";
+
+    fn fold_all(fold: &mut RepeatFold, lines: &[(&str, u64)]) -> Vec<String> {
+        let start = std::time::Instant::now();
+        lines
+            .iter()
+            .flat_map(|&(line, secs)| {
+                fold.take(
+                    line.to_owned(),
+                    start + std::time::Duration::from_secs(secs),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_repeated_failed_cast_is_printed_once_then_counted_once_a_minute() {
+        let mut fold = RepeatFold::default();
+        let mut lines = vec![(REFUSED, 0)];
+        lines.extend((1..=59).map(|s| (REFUSED, s)));
+        lines.push((REFUSED, 60));
+        lines.push((REFUSED, 61));
+        assert_eq!(
+            fold_all(&mut fold, &lines),
+            [
+                REFUSED.to_owned(),
+                format!("{REFUSED} (61 more times in 60 s)")
+            ]
+        );
+    }
+
+    #[test]
+    fn other_lines_pass_through_a_fold_without_ending_it() {
+        let mut fold = RepeatFold::default();
+        let status = "--   Jerry Seinfeld (level 275) health 372/372";
+        let out = fold_all(
+            &mut fold,
+            &[
+                (REFUSED, 0),
+                (status, 1),
+                (REFUSED, 2),
+                (status, 3),
+                (REFUSED, 4),
+            ],
+        );
+        assert_eq!(out, [REFUSED, status, status]);
+    }
+
+    #[test]
+    fn a_different_cast_line_prints_the_count_held_back_first() {
+        let mut fold = RepeatFold::default();
+        let other = "-- cast of spell 4311 at 0x500600B4 finished with error 0x001D";
+        let ok = "-- cast of spell 48 at 0x5004492A finished";
+        let out = fold_all(
+            &mut fold,
+            &[
+                (REFUSED, 0),
+                (REFUSED, 1),
+                (REFUSED, 3),
+                (other, 4),
+                (ok, 5),
+                (ok, 6),
+            ],
+        );
+        assert_eq!(
+            out,
+            [
+                REFUSED.to_owned(),
+                format!("{REFUSED} (2 more times in 2 s)"),
+                other.to_owned(),
+                ok.to_owned(),
+                ok.to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_count_due_goes_out_with_the_next_line_of_any_kind() {
+        let mut fold = RepeatFold::default();
+        let status = "-- combat mode Magic";
+        let out = fold_all(&mut fold, &[(REFUSED, 0), (REFUSED, 1), (status, 70)]);
+        assert_eq!(
+            out,
+            [
+                REFUSED.to_owned(),
+                format!("{REFUSED} (1 more time in 1 s)"),
+                status.to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_cast_with_a_session_id_folds_too() {
+        let mut fold = RepeatFold::default();
+        let tagged = notice(
+            "cast of spell 48 at 0x5004492A finished with error 0x042C",
+            Some("bot"),
+        );
+        let out = fold_all(&mut fold, &[(&tagged, 0), (&tagged, 1), (&tagged, 2)]);
+        assert_eq!(out, std::slice::from_ref(&tagged));
+        let chat = "c[General] someone says, \"-- cast of spell 1 finished with error 0x1\"";
+        assert_eq!(
+            fold.take(chat.to_owned(), std::time::Instant::now()),
+            [chat]
+        );
+    }
+
+    #[test]
+    fn a_refusal_after_a_cast_that_went_through_is_printed_again() {
+        let mut fold = RepeatFold::default();
+        let ok = "-- cast of spell 48 at 0x5004492A finished";
+        let out = fold_all(
+            &mut fold,
+            &[(REFUSED, 0), (REFUSED, 1), (ok, 2), (REFUSED, 3)],
+        );
+        assert_eq!(
+            out,
+            [
+                REFUSED.to_owned(),
+                format!("{REFUSED} (1 more time in 1 s)"),
+                ok.to_owned(),
+                REFUSED.to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_server_losing_the_player_prints_the_cast_then_the_positions_oldest_first() {
+        use ac_runtime::session::{TrailMessage, TrailPosition, TrailStamps};
+        use std::time::Duration;
+        let at = |millis: u64| Duration::from_millis(millis);
+        let position = TrailPosition {
+            cell_id: 0xC8E9_002A,
+            origin: [101.2, 34.55, 12.0],
+        };
+        let lost = PlayerNotFound {
+            at: at(5_741_900),
+            spell_id: 48,
+            target: 0x5004_492A,
+            weenie_error: 0x042C,
+            trail: vec![
+                TrailEntry {
+                    at: at(5_740_000),
+                    event: TrailEvent::TeleportStarted { teleport: 41 },
+                },
+                TrailEntry {
+                    at: at(5_740_500),
+                    event: TrailEvent::TeleportArrived {
+                        teleport: 41,
+                        cell_id: 0xC8E9_002A,
+                    },
+                },
+                TrailEntry {
+                    at: at(5_741_078),
+                    event: TrailEvent::Sent {
+                        message: TrailMessage::AutonomousPosition,
+                        action: 212,
+                        position,
+                        stamps: TrailStamps {
+                            instance: 3,
+                            position: None,
+                            server_control: Some(1),
+                            teleport: 41,
+                            force_position: 2,
+                        },
+                        contact: true,
+                    },
+                },
+                TrailEntry {
+                    at: at(5_741_300),
+                    event: TrailEvent::Received {
+                        message: TrailMessage::UpdatePosition,
+                        position,
+                        stamps: TrailStamps {
+                            instance: 3,
+                            position: Some(907),
+                            server_control: None,
+                            teleport: 41,
+                            force_position: 2,
+                        },
+                        acceptance: Acceptance::Refused,
+                    },
+                },
+                TrailEntry {
+                    at: at(5_741_400),
+                    event: TrailEvent::GenerationEnded,
+                },
+            ],
+        };
+        assert_eq!(
+            event_lines(&HostEvent::PlayerNotFound(Box::new(lost)), Some("bot")),
+            [
+                "-- [bot] the server could not find the player: spell 48 at 0x5004492A came \
+                 back 0x042C; positions of the last 120 s, oldest first:",
+                "-- [bot]   s=5740.000 teleport 41 started",
+                "-- [bot]   s=5740.500 teleport 41 arrived in cell 0xC8E9002A",
+                "-- [bot]   s=5741.078 sent AutonomousPosition cell 0xC8E9002A (101.20, 34.55, \
+                 12.00) inst 3 ctl 1 tele 41 force 2 action 212 contact",
+                "-- [bot]   s=5741.300 got UpdatePosition cell 0xC8E9002A (101.20, 34.55, 12.00) \
+                 inst 3 pos 907 tele 41 force 2 refused",
+                "-- [bot]   s=5741.400 generation ended",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_server_losing_the_player_with_nothing_recorded_says_so() {
+        let lost = PlayerNotFound {
+            at: std::time::Duration::from_secs(9),
+            spell_id: 48,
+            target: 0x5004_492A,
+            weenie_error: 0x042C,
+            trail: Vec::new(),
+        };
+        let lines = event_lines(&HostEvent::PlayerNotFound(Box::new(lost)), None);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1], "--   none");
+        assert!(cast_line(&lines[0]).is_none(), "the report is never folded");
     }
 }

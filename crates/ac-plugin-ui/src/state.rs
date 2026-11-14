@@ -1037,7 +1037,7 @@ impl PluginUi {
         self.image_result(owner, result)
     }
 
-    /// The plugin's own encoded art (PNG, JPEG, BMP, TGA or GIF) under its
+    /// The plugin's own encoded art (PNG, JPEG, BMP, TGA, GIF or WebP) under its
     /// name for it, decoded by the host's resources (OpenAC
     /// `IPluginImages.FromStream`); refused where the host lends none.
     pub fn image_decode(&mut self, owner: &str, name: &str, bytes: &[u8]) -> (u32, u32, u32) {

@@ -762,6 +762,30 @@ pub fn target_compatible(
         )
 }
 
+/// Whether using `item` alone (as a double-click) would wait for a target
+/// pick. An item the double-click handles first (an unheld weapon or
+/// caster is wielded, a loose item is picked up, and so on) never waits,
+/// even when its own use is a targeted one: the targeted branch is only
+/// reached when the item has no such primary use.
+#[must_use]
+pub fn use_waits_for_target(
+    objects: &ClientObjectTable,
+    player: u32,
+    ground_object: u32,
+    item: u32,
+) -> bool {
+    let Some(item) = objects.get(item) else {
+        return false;
+    };
+    let source = policy_object(objects, item, player);
+    source.useability.is_targeted()
+        && !interaction::is_classified_use(interaction::determine_use_result(
+            &source,
+            player,
+            ground_object,
+        ))
+}
+
 /// An empty mana stone (no icon effect yet) destroys the item it drains, so
 /// its use is asked first; a charged stone gives its mana without asking.
 fn requires_mana_stone_confirmation(source: &ClientObject) -> bool {
@@ -1432,8 +1456,14 @@ impl Inventory {
                 K::PlaceInBackpack => {
                     acted |= self.place_world_item_in_backpack(action.object_id, ctx);
                 }
-                K::WieldRight | K::WieldLeft | K::AutoSort => {
+                K::WieldRight | K::AutoSort => {
                     acted |= self.try_wield(action.object_id, EquipMask::NONE, ctx);
+                }
+                // A weapon flagged to wield left (a left-hand tether) goes to
+                // the shield hand, the way dropping it on the off-hand slot
+                // does.
+                K::WieldLeft => {
+                    acted |= self.try_wield_secondary(action.object_id, ctx);
                 }
                 K::OpenContainedContainer => {
                     // A pack the character carries opens in the inventory

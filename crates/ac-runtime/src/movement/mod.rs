@@ -642,6 +642,17 @@ impl Movement {
         self.content.is_some()
     }
 
+    /// Whether the collision of the destination a teleport's placement
+    /// waits for is loaded (diagnostics). `None` while no placement waits.
+    #[must_use]
+    pub fn destination_collision_ready(&self) -> Option<bool> {
+        let pending = self.pending_place?;
+        Some(
+            self.residency
+                .is_ready(&self.engine, pending.accepted.cell_id),
+        )
+    }
+
     /// The physics engine (diagnostics and tests).
     #[must_use]
     pub fn engine(&self) -> &PhysicsEngine {
@@ -716,6 +727,12 @@ impl Movement {
     /// Take the movement messages sent (only with records kept).
     pub fn take_outbound_records(&mut self) -> Vec<OutboundRecord> {
         self.outbound.take_records()
+    }
+
+    /// The player's positions sent since the last call, oldest first
+    /// (always kept, for the session's position trail).
+    pub fn drain_sent_positions(&mut self) -> std::vec::Drain<'_, OutboundRecord> {
+        self.outbound.drain_sent()
     }
 
     /// Objects the world forgot on its own (their time out of range ran
