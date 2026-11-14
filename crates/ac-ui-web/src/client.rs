@@ -291,7 +291,12 @@ impl ClientPanels {
             .as_ref()
             .filter(|(player, _)| *player == data.player)
             .map(|(_, ids)| ids.as_slice());
-        let events = data.events(offline.selected, offline.revision, before);
+        let events = data.events(offline.kind, offline.selected, offline.revision, before);
+        if offline.kind == OfflineKind::Character
+            && let Some(ui) = self.ui.as_mut()
+        {
+            ui.set_reported_sheet(Some(data.stats.reported.clone()));
+        }
         offline.shown = Some((data.player, data.object_ids()));
         let scene = self.scene.get_or_insert_with(Scene::default);
         for event in events {

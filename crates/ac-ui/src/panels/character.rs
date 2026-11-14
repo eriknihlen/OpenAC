@@ -521,23 +521,7 @@ impl CharacterSheet {
             let cost =
                 |amount| curve.map_or(0, |c| raise_cost_from_curve(c, s.ranks, s.xp, amount));
             let values = p.get_skill_value(s.skill_id, None);
-            let tooltip = base.and_then(|b| {
-                ac_core::player::build_tooltip(&ac_core::player::SkillBase {
-                    name: b.name.clone(),
-                    description: b.description.clone(),
-                    min_level: b.min_level,
-                    trained_cost: b.trained_cost,
-                    specialized_cost: b.specialized_cost,
-                    formula: ac_core::player::SkillFormula {
-                        additive_bonus: b.formula.additive_bonus,
-                        attribute1_multiplier: b.formula.attribute1_multiplier,
-                        attribute2_multiplier: b.formula.attribute2_multiplier,
-                        divisor: b.formula.divisor,
-                        attribute1: b.formula.attribute1,
-                        attribute2: b.formula.attribute2,
-                    },
-                })
-            });
+            let tooltip = base.and_then(skill_tooltip);
             let level = sat(s.current_level());
             skills.push(CharacterSkill {
                 id: s.skill_id,
@@ -596,6 +580,58 @@ impl CharacterSheet {
         }
     }
 
+    /// Put in the values a character's report gives where the numbers the
+    /// sheet was built from have none: shown without a session, from what
+    /// a companion reported, nothing can be raised (no raise costs).
+    pub fn apply_reported(&mut self, reported: &ReportedSheet, skill_table: Option<&SkillTable>) {
+        for (row, value) in reported.attributes.iter().enumerate() {
+            if let Some(value) = value {
+                self.attributes[row] = *value;
+            }
+        }
+        for (i, vital) in reported.vitals.iter().enumerate() {
+            if let Some(v) = vital {
+                self.vital_base_max[i] = v.base_max;
+                self.vital_max[i] = v.max;
+                self.vital_current[i] = v.current;
+                self.vital_vitae[i] = 0;
+            }
+        }
+        self.attribute_raise_costs = [0; 9];
+        self.attribute_raise10_costs = [0; 9];
+        let mut skills = Vec::new();
+        for r in &reported.skills {
+            if r.advancement == SkillAdvancement::Inactive {
+                continue;
+            }
+            let entry = skill_table.and_then(|t| {
+                t.skills
+                    .iter()
+                    .find(|(_, b)| reported_skill_key(&b.name) == r.key)
+            });
+            let Some((id, base)) = entry else {
+                continue;
+            };
+            skills.push(CharacterSkill {
+                id: *id,
+                name: base.name.clone(),
+                icon: base.icon,
+                advancement: r.advancement,
+                base_level: r.base,
+                current_level: r.current,
+                usable_untrained: !matches!(*id, 18 | 37 | 38 | 39 | 40),
+                trained_cost: base.trained_cost,
+                specialized_cost: base.specialized_cost,
+                raise_cost: 0,
+                raise10_cost: 0,
+                vitae_modifier: 0,
+                tooltip: skill_tooltip(base),
+            });
+        }
+        skills.sort_by_key(|s| s.id);
+        self.skills = skills;
+    }
+
     /// The skill `id`.
     #[must_use]
     pub fn skill(&self, id: u32) -> Option<&CharacterSkill> {
@@ -607,6 +643,69 @@ impl CharacterSheet {
     pub fn luminance_visible(&self) -> bool {
         self.level.is_some_and(|l| l >= 200) && self.maximum_luminance != 0
     }
+}
+
+/// A skill's tooltip from its dat entry.
+fn skill_tooltip(b: &ac_dat::objects::SkillBase) -> Option<String> {
+    ac_core::player::build_tooltip(&ac_core::player::SkillBase {
+        name: b.name.clone(),
+        description: b.description.clone(),
+        min_level: b.min_level,
+        trained_cost: b.trained_cost,
+        specialized_cost: b.specialized_cost,
+        formula: ac_core::player::SkillFormula {
+            additive_bonus: b.formula.additive_bonus,
+            attribute1_multiplier: b.formula.attribute1_multiplier,
+            attribute2_multiplier: b.formula.attribute2_multiplier,
+            divisor: b.formula.divisor,
+            attribute1: b.formula.attribute1,
+            attribute2: b.formula.attribute2,
+        },
+    })
+}
+
+/// A skill's key in a character report: its name in lower case, spaces
+/// as underscores ("War Magic" is `war_magic`).
+#[must_use]
+pub fn reported_skill_key(name: &str) -> String {
+    name.trim().to_lowercase().replace(' ', "_")
+}
+
+/// One vital as a character report gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReportedVital {
+    /// The maximum without spells.
+    pub base_max: i32,
+    /// The maximum now.
+    pub max: i32,
+    /// The value now.
+    pub current: i32,
+}
+
+/// One skill as a character report gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportedSkill {
+    /// Its key ([`reported_skill_key`] of its name).
+    pub key: String,
+    /// The level without spells.
+    pub base: i32,
+    /// The level now.
+    pub current: i32,
+    /// Its training.
+    pub advancement: SkillAdvancement,
+}
+
+/// What a character report gives that the player's numbers, built from
+/// the report, cannot work out ([`CharacterSheet::apply_reported`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReportedSheet {
+    /// The attributes now, in the rows' order (strength, endurance,
+    /// coordination, quickness, focus, self).
+    pub attributes: [Option<i32>; 6],
+    /// Health, stamina, mana.
+    pub vitals: [Option<ReportedVital>; 3],
+    /// The skills.
+    pub skills: Vec<ReportedSkill>,
 }
 
 /// The skills of a group, by name: specialized, trained, or untrained

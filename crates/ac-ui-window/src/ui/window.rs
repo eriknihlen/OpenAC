@@ -36,7 +36,8 @@ use ac_ui::import::{ImportedLayout, LayoutSource, import};
 use ac_ui::panels::PanelOutput;
 use ac_ui::panels::appraisal::{AppraisalController, AppraisalPage, SpellExamineComponent};
 use ac_ui::panels::character::{
-    CharacterSheet, CharacterStatController, CharacterTab, ExperienceCurves, SheetSource,
+    CharacterSheet, CharacterStatController, CharacterTab, ExperienceCurves, ReportedSheet,
+    SheetSource,
 };
 use ac_ui::panels::chat::{self, ChatContext, ChatWindowController};
 use ac_ui::panels::dialog::{DialogAnswer, DialogQueue, confirmation_text, train_skill_message};
@@ -534,6 +535,9 @@ pub struct WindowUi {
     pub(super) dialog_layout: Option<u32>,
     /// The selection the panels were last fed.
     fed_selection: Option<Option<u32>>,
+    /// A character report's values the character sheet takes over the
+    /// numbers (a window shown without a session).
+    reported_sheet: Option<ReportedSheet>,
     /// Panels shown since they were last fed.
     stale: Vec<&'static str>,
     /// Whether the character was in the world when the social panel was
@@ -659,6 +663,7 @@ impl WindowUi {
             dialogs: DialogQueue::default(),
             dialog_layout: None,
             fed_selection: None,
+            reported_sheet: None,
             stale: Vec::new(),
             social_in_world: None,
             fed_social_selection: None,
@@ -1034,6 +1039,13 @@ impl WindowUi {
         }
     }
 
+    /// The values a character report gives, which the character sheet
+    /// shows over the player's numbers (none: the numbers alone).
+    pub fn set_reported_sheet(&mut self, reported: Option<ReportedSheet>) {
+        self.reported_sheet = reported;
+        self.stale.push(CHARACTER_WINDOW);
+    }
+
     /// The size `window` was mounted at (its frame included), in UI
     /// units.
     #[must_use]
@@ -1200,6 +1212,7 @@ impl WindowUi {
             content,
             status,
             panels,
+            reported_sheet,
             ..
         } = self;
         let mana_answers = std::mem::take(&mut facts.item_mana);
@@ -1258,7 +1271,7 @@ impl WindowUi {
         {
             let strings = content.strings();
             let ui_string = |key: &str| strings.resolve(UI_STRING_TABLE, compute_hash(key), 0);
-            let sheet = CharacterSheet::build(&SheetSource {
+            let mut sheet = CharacterSheet::build(&SheetSource {
                 player: numbers,
                 properties: &object.properties,
                 pwd_bitfield: object.public_weenie_bitfield.map_or(0, |f| f.bits()),
@@ -1268,6 +1281,9 @@ impl WindowUi {
                 skill_table: skill_table.as_ref(),
                 ui_string: Some(&ui_string),
             });
+            if let Some(reported) = reported_sheet.as_ref() {
+                sheet.apply_reported(reported, skill_table.as_ref());
+            }
             host.with_controller::<CharacterStatController, _>(CHARACTER_WINDOW, |c, ui| {
                 c.apply(ui, &sheet);
             });

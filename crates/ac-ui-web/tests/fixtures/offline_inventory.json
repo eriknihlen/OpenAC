@@ -2,6 +2,13 @@
  "character": {
   "character_name": "Offline Tester",
   "level": 126,
+  "race": "Aluvian",
+  "gender": "Male",
+  "total_xp": 191226310,
+  "unassigned_xp": 1234567,
+  "skill_credits": 2,
+  "luminance_earned": null,
+  "luminance_total": null,
   "attributes": {
    "strength": {
     "base": 200,
@@ -28,9 +35,57 @@
     "creation": 40
    }
   },
+  "vitals": {
+   "health": {
+    "base": 190
+   },
+   "stamina": {
+    "base": 330
+   },
+   "mana": {
+    "base": 280
+   }
+  },
+  "skills": {
+   "war_magic": {
+    "base": 330,
+    "training": "Specialized"
+   },
+   "life_magic": {
+    "base": 310,
+    "training": "Specialized"
+   },
+   "melee_defense": {
+    "base": 290,
+    "training": "Trained"
+   },
+   "magic_defense": {
+    "base": 260,
+    "training": "Trained"
+   },
+   "run": {
+    "base": 240,
+    "training": "Trained"
+   },
+   "jump": {
+    "base": 220,
+    "training": "Untrained"
+   },
+   "alchemy": {
+    "base": 120,
+    "training": "Untrained"
+   },
+   "sneak_attack": {
+    "base": 0,
+    "training": "Unusable"
+   }
+  },
   "encumbrance_capacity": 45000,
   "burden_units": 12000,
   "properties": {
+   "25": 126,
+   "113": 1,
+   "188": 1,
    "230": 0
   }
  },

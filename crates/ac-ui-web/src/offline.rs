@@ -21,6 +21,9 @@ use ac_core::player::LocalPlayerState;
 use ac_runtime::session::PresentationEvent;
 use ac_runtime::session::interface::{InterfaceEvent, InterfaceState, ItemsUpdate, PlayerFacts};
 use ac_runtime::world::{PlayerView, WorldSnapshot};
+use ac_ui::panels::character::{
+    ReportedSheet, ReportedSkill, ReportedVital, SkillAdvancement, reported_skill_key,
+};
 use serde_json::Value;
 
 /// Which window the module shows without a session.
@@ -98,6 +101,15 @@ const PROP_CARRYING_CAPACITY_AUGS: u32 = 0xE6;
 const BURDEN_PER_STRENGTH: i64 = 150;
 const AUG_BURDEN_PER_RANK: i64 = 30;
 const AUG_RANKS_COUNTED: i64 = 5;
+/// The player's level and unspent skill credits (int properties).
+const PROP_LEVEL: u32 = 25;
+const PROP_AVAILABLE_SKILL_CREDITS: u32 = 24;
+/// His total and unassigned experience, and his luminance now and at
+/// most (64-bit int properties).
+const INT64_TOTAL_XP: u32 = 1;
+const INT64_AVAILABLE_XP: u32 = 2;
+const INT64_AVAILABLE_LUMINANCE: u32 = 6;
+const INT64_MAXIMUM_LUMINANCE: u32 = 7;
 /// The stats' attribute names in the game's attribute order (ids 1..=6).
 const ATTRIBUTE_NAMES: [&str; 6] = [
     "strength",
@@ -107,6 +119,12 @@ const ATTRIBUTE_NAMES: [&str; 6] = [
     "focus",
     "self",
 ];
+
+/// The stats' vital names: health, stamina, mana.
+const VITAL_NAMES: [&str; 3] = ["health", "stamina", "mana"];
+/// The character sheet's row of each attribute in the game's order
+/// (its rows: strength, endurance, coordination, quickness, focus, self).
+const SHEET_ROW_OF_ATTRIBUTE: [usize; 6] = [0, 1, 3, 2, 4, 5];
 
 /// Each attribute as (ranks, start), in the game's order (strength,
 /// endurance, quickness, coordination, focus, self).
@@ -124,10 +142,26 @@ pub struct OfflineData {
     /// Contents lists, in order: the player's (his items and packs) and
     /// each pack's.
     pub contents: Vec<(u32, Vec<u32>)>,
-    /// The player's int properties (burden among them).
-    pub player_ints: BTreeMap<u32, i32>,
-    /// Each attribute as (ranks, start), in the game's order.
+    /// The player's numbers from the character's stats.
+    pub stats: Stats,
+}
+
+/// What the character's stats give.
+#[derive(Debug, Clone, Default)]
+pub struct Stats {
+    /// The player's int properties (level, burden, heritage, ...).
+    pub ints: BTreeMap<u32, i32>,
+    /// His 64-bit int properties (experience, luminance).
+    pub int64s: BTreeMap<u32, i64>,
+    /// Each attribute without spells as (ranks, start), in the game's
+    /// order.
     pub attributes: Attributes,
+    /// Strength now, as the burden capacity says (the burden meter reads
+    /// it); none when the capacity says no more than strength without
+    /// spells.
+    pub strength_now: Option<u32>,
+    /// What the character sheet shows of the stats over the numbers.
+    pub reported: ReportedSheet,
 }
 
 /// Reading the page's JSON failed.
@@ -169,7 +203,7 @@ impl OfflineData {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let (player_ints, attributes) = character.map(player_numbers).unwrap_or_default();
+        let stats = character.map(player_numbers).unwrap_or_default();
 
         // Contents lists: each container's items by their slot, then in the
         // order they came.
@@ -209,8 +243,7 @@ impl OfflineData {
             name,
             items,
             contents,
-            player_ints,
-            attributes,
+            stats,
         })
     }
 
@@ -222,6 +255,7 @@ impl OfflineData {
     #[must_use]
     pub fn events(
         &self,
+        kind: OfflineKind,
         selected: Option<u32>,
         revision: u64,
         before: Option<&[u32]>,
@@ -229,7 +263,8 @@ impl OfflineData {
         let mut player_object = ClientObject::new(self.player);
         player_object.name.clone_from(&self.name);
         player_object.item_type = ItemType::CREATURE;
-        player_object.properties.ints = self.player_ints.clone();
+        player_object.properties.ints = self.stats.ints.clone();
+        player_object.properties.int64s = self.stats.int64s.clone();
         let mut objects = vec![player_object];
         objects.extend(self.items.iter().cloned());
         let contents = self
@@ -238,12 +273,19 @@ impl OfflineData {
             .map(|(c, list)| (*c, Some(list.clone())))
             .collect();
         let mut numbers = LocalPlayerState::new(None);
-        for (index, attribute) in self.attributes.iter().enumerate() {
-            if let Some((ranks, start)) = attribute {
-                let _ = numbers.on_attribute_update(index as u32 + 1, *ranks, *start, 0);
+        for (index, attribute) in self.stats.attributes.iter().enumerate() {
+            if let Some((mut ranks, start)) = *attribute {
+                // The inventory's burden meter reads strength now.
+                if index == 0
+                    && kind == OfflineKind::Inventory
+                    && let Some(now) = self.stats.strength_now
+                {
+                    ranks = now.saturating_sub(start);
+                }
+                let _ = numbers.on_attribute_update(index as u32 + 1, ranks, start, 0);
             }
         }
-        numbers.on_int_properties(self.player_ints.clone());
+        numbers.on_int_properties(self.stats.ints.clone());
         let snapshot = WorldSnapshot {
             player_guid: Some(self.player),
             objects: vec![player_view_object(self.player, &self.name)],
@@ -289,14 +331,14 @@ impl OfflineData {
     }
 }
 
-/// The player's int properties and attributes from the stats.
-///
-/// The stats carry each attribute's value before spells and its starting
-/// value, and the burden capacity worked out from the strength the
-/// character has now. The burden meter reads the strength now, so when the
-/// capacity says more than the unbuffed strength gives, strength is
-/// reported as what the capacity implies.
-fn player_numbers(stats: &Value) -> (BTreeMap<u32, i32>, Attributes) {
+/// The player's numbers from the character's stats (the plugin's
+/// `character_stats`): his int properties with the level, credits and
+/// burden put in, his experience and luminance, each attribute as its
+/// value before spells and its starting value, strength now from the
+/// burden capacity, and what the sheet shows over the numbers (values now
+/// where the stats give them, the vitals, the skills).
+fn player_numbers(stats: &Value) -> Stats {
+    let number = |v: &Value, key: &str| v.get(key).and_then(Value::as_i64);
     let mut ints = BTreeMap::new();
     if let Some(properties) = stats.get("properties").and_then(Value::as_object) {
         for (key, value) in properties {
@@ -305,38 +347,93 @@ fn player_numbers(stats: &Value) -> (BTreeMap<u32, i32>, Attributes) {
             }
         }
     }
-    if let Some(burden) = stats.get("burden_units").and_then(Value::as_i64) {
-        ints.insert(PROP_ENCUMBRANCE_VAL, burden as i32);
+    for (key, property) in [
+        ("burden_units", PROP_ENCUMBRANCE_VAL),
+        ("level", PROP_LEVEL),
+        ("skill_credits", PROP_AVAILABLE_SKILL_CREDITS),
+    ] {
+        if let Some(v) = number(stats, key) {
+            ints.insert(property, v as i32);
+        }
     }
+    let mut int64s = BTreeMap::new();
+    for (key, property) in [
+        ("total_xp", INT64_TOTAL_XP),
+        ("unassigned_xp", INT64_AVAILABLE_XP),
+        ("luminance_earned", INT64_AVAILABLE_LUMINANCE),
+        ("luminance_total", INT64_MAXIMUM_LUMINANCE),
+    ] {
+        if let Some(v) = number(stats, key) {
+            int64s.insert(property, v);
+        }
+    }
+
     let mut attributes = [None; 6];
+    let mut reported = ReportedSheet::default();
     for (index, name) in ATTRIBUTE_NAMES.iter().enumerate() {
         let Some(a) = stats.get("attributes").and_then(|a| a.get(*name)) else {
             continue;
         };
-        let base = a.get("base").and_then(Value::as_i64).unwrap_or(0).max(0);
-        let start = a
-            .get("creation")
-            .and_then(Value::as_i64)
-            .unwrap_or(base)
-            .clamp(0, base);
+        let base = number(a, "base").unwrap_or(0).max(0);
+        let start = number(a, "creation").unwrap_or(base).clamp(0, base);
         attributes[index] = Some(((base - start) as u32, start as u32));
+        if let Some(now) = number(a, "current") {
+            reported.attributes[SHEET_ROW_OF_ATTRIBUTE[index]] = Some(now as i32);
+        }
     }
+    for (index, name) in VITAL_NAMES.iter().enumerate() {
+        let Some(v) = stats.get("vitals").and_then(|v| v.get(*name)) else {
+            continue;
+        };
+        let Some(base) = number(v, "base") else {
+            continue;
+        };
+        let max = number(v, "max").unwrap_or(base);
+        let current = number(v, "current").unwrap_or(max);
+        reported.vitals[index] = Some(ReportedVital {
+            base_max: base as i32,
+            max: max as i32,
+            current: current as i32,
+        });
+    }
+    if let Some(skills) = stats.get("skills").and_then(Value::as_object) {
+        for (key, s) in skills {
+            let Some(base) = number(s, "base") else {
+                continue;
+            };
+            let advancement = match s.get("training").and_then(Value::as_str) {
+                Some("Specialized") => SkillAdvancement::Specialized,
+                Some("Trained") => SkillAdvancement::Trained,
+                Some("Untrained") => SkillAdvancement::Untrained,
+                _ => SkillAdvancement::Inactive,
+            };
+            reported.skills.push(ReportedSkill {
+                key: reported_skill_key(key),
+                base: base as i32,
+                current: number(s, "current").unwrap_or(base) as i32,
+                advancement,
+            });
+        }
+    }
+
     // Strength now, from the capacity: capacity = strength x (150 + 30 x
     // min(augs, 5)).
     let augs = i64::from(ints.get(&PROP_CARRYING_CAPACITY_AUGS).copied().unwrap_or(0))
         .clamp(0, AUG_RANKS_COUNTED);
     let per_point = BURDEN_PER_STRENGTH + AUG_BURDEN_PER_RANK * augs;
-    if let Some(capacity) = stats.get("encumbrance_capacity").and_then(Value::as_i64)
-        && capacity > 0
-        && let Some((ranks, start)) = attributes[0]
-    {
-        let now = capacity / per_point;
-        let base = i64::from(ranks + start);
-        if now > base {
-            attributes[0] = Some(((now - i64::from(start)) as u32, start));
-        }
+    let strength_now = number(stats, "encumbrance_capacity")
+        .filter(|&c| c > 0)
+        .map(|c| c / per_point)
+        .zip(attributes[0])
+        .filter(|&(now, (ranks, start))| now > i64::from(ranks + start))
+        .map(|(now, _)| now as u32);
+    Stats {
+        ints,
+        int64s,
+        attributes,
+        strength_now,
+        reported,
     }
-    (ints, attributes)
 }
 
 /// The player's object in the world: only what the window reads of it

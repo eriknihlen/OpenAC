@@ -67,8 +67,25 @@ fn the_records_become_the_client_objects() {
     assert!(main.contains(&PACK));
     let in_pack = data.contents.iter().find(|(c, _)| *c == PACK).unwrap();
     assert_eq!(in_pack.1.len(), 3);
-    // Strength now comes from the capacity: 45000 / 150.
-    assert_eq!(data.attributes[0], Some((200, 100)));
+    // Strength without spells stays; strength now comes from the
+    // capacity (45000 / 150).
+    assert_eq!(data.stats.attributes[0], Some((100, 100)));
+    assert_eq!(data.stats.strength_now, Some(300));
+    assert_eq!(data.stats.ints.get(&25), Some(&126), "the level");
+    assert_eq!(
+        data.stats.int64s.get(&1),
+        Some(&191_226_310),
+        "total experience"
+    );
+    let war = data
+        .stats
+        .reported
+        .skills
+        .iter()
+        .find(|s| s.key == "war_magic")
+        .unwrap();
+    assert_eq!(war.base, 330);
+    assert_eq!(data.stats.reported.vitals[1].unwrap().max, 330);
     // Framework keys stay out of the game properties.
     assert!(sleeves.properties.ints.keys().all(|k| *k < 167_772_160));
     assert_eq!(sleeves.properties.ints.get(&5), Some(&600));
@@ -150,5 +167,8 @@ fn the_character_window_shows_alone() {
     let ui = page.module.panels().ui().expect("built");
     let root = &ui.host().root;
     assert!(root.is_window_visible("character"), "{}", page.log);
+    // The skills tab lists the reported skills by training.
+    click(&mut page, (143.0, 18.0));
+    picture(&page, "character-skills");
     assert!(page.sent_stamped().is_empty());
 }
