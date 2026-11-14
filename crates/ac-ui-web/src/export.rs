@@ -92,6 +92,39 @@ pub extern "C" fn ui_init(width: u32, height: u32, scale: f32, now: f64) -> u32 
     0
 }
 
+/// Before `ui_init`: show one window without a session, read-only, from
+/// the data `ui_offline_data` hands in (1 the inventory, 2 the character
+/// window). Returns 0, or 1 for an unknown kind.
+#[unsafe(no_mangle)]
+pub extern "C" fn ui_offline(kind: u32) -> u32 {
+    let Some(kind) = crate::offline::OfflineKind::from_number(kind) else {
+        return 1;
+    };
+    with(|module| module.panels().set_offline(kind));
+    0
+}
+
+/// The data the window without a session shows, as UTF-8 JSON (see
+/// `offline`), again whenever it changed. Returns 0, or 1 when it cannot
+/// be read (the reason goes to the log).
+#[unsafe(no_mangle)]
+pub extern "C" fn ui_offline_data(ptr: u32, len: u32) -> u32 {
+    with(|module| u32::from(module.panels().offline_data_logged(bytes(ptr, len))))
+}
+
+/// The window without a session's own size, frame included, in pixels at
+/// scale 1, as `width << 16 | height`; 0 until the panels are built (or
+/// with a session).
+#[unsafe(no_mangle)]
+pub extern "C" fn ui_offline_size() -> u32 {
+    with(|module| {
+        module
+            .panels()
+            .offline_size()
+            .map_or(0, |(w, h)| (w.min(0xFFFF) << 16) | h.min(0xFFFF))
+    })
+}
+
 /// The canvas changed size.
 #[unsafe(no_mangle)]
 pub extern "C" fn ui_resize(width: u32, height: u32, scale: f32) {

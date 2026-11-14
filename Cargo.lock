@@ -344,6 +344,7 @@ dependencies = [
  "ac-runtime",
  "ac-ui",
  "ac-ui-window",
+ "serde_json",
 ]
 
 [[package]]

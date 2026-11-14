@@ -29,6 +29,7 @@ use ac_ui_window::ui::{TextureLedger, UiBatch, UiPixels, WindowUi};
 use crate::commands::Outbox;
 use crate::host::{Modifiers, Panels, Session};
 use crate::keys;
+use crate::offline::{OfflineData, OfflineKind};
 use crate::output::{Cursor, Level, Outputs, Texels};
 use crate::page::{
     self, ArrivingSurfaces, ClipboardState, HEADER_ID, KeptSettings, PageClipboard, PageStorage,
@@ -97,6 +98,40 @@ enum Tables {
     Failed,
 }
 
+/// The module without a session ([`crate::offline`]): the window it shows,
+/// the data shown there, and the selection, which the panels' clicks set
+/// here as a session would.
+#[derive(Debug)]
+struct Offline {
+    kind: OfflineKind,
+    data: Option<OfflineData>,
+    selected: Option<u32>,
+    /// The data changed since the scene was given it.
+    stale: bool,
+    /// Bumped for every set of the player's numbers given to the scene.
+    revision: u64,
+    /// The player and the objects the scene was last given (none before
+    /// the first data).
+    shown: Option<(u32, Vec<u32>)>,
+}
+
+impl Offline {
+    /// The window shown, its main panel, and the window that may show
+    /// beside it (the inventory's: the examination window).
+    fn window(&self) -> (&'static str, u32, Option<&'static str>) {
+        use ac_ui::panels::panel_id;
+        use ac_ui_window::ui::window::{CHARACTER_WINDOW, EXAMINATION_WINDOW, INVENTORY_WINDOW};
+        match self.kind {
+            OfflineKind::Inventory => (
+                INVENTORY_WINDOW,
+                panel_id::INVENTORY,
+                Some(EXAMINATION_WINDOW),
+            ),
+            OfflineKind::Character => (CHARACTER_WINDOW, panel_id::CHARACTER, None),
+        }
+    }
+}
+
 /// The client's panels, built for a page. See the module documentation.
 pub struct ClientPanels {
     canvas: Option<Canvas>,
@@ -148,6 +183,8 @@ pub struct ClientPanels {
     /// The epoch commands count instants from when no stream is attached.
     epoch: Instant,
     log: Vec<String>,
+    /// Shown without a session: one window, read-only, from handed-in data.
+    offline: Option<Offline>,
 }
 
 impl std::fmt::Debug for ClientPanels {
@@ -168,7 +205,220 @@ impl ClientPanels {
     /// the session does not have. (The pointer still shows what is under
     /// it, and the wheel still scrolls.)
     fn watching(&self) -> bool {
-        !self.outbox.session().controlling
+        self.offline.is_none() && !self.outbox.session().controlling
+    }
+
+    /// Show one window without a session (before [`Panels::init`]): it
+    /// shows what [`Self::offline_data`] hands in, read-only. No stream is
+    /// read and no command goes out; the selection is kept here.
+    pub fn set_offline(&mut self, kind: OfflineKind) {
+        self.offline = Some(Offline {
+            kind,
+            data: None,
+            selected: None,
+            stale: true,
+            revision: 0,
+            shown: None,
+        });
+    }
+
+    /// The data the window without a session shows (see
+    /// [`crate::offline`]), again whenever it changed.
+    ///
+    /// # Errors
+    /// The module is not without a session, or the data cannot be read.
+    pub fn offline_data(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let Some(offline) = self.offline.as_mut() else {
+            return Err("offline data, but the module shows a session".into());
+        };
+        let data = OfflineData::parse(bytes).map_err(|e| e.to_string())?;
+        // A selection that is gone is let go.
+        if offline
+            .selected
+            .is_some_and(|s| !data.items.iter().any(|i| i.object_id() == s))
+        {
+            offline.selected = None;
+        }
+        self.log.push(format!(
+            "ui: offline data: {} items, player {:#010x}",
+            data.items.len(),
+            data.player
+        ));
+        offline.data = Some(data);
+        offline.stale = true;
+        Ok(())
+    }
+
+    /// The size the window without a session was mounted at, frame
+    /// included, in pixels at scale 1; none before the panels are built
+    /// or with a session.
+    #[must_use]
+    pub fn offline_size(&self) -> Option<(u32, u32)> {
+        let (window, _, beside) = self.offline.as_ref()?.window();
+        let ui = self.ui.as_ref()?;
+        let (mut w, mut h) = ui.natural_size(window)?;
+        // While the examination window shows beside it, it is counted in.
+        if let Some(beside) = beside.filter(|b| ui.is_window_visible(b))
+            && let Some((bw, bh)) = ui.window_size(beside)
+        {
+            w += bw;
+            h = h.max(bh);
+        }
+        Some((w.round().max(0.0) as u32, h.round().max(0.0) as u32))
+    }
+
+    /// The selection without a session.
+    #[must_use]
+    pub fn offline_selected(&self) -> Option<u32> {
+        self.offline.as_ref().and_then(|o| o.selected)
+    }
+
+    /// [`Self::offline_data`], its failure written to the log: whether it
+    /// failed.
+    pub fn offline_data_logged(&mut self, bytes: &[u8]) -> bool {
+        match self.offline_data(bytes) {
+            Ok(()) => false,
+            Err(error) => {
+                self.log.push(format!("ui: {error}"));
+                true
+            }
+        }
+    }
+
+    /// Give the scene the data handed in since it was last given it.
+    fn feed_offline(&mut self) {
+        let (spells, _) = self.table_parts();
+        let Some(offline) = self.offline.as_mut() else {
+            return;
+        };
+        if !offline.stale {
+            return;
+        }
+        let Some(data) = offline.data.as_ref() else {
+            return;
+        };
+        offline.stale = false;
+        offline.revision += 1;
+        // Another character: the world is entered again.
+        let before = offline
+            .shown
+            .as_ref()
+            .filter(|(player, _)| *player == data.player)
+            .map(|(_, ids)| ids.as_slice());
+        let events = data.events(
+            offline.kind,
+            spells,
+            offline.selected,
+            offline.revision,
+            before,
+        );
+        let mut titles = None;
+        if offline.kind == OfflineKind::Character
+            && let Some(ui) = self.ui.as_mut()
+        {
+            ui.set_reported_sheet(Some(data.stats.reported.clone()));
+            // The titles page: the report names titles by their text.
+            // The title shown is one earned, whether or not the report
+            // named it.
+            let mut title_ids = ui.title_ids_named(&data.stats.titles);
+            if let Some(current) = data.stats.current_title
+                && !title_ids.contains(&current)
+            {
+                title_ids.push(current);
+                title_ids.sort_unstable();
+            }
+            titles = Some(ac_runtime::session::interface::TitleFacts {
+                display_title_id: data.stats.current_title.unwrap_or(0),
+                title_ids,
+                revision: offline.revision,
+                table_generation: 1,
+            });
+        }
+        offline.shown = Some((data.player, data.object_ids()));
+        let scene = self.scene.get_or_insert_with(Scene::default);
+        for event in events {
+            scene.apply(event);
+        }
+        if let Some(titles) = titles {
+            scene.apply(ac_runtime::session::PresentationEvent::Interface(
+                ac_runtime::session::interface::InterfaceEvent::Titles(Box::new(titles)),
+            ));
+        }
+    }
+
+    /// A command the panels sent without a session: a selection is made
+    /// here, as a session would make it; everything else goes nowhere.
+    fn offline_command(&mut self, command: &SessionCommand) {
+        use ac_runtime::gameplay::GameplayCommand;
+        use ac_runtime::inventory::ObjectRef;
+        let selected = match command {
+            SessionCommand::Gameplay(GameplayCommand::SelectAs(ObjectRef::Guid(guid), _)) => {
+                (*guid != 0).then_some(*guid)
+            }
+            SessionCommand::Gameplay(GameplayCommand::ClearSelection) => None,
+            SessionCommand::Item(ac_runtime::inventory::ItemCommand::Appraise(
+                ObjectRef::Guid(guid),
+            )) => {
+                self.offline_appraise(*guid);
+                return;
+            }
+            _ => return,
+        };
+        let Some(offline) = self.offline.as_mut() else {
+            return;
+        };
+        if offline.selected == selected {
+            return;
+        }
+        offline.selected = selected;
+        let scene = self.scene.get_or_insert_with(Scene::default);
+        scene.apply(ac_runtime::session::PresentationEvent::Player(
+            ac_runtime::world::PlayerView {
+                selected,
+                ..Default::default()
+            },
+        ));
+        scene.apply(ac_runtime::session::PresentationEvent::Interface(
+            ac_runtime::session::interface::InterfaceEvent::Selection(selected),
+        ));
+        // The inventory examines what is selected: the examination window
+        // opens beside it.
+        if let Some(guid) = selected {
+            self.offline_appraise(guid);
+        }
+    }
+
+    /// The examination of `guid` from the data, as the server would answer
+    /// it (the inventory's alone).
+    fn offline_appraise(&mut self, guid: u32) {
+        let Some(offline) = self.offline.as_ref() else {
+            return;
+        };
+        if offline.kind != OfflineKind::Inventory {
+            return;
+        }
+        let Some(data) = offline.data.as_ref() else {
+            return;
+        };
+        let Some(response) = data.appraisals.get(&guid).cloned() else {
+            return;
+        };
+        let name = data
+            .items
+            .iter()
+            .find(|i| i.object_id() == guid)
+            .map(|i| i.name.clone());
+        let scene = self.scene.get_or_insert_with(Scene::default);
+        scene.apply(ac_runtime::session::PresentationEvent::Interface(
+            ac_runtime::session::interface::InterfaceEvent::Appraisal(Box::new(
+                ac_runtime::inventory::AppraisalView {
+                    name,
+                    response,
+                    present_in_ui: true,
+                    opens_window: true,
+                },
+            )),
+        ));
     }
 
     /// A new attach begins: its snapshot replaces the scene, the stream is
@@ -229,6 +479,7 @@ impl ClientPanels {
             now_ms: 0.0,
             epoch: Instant::now(),
             log: Vec::new(),
+            offline: None,
         }
     }
 
@@ -299,6 +550,10 @@ impl ClientPanels {
                     cx.spell_table = spells;
                     cx.skill_formula_bonus_resolver = formulas;
                 }
+                // The window without a session names spells from now on.
+                if let Some(offline) = self.offline.as_mut() {
+                    offline.stale = true;
+                }
             }
             Err(error) => {
                 self.log.push(format!("ui: no game tables: {error}"));
@@ -312,6 +567,10 @@ impl ClientPanels {
     }
 
     fn send(&mut self, command: SessionCommand) {
+        if self.offline.is_some() {
+            self.offline_command(&command);
+            return;
+        }
         let cx = self.encode_context();
         self.outbox.send(command, self.now_ms, &cx);
     }
@@ -451,10 +710,16 @@ impl ClientPanels {
             PLUGIN_CONTROLS_KEY,
             Arc::new(KeptSettings::new(self.storage.clone(), PLUGIN_CONTROLS_KEY)),
         );
-        ui.set_stores(
-            Some(Box::new(layouts)),
-            Some(Box::new(ControlStateSettings(controls))),
-        );
+        // Without a session the one window stands where the module puts
+        // it: no layout is kept or restored.
+        if self.offline.is_some() {
+            ui.set_stores(None, Some(Box::new(ControlStateSettings(controls))));
+        } else {
+            ui.set_stores(
+                Some(Box::new(layouts)),
+                Some(Box::new(ControlStateSettings(controls))),
+            );
+        }
         ui.attach_key_bindings(self.gameplay.dispatcher().bindings());
         let key = ac_ui::storage::keys::CONTROLS_INI;
         match ac_ui::controls_ini::ControlsIni::load_from(&self.storage, key) {
@@ -692,6 +957,8 @@ impl ClientPanels {
     /// frame drawn and handed over.
     fn draw(&mut self, canvas: Canvas, out: &mut Outputs) {
         self.tick_gameplay();
+        self.feed_offline();
+        let offline_window = self.offline.as_ref().map(Offline::window);
         let Some(ui) = self.ui.as_mut() else {
             return;
         };
@@ -709,6 +976,10 @@ impl ClientPanels {
             // The world's effects and motions are the 3-D view's.
             let _ = scene.take_effects();
             let _ = scene.take_motions();
+        }
+        if let Some((window, panel, beside)) = offline_window {
+            let (w, h) = canvas.ui_size();
+            ui.present_only(window, Some(panel), (w as f32, h as f32), beside);
         }
         let _ = ui.take_minimize_requests();
         ui.report_client_chords(self.gameplay.dispatcher().bindings());
@@ -777,7 +1048,9 @@ impl ClientPanels {
     /// What the frame owes the page besides the picture.
     fn hand_over(&mut self, out: &mut Outputs) {
         let cx = self.encode_context();
-        self.outbox.heartbeat(self.now_ms, &cx);
+        if self.offline.is_none() {
+            self.outbox.heartbeat(self.now_ms, &cx);
+        }
         for frame in self.outbox.take_frames() {
             out.command_frame(&frame);
         }
@@ -888,6 +1161,9 @@ impl Panels for ClientPanels {
 
     fn stream(&mut self, frame: &[u8], now: f64) -> Result<(), String> {
         self.now_ms = now;
+        if self.offline.is_some() {
+            return Err("the module shows offline data, not a session".into());
+        }
         if std::mem::take(&mut self.attach_ended) {
             self.start_over();
         }

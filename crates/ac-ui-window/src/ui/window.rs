@@ -36,7 +36,8 @@ use ac_ui::import::{ImportedLayout, LayoutSource, import};
 use ac_ui::panels::PanelOutput;
 use ac_ui::panels::appraisal::{AppraisalController, AppraisalPage, SpellExamineComponent};
 use ac_ui::panels::character::{
-    CharacterSheet, CharacterStatController, CharacterTab, ExperienceCurves, SheetSource,
+    CharacterSheet, CharacterStatController, CharacterTab, ExperienceCurves, ReportedSheet,
+    SheetSource,
 };
 use ac_ui::panels::chat::{self, ChatContext, ChatWindowController};
 use ac_ui::panels::dialog::{DialogAnswer, DialogQueue, confirmation_text, train_skill_message};
@@ -534,6 +535,9 @@ pub struct WindowUi {
     pub(super) dialog_layout: Option<u32>,
     /// The selection the panels were last fed.
     fed_selection: Option<Option<u32>>,
+    /// A character report's values the character sheet takes over the
+    /// numbers (a window shown without a session).
+    reported_sheet: Option<ReportedSheet>,
     /// Panels shown since they were last fed.
     stale: Vec<&'static str>,
     /// Whether the character was in the world when the social panel was
@@ -659,6 +663,7 @@ impl WindowUi {
             dialogs: DialogQueue::default(),
             dialog_layout: None,
             fed_selection: None,
+            reported_sheet: None,
             stale: Vec::new(),
             social_in_world: None,
             fed_social_selection: None,
@@ -993,6 +998,93 @@ impl WindowUi {
         &self.mounted
     }
 
+    /// Show `window` alone, at the top left, every other window hidden:
+    /// the one window a page shows without a session. `panel` names it as
+    /// a main panel, which is shown through the panel switcher. The
+    /// inventory shows the paperdoll's slot view (the figure is a 3-D view
+    /// the page does not draw). Called every frame: whatever showed
+    /// another window meanwhile is undone. Where the window resizes it
+    /// fills `fill`, the canvas in UI units. `beside` may show too (it is
+    /// not shown here, only let be): to the right of `window`, at the top.
+    pub fn present_only(
+        &mut self,
+        window: &str,
+        panel: Option<u32>,
+        fill: (f32, f32),
+        beside: Option<&str>,
+    ) {
+        let others: Vec<String> = self
+            .host
+            .root
+            .windows()
+            .iter()
+            .filter(|w| w.name != window && Some(w.name.as_str()) != beside)
+            .map(|w| w.name.clone())
+            .collect();
+        for name in others {
+            if self.host.root.is_window_visible(&name) {
+                self.host.root.hide_window(&name);
+            }
+        }
+        if !self.host.root.is_window_visible(window) {
+            match panel {
+                Some(panel) => {
+                    self.panels.set_visibility(&mut self.host.root, panel, true);
+                }
+                None => {
+                    self.host.root.show_window(window);
+                }
+            }
+        }
+        self.host.root.move_window(window, 0.0, 0.0);
+        if let Some(beside) = beside
+            && self.host.root.is_window_visible(beside)
+        {
+            let left = self.window_size(window).map_or(0.0, |(w, _)| w);
+            self.host.root.move_window(beside, left, 0.0);
+            self.host.root.resize_window(window, left, fill.1);
+        } else {
+            self.host.root.resize_window(window, fill.0, fill.1);
+        }
+        if window == INVENTORY_WINDOW {
+            self.host
+                .with_controller::<InventoryWindowController, _>(INVENTORY_WINDOW, |c, ui| {
+                    c.paperdoll.set_slot_view(ui, true);
+                });
+        }
+    }
+
+    /// The values a character report gives, which the character sheet
+    /// shows over the player's numbers (none: the numbers alone).
+    pub fn set_reported_sheet(&mut self, reported: Option<ReportedSheet>) {
+        self.reported_sheet = reported;
+        self.stale.push(CHARACTER_WINDOW);
+    }
+
+    /// The size `window` has now (its frame included), in UI units.
+    #[must_use]
+    pub fn window_size(&self, window: &str) -> Option<(f32, f32)> {
+        let frame = self.host.root.window(window)?.frame;
+        let e = self.host.root.element(frame)?;
+        Some((e.width, e.height))
+    }
+
+    /// Whether `window` shows.
+    #[must_use]
+    pub fn is_window_visible(&self, window: &str) -> bool {
+        self.host.root.is_window_visible(window)
+    }
+
+    /// The size `window` was mounted at (its frame included), in UI
+    /// units.
+    #[must_use]
+    pub fn natural_size(&self, window: &str) -> Option<(f32, f32)> {
+        self.host
+            .root
+            .window(window)
+            .map(|w| (w.authored_width, w.authored_height))
+    }
+
     /// The UI host (input goes through [`WindowUi::key`] and
     /// [`super::input`]).
     pub fn host_mut(&mut self) -> &mut UiHost {
@@ -1149,6 +1241,7 @@ impl WindowUi {
             content,
             status,
             panels,
+            reported_sheet,
             ..
         } = self;
         let mana_answers = std::mem::take(&mut facts.item_mana);
@@ -1207,7 +1300,7 @@ impl WindowUi {
         {
             let strings = content.strings();
             let ui_string = |key: &str| strings.resolve(UI_STRING_TABLE, compute_hash(key), 0);
-            let sheet = CharacterSheet::build(&SheetSource {
+            let mut sheet = CharacterSheet::build(&SheetSource {
                 player: numbers,
                 properties: &object.properties,
                 pwd_bitfield: object.public_weenie_bitfield.map_or(0, |f| f.bits()),
@@ -1217,6 +1310,9 @@ impl WindowUi {
                 skill_table: skill_table.as_ref(),
                 ui_string: Some(&ui_string),
             });
+            if let Some(reported) = reported_sheet.as_ref() {
+                sheet.apply_reported(reported, skill_table.as_ref());
+            }
             host.with_controller::<CharacterStatController, _>(CHARACTER_WINDOW, |c, ui| {
                 c.apply(ui, &sheet);
             });

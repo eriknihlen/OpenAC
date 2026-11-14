@@ -22,6 +22,7 @@ pub mod commands;
 mod export;
 pub mod host;
 pub mod keys;
+pub mod offline;
 pub mod output;
 pub mod page;
 

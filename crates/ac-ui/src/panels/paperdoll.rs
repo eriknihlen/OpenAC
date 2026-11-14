@@ -619,6 +619,15 @@ impl PaperdollController {
             .map(|(_, l)| *l)
     }
 
+    /// Show the slot view (`true`: every slot, the armor slots too, no
+    /// figure) or the doll view.
+    pub fn set_slot_view(&mut self, ui: &mut UiRoot, slot_view: bool) {
+        if self.slot_view != slot_view {
+            self.slot_view = slot_view;
+            self.apply_view(ui);
+        }
+    }
+
     fn toggle(&mut self, ui: &mut UiRoot) {
         self.slot_view = !self.slot_view;
         self.apply_view(ui);
