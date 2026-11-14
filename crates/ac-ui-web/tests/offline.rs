@@ -123,6 +123,13 @@ fn the_inventory_shows_alone_and_a_click_selects_without_a_command() {
         .map(ac_core::items::ClientObject::object_id);
     assert_eq!(page.module.panels().offline_selected(), boots);
     picture(&page, "inventory-selected");
+    // ... and the examination window opens beside the inventory, counted
+    // in the size.
+    let ui = page.module.panels().ui().unwrap();
+    assert!(ui.is_window_visible("examination"), "{}", page.log);
+    let size = page.module.panels().offline_size().unwrap();
+    println!("size while examining: {size:?}");
+    assert!(size.0 > 500, "{size:?}");
 
     // A click on the side pack opens it: its three items show.
     click(&mut page, (267.0, 118.0));
@@ -202,6 +209,16 @@ fn real_data_shows_in_both_windows() {
         if kind == OfflineKind::Character {
             click(&mut page, (143.0, 18.0));
             picture(&page, "real-character-skills");
+        } else {
+            // Examine each worn item in turn (the paperdoll's slots).
+            for (n, at) in [(178.0, 215.0), (213.0, 125.0), (104.0, 70.0), (68.0, 110.0)]
+                .into_iter()
+                .enumerate()
+            {
+                click(&mut page, at);
+                picture(&page, &format!("real-exam-{n}"));
+            }
+            println!("size: {:?}", page.module.panels().offline_size());
         }
         println!("{}", page.log);
         assert!(page.sent_stamped().is_empty());

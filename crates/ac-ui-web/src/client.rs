@@ -116,13 +116,18 @@ struct Offline {
 }
 
 impl Offline {
-    /// The window shown and, for a main panel, its panel.
-    fn window(&self) -> (&'static str, u32) {
+    /// The window shown, its main panel, and the window that may show
+    /// beside it (the inventory's: the examination window).
+    fn window(&self) -> (&'static str, u32, Option<&'static str>) {
         use ac_ui::panels::panel_id;
-        use ac_ui_window::ui::window::{CHARACTER_WINDOW, INVENTORY_WINDOW};
+        use ac_ui_window::ui::window::{CHARACTER_WINDOW, EXAMINATION_WINDOW, INVENTORY_WINDOW};
         match self.kind {
-            OfflineKind::Inventory => (INVENTORY_WINDOW, panel_id::INVENTORY),
-            OfflineKind::Character => (CHARACTER_WINDOW, panel_id::CHARACTER),
+            OfflineKind::Inventory => (
+                INVENTORY_WINDOW,
+                panel_id::INVENTORY,
+                Some(EXAMINATION_WINDOW),
+            ),
+            OfflineKind::Character => (CHARACTER_WINDOW, panel_id::CHARACTER, None),
         }
     }
 }
@@ -249,8 +254,16 @@ impl ClientPanels {
     /// or with a session.
     #[must_use]
     pub fn offline_size(&self) -> Option<(u32, u32)> {
-        let (window, _) = self.offline.as_ref()?.window();
-        let (w, h) = self.ui.as_ref()?.natural_size(window)?;
+        let (window, _, beside) = self.offline.as_ref()?.window();
+        let ui = self.ui.as_ref()?;
+        let (mut w, mut h) = ui.natural_size(window)?;
+        // While the examination window shows beside it, it is counted in.
+        if let Some(beside) = beside.filter(|b| ui.is_window_visible(b))
+            && let Some((bw, bh)) = ui.window_size(beside)
+        {
+            w += bw;
+            h = h.max(bh);
+        }
         Some((w.round().max(0.0) as u32, h.round().max(0.0) as u32))
     }
 
@@ -274,6 +287,7 @@ impl ClientPanels {
 
     /// Give the scene the data handed in since it was last given it.
     fn feed_offline(&mut self) {
+        let (spells, _) = self.table_parts();
         let Some(offline) = self.offline.as_mut() else {
             return;
         };
@@ -291,7 +305,13 @@ impl ClientPanels {
             .as_ref()
             .filter(|(player, _)| *player == data.player)
             .map(|(_, ids)| ids.as_slice());
-        let events = data.events(offline.kind, offline.selected, offline.revision, before);
+        let events = data.events(
+            offline.kind,
+            spells,
+            offline.selected,
+            offline.revision,
+            before,
+        );
         if offline.kind == OfflineKind::Character
             && let Some(ui) = self.ui.as_mut()
         {
@@ -314,6 +334,12 @@ impl ClientPanels {
                 (*guid != 0).then_some(*guid)
             }
             SessionCommand::Gameplay(GameplayCommand::ClearSelection) => None,
+            SessionCommand::Item(ac_runtime::inventory::ItemCommand::Appraise(
+                ObjectRef::Guid(guid),
+            )) => {
+                self.offline_appraise(*guid);
+                return;
+            }
             _ => return,
         };
         let Some(offline) = self.offline.as_mut() else {
@@ -332,6 +358,44 @@ impl ClientPanels {
         ));
         scene.apply(ac_runtime::session::PresentationEvent::Interface(
             ac_runtime::session::interface::InterfaceEvent::Selection(selected),
+        ));
+        // The inventory examines what is selected: the examination window
+        // opens beside it.
+        if let Some(guid) = selected {
+            self.offline_appraise(guid);
+        }
+    }
+
+    /// The examination of `guid` from the data, as the server would answer
+    /// it (the inventory's alone).
+    fn offline_appraise(&mut self, guid: u32) {
+        let Some(offline) = self.offline.as_ref() else {
+            return;
+        };
+        if offline.kind != OfflineKind::Inventory {
+            return;
+        }
+        let Some(data) = offline.data.as_ref() else {
+            return;
+        };
+        let Some(response) = data.appraisals.get(&guid).cloned() else {
+            return;
+        };
+        let name = data
+            .items
+            .iter()
+            .find(|i| i.object_id() == guid)
+            .map(|i| i.name.clone());
+        let scene = self.scene.get_or_insert_with(Scene::default);
+        scene.apply(ac_runtime::session::PresentationEvent::Interface(
+            ac_runtime::session::interface::InterfaceEvent::Appraisal(Box::new(
+                ac_runtime::inventory::AppraisalView {
+                    name,
+                    response,
+                    present_in_ui: true,
+                    opens_window: true,
+                },
+            )),
         ));
     }
 
@@ -463,6 +527,10 @@ impl ClientPanels {
                 if let Some(cx) = self.decode.as_mut() {
                     cx.spell_table = spells;
                     cx.skill_formula_bonus_resolver = formulas;
+                }
+                // The window without a session names spells from now on.
+                if let Some(offline) = self.offline.as_mut() {
+                    offline.stale = true;
                 }
             }
             Err(error) => {
@@ -887,9 +955,9 @@ impl ClientPanels {
             let _ = scene.take_effects();
             let _ = scene.take_motions();
         }
-        if let Some((window, panel)) = offline_window {
+        if let Some((window, panel, beside)) = offline_window {
             let (w, h) = canvas.ui_size();
-            ui.present_only(window, Some(panel), (w as f32, h as f32));
+            ui.present_only(window, Some(panel), (w as f32, h as f32), beside);
         }
         let _ = ui.take_minimize_requests();
         ui.report_client_chords(self.gameplay.dispatcher().bindings());

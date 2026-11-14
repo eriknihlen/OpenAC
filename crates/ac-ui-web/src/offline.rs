@@ -18,6 +18,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use ac_core::items::{ClientObject, EquipMask, ItemType, ItemUseable, PublicWeenieFlags};
 use ac_core::player::LocalPlayerState;
+use ac_proto::PropertyTables;
+use ac_proto::appraise::{ArmorProfile, IdentifyObjectResponse, WeaponProfile};
 use ac_runtime::session::PresentationEvent;
 use ac_runtime::session::interface::{InterfaceEvent, InterfaceState, ItemsUpdate, PlayerFacts};
 use ac_runtime::world::{PlayerView, WorldSnapshot};
@@ -74,6 +76,24 @@ mod keys {
     pub const ICON_UNDERLAY: u32 = 218_103_850;
     pub const SALVAGE_WORKMANSHIP: u32 = 167_772_169;
     pub const SECONDARY_NAME: u32 = 184_549_376;
+    // The appraisal profiles' values.
+    pub const WEAP_SPEED: u32 = 218_103_839;
+    pub const EQUIP_SKILL: u32 = 218_103_840;
+    pub const DAMAGE_TYPE: u32 = 218_103_841;
+    pub const MAX_DAMAGE: u32 = 218_103_842;
+    pub const SLASH_PROT: u32 = 167_772_160;
+    pub const PIERCE_PROT: u32 = 167_772_161;
+    pub const BLUDGEON_PROT: u32 = 167_772_162;
+    pub const ACID_PROT: u32 = 167_772_163;
+    pub const LIGHTNING_PROT: u32 = 167_772_164;
+    pub const FIRE_PROT: u32 = 167_772_165;
+    pub const COLD_PROT: u32 = 167_772_166;
+    pub const VARIANCE: u32 = 167_772_171;
+    pub const ATTACK_BONUS: u32 = 167_772_172;
+    pub const RANGE: u32 = 167_772_173;
+    pub const DAMAGE_BONUS: u32 = 167_772_174;
+    /// The armor's nether protection, a game property (no framework key).
+    pub const NETHER_PROT: u32 = 165;
 
     /// The lowest framework key (the floating-point table's first).
     pub const FRAMEWORK_KEYS_FROM: u32 = 167_772_160;
@@ -139,6 +159,8 @@ pub struct OfflineData {
     pub name: String,
     /// Every item, with its place.
     pub items: Vec<ClientObject>,
+    /// Each item's appraisal as the server would answer it, by id.
+    pub appraisals: HashMap<u32, IdentifyObjectResponse>,
     /// Contents lists, in order: the player's (his items and packs) and
     /// each pack's.
     pub contents: Vec<(u32, Vec<u32>)>,
@@ -186,8 +208,10 @@ impl OfflineData {
             .and_then(Value::as_array)
             .map_or(&[][..], Vec::as_slice);
         let mut slotted: Vec<(ClientObject, Option<i64>, usize)> = Vec::new();
+        let mut appraisals = HashMap::new();
         for (index, record) in records.iter().enumerate() {
             if let Some(item) = item_of(record) {
+                appraisals.insert(item.object_id(), appraisal_of(record, &item));
                 let slot = record.get("slot").and_then(Value::as_i64);
                 slotted.push((item, slot, index));
             }
@@ -244,6 +268,7 @@ impl OfflineData {
             items,
             contents,
             stats,
+            appraisals,
         })
     }
 
@@ -256,6 +281,7 @@ impl OfflineData {
     pub fn events(
         &self,
         kind: OfflineKind,
+        spells: Option<std::sync::Arc<ac_core::spells::SpellTable>>,
         selected: Option<u32>,
         revision: u64,
         before: Option<&[u32]>,
@@ -272,7 +298,8 @@ impl OfflineData {
             .iter()
             .map(|(c, list)| (*c, Some(list.clone())))
             .collect();
-        let mut numbers = LocalPlayerState::new(None);
+        // The spell table names the spells the windows show.
+        let mut numbers = LocalPlayerState::new(Some(ac_core::spells::Spellbook::new(spells)));
         for (index, attribute) in self.stats.attributes.iter().enumerate() {
             if let Some((mut ranks, start)) = *attribute {
                 // The inventory's burden meter reads strength now.
@@ -619,4 +646,75 @@ fn item_of(record: &Value) -> Option<ClientObject> {
     o.properties.strings = strings.into_iter().filter(|(k, _)| game(k)).collect();
     o.properties.bools = bools.into_iter().filter(|(k, _)| game(k)).collect();
     Some(o)
+}
+
+/// One item record as the server's answer to an appraisal of it: its game
+/// properties, its spells and, where the record keeps them, its weapon and
+/// armor profiles (from the framework's keys). An item the companion never
+/// appraised answers with what its description gave.
+fn appraisal_of(record: &Value, item: &ClientObject) -> IdentifyObjectResponse {
+    use ac_proto::appraise::identify_flags as f;
+    let ints = table(record, "IntValues", |v| v.as_i64().map(|v| v as i32));
+    let floats = table(record, "DoubleValues", Value::as_f64);
+    let float = |key: u32| floats.get(&key).copied();
+    let int = |key: u32| ints.get(&key).copied();
+    let p = &item.properties;
+    let properties = PropertyTables {
+        ints: p.ints.clone(),
+        int64s: p.int64s.clone(),
+        bools: p.bools.clone(),
+        floats: p.floats.clone(),
+        strings: p.strings.clone(),
+        data_ids: p.data_ids.clone(),
+        instance_ids: BTreeMap::new(),
+    };
+    let weapon_profile = int(keys::MAX_DAMAGE).map(|damage| WeaponProfile {
+        damage_type: int(keys::DAMAGE_TYPE).unwrap_or(0) as u32,
+        weapon_time: int(keys::WEAP_SPEED).unwrap_or(0) as u32,
+        weapon_skill: int(keys::EQUIP_SKILL).unwrap_or(0) as u32,
+        damage: damage as u32,
+        damage_variance: float(keys::VARIANCE).unwrap_or(0.0),
+        damage_mod: float(keys::DAMAGE_BONUS).unwrap_or(1.0),
+        weapon_length: 0.0,
+        max_velocity: float(keys::RANGE).unwrap_or(0.0),
+        weapon_offense: float(keys::ATTACK_BONUS).unwrap_or(1.0),
+        max_velocity_estimated: 0,
+    });
+    let armor_profile = float(keys::SLASH_PROT).map(|slashing| ArmorProfile {
+        slashing: slashing as f32,
+        piercing: float(keys::PIERCE_PROT).unwrap_or(0.0) as f32,
+        bludgeoning: float(keys::BLUDGEON_PROT).unwrap_or(0.0) as f32,
+        cold: float(keys::COLD_PROT).unwrap_or(0.0) as f32,
+        fire: float(keys::FIRE_PROT).unwrap_or(0.0) as f32,
+        acid: float(keys::ACID_PROT).unwrap_or(0.0) as f32,
+        // The record keeps no nether protection of the profile: the item's
+        // own property, or the neutral 1.0 the server sends for an item
+        // without one.
+        nether: float(keys::NETHER_PROT).unwrap_or(1.0) as f32,
+        lightning: float(keys::LIGHTNING_PROT).unwrap_or(0.0) as f32,
+    });
+    let mut flags = 0;
+    for (present, flag) in [
+        (!properties.ints.is_empty(), f::INT_STATS_TABLE),
+        (!properties.bools.is_empty(), f::BOOL_STATS_TABLE),
+        (!properties.floats.is_empty(), f::FLOAT_STATS_TABLE),
+        (!properties.strings.is_empty(), f::STRING_STATS_TABLE),
+        (!item.appraised_spell_ids.is_empty(), f::SPELL_BOOK),
+        (weapon_profile.is_some(), f::WEAPON_PROFILE),
+        (armor_profile.is_some(), f::ARMOR_PROFILE),
+    ] {
+        if present {
+            flags |= flag;
+        }
+    }
+    IdentifyObjectResponse {
+        guid: item.object_id(),
+        flags,
+        success: true,
+        properties,
+        spell_book: item.appraised_spell_ids.clone(),
+        armor_profile,
+        weapon_profile,
+        ..IdentifyObjectResponse::default()
+    }
 }

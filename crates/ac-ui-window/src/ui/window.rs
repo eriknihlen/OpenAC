@@ -1004,14 +1004,21 @@ impl WindowUi {
     /// inventory shows the paperdoll's slot view (the figure is a 3-D view
     /// the page does not draw). Called every frame: whatever showed
     /// another window meanwhile is undone. Where the window resizes it
-    /// fills `fill`, the canvas in UI units.
-    pub fn present_only(&mut self, window: &str, panel: Option<u32>, fill: (f32, f32)) {
+    /// fills `fill`, the canvas in UI units. `beside` may show too (it is
+    /// not shown here, only let be): to the right of `window`, at the top.
+    pub fn present_only(
+        &mut self,
+        window: &str,
+        panel: Option<u32>,
+        fill: (f32, f32),
+        beside: Option<&str>,
+    ) {
         let others: Vec<String> = self
             .host
             .root
             .windows()
             .iter()
-            .filter(|w| w.name != window)
+            .filter(|w| w.name != window && Some(w.name.as_str()) != beside)
             .map(|w| w.name.clone())
             .collect();
         for name in others {
@@ -1030,7 +1037,15 @@ impl WindowUi {
             }
         }
         self.host.root.move_window(window, 0.0, 0.0);
-        self.host.root.resize_window(window, fill.0, fill.1);
+        if let Some(beside) = beside
+            && self.host.root.is_window_visible(beside)
+        {
+            let left = self.window_size(window).map_or(0.0, |(w, _)| w);
+            self.host.root.move_window(beside, left, 0.0);
+            self.host.root.resize_window(window, left, fill.1);
+        } else {
+            self.host.root.resize_window(window, fill.0, fill.1);
+        }
         if window == INVENTORY_WINDOW {
             self.host
                 .with_controller::<InventoryWindowController, _>(INVENTORY_WINDOW, |c, ui| {
@@ -1044,6 +1059,20 @@ impl WindowUi {
     pub fn set_reported_sheet(&mut self, reported: Option<ReportedSheet>) {
         self.reported_sheet = reported;
         self.stale.push(CHARACTER_WINDOW);
+    }
+
+    /// The size `window` has now (its frame included), in UI units.
+    #[must_use]
+    pub fn window_size(&self, window: &str) -> Option<(f32, f32)> {
+        let frame = self.host.root.window(window)?.frame;
+        let e = self.host.root.element(frame)?;
+        Some((e.width, e.height))
+    }
+
+    /// Whether `window` shows.
+    #[must_use]
+    pub fn is_window_visible(&self, window: &str) -> bool {
+        self.host.root.is_window_visible(window)
     }
 
     /// The size `window` was mounted at (its frame included), in UI
