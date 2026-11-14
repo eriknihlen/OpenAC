@@ -42,7 +42,12 @@ wayland-protocols.workspace = true
 x11-dl.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+[[test]]
+# Runs the event loop on its own main thread (see the file).
+name = "hidden_window_close"
+harness = false
 
 [lints]
 workspace = true

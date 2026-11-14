@@ -870,6 +870,10 @@ impl AttachedWindow {
         self.window.id()
     }
 
+    pub(crate) fn winit_window(&self) -> &Window {
+        &self.window
+    }
+
     pub(crate) fn adapter(&self) -> &AdapterSummary {
         &self.adapter
     }

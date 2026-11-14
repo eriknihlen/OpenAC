@@ -116,11 +116,19 @@ pub fn resolve_display(
 }
 
 /// Apply the decision to the event loop builder (Linux only; elsewhere
-/// there is one windowing system).
+/// there is one windowing system). On Windows the loop also takes a close
+/// request only for the game window: see [`drops_message`].
 pub(crate) fn apply<T>(
     builder: &mut winit::event_loop::EventLoopBuilder<T>,
     protocol: DisplayProtocol,
+    game_window: &GameWindow,
 ) {
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        let game_window = game_window.clone();
+        builder.with_msg_hook(move |message| windows_drops_message(message, &game_window));
+    }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         use winit::platform::wayland::EventLoopBuilderExtWayland;
@@ -139,6 +147,69 @@ pub(crate) fn apply<T>(
     {
         let _ = (builder, protocol);
     }
+    let _ = game_window;
+}
+
+/// The native handle of the game window while one is open (0 when none),
+/// kept by the window host and read by the event loop's message hook, both
+/// on the loop's thread.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GameWindow(std::rc::Rc<std::cell::Cell<isize>>);
+
+impl GameWindow {
+    /// The game window `window` is open now.
+    pub(crate) fn opened(&self, window: &winit::window::Window) {
+        self.0.set(native_handle(window));
+    }
+
+    /// No game window is open.
+    pub(crate) fn closed(&self) {
+        self.0.set(0);
+    }
+
+    #[cfg(windows)]
+    fn get(&self) -> isize {
+        self.0.get()
+    }
+}
+
+/// A window's Win32 handle, or 0 elsewhere.
+fn native_handle(window: &winit::window::Window) -> isize {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().map(|handle| handle.as_raw()) {
+        Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
+        _ => 0,
+    }
+}
+
+/// The Win32 close request (`WM_CLOSE`).
+pub const WM_CLOSE: u32 = 0x0010;
+
+/// Whether the event loop drops a queued Win32 message for `window`
+/// instead of handing it on: a close request for any window of the loop's
+/// thread but the game window (`game_window`, 0 when none is open). Such a
+/// request comes from outside the client: `taskkill` without `/F` posts one
+/// to every top-level window of the process. The game window takes it as
+/// the player's close. Of the others none is one a player can close, and
+/// one is the loop's own hidden window, which would destroy itself: every
+/// later wake of the loop (a window opening on a session, the shutdown when
+/// the session has ended) would then go nowhere, and the process would
+/// outlive its session with no window.
+#[must_use]
+pub fn drops_message(message: u32, window: isize, game_window: isize) -> bool {
+    message == WM_CLOSE && window != 0 && window != game_window
+}
+
+/// [`drops_message`] for the message the loop is about to dispatch.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn windows_drops_message(message: *const std::ffi::c_void, game_window: &GameWindow) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::MSG;
+    // SAFETY: the event loop calls this hook with a pointer to the live MSG
+    // it has just taken from the thread's queue, and reads it only after
+    // the hook returns.
+    let message = unsafe { &*message.cast::<MSG>() };
+    drops_message(message.message, message.hwnd as isize, game_window.get())
 }
 
 /// The windowing system a window actually runs on (an automatic choice
@@ -252,6 +323,21 @@ mod tests {
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         move |name| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+    }
+
+    /// Only a close request for a window other than the game window is
+    /// dropped: the game window's close and every other message reach
+    /// their windows.
+    #[test]
+    fn only_the_game_window_takes_a_close_request() {
+        let (game, hidden) = (0x1234, 0x5678);
+        assert!(!drops_message(WM_CLOSE, game, game), "the player's close");
+        assert!(drops_message(WM_CLOSE, hidden, game));
+        assert!(drops_message(WM_CLOSE, hidden, 0), "no game window open");
+        assert!(!drops_message(WM_CLOSE, 0, 0), "a thread message");
+        const WM_PAINT: u32 = 0x000F;
+        assert!(!drops_message(WM_PAINT, hidden, game));
+        assert!(!drops_message(WM_PAINT, game, game));
     }
 
     #[test]

@@ -352,6 +352,8 @@ pub struct WindowHost {
     event_loop: EventLoop<HostCommand>,
     events: Sender<HostEvent>,
     options: HostOptions,
+    /// The open game window, the one window a close request reaches.
+    game_window: crate::platform::GameWindow,
 }
 
 impl WindowHost {
@@ -361,7 +363,8 @@ impl WindowHost {
         options: HostOptions,
     ) -> Result<(Self, HostHandle, Receiver<HostEvent>), RenderError> {
         let mut builder = EventLoop::<HostCommand>::with_user_event();
-        crate::platform::apply(&mut builder, options.display);
+        let game_window = crate::platform::GameWindow::default();
+        crate::platform::apply(&mut builder, options.display, &game_window);
         let event_loop = builder.build()?;
         event_loop.set_control_flow(ControlFlow::Wait);
         let handle = HostHandle {
@@ -377,6 +380,7 @@ impl WindowHost {
                 event_loop,
                 events,
                 options,
+                game_window,
             },
             handle,
             receiver,
@@ -398,6 +402,7 @@ impl WindowHost {
         });
         let mut app = HostApp {
             instance: None,
+            game_window: self.game_window,
             machine: AttachMachine::new(),
             window: None,
             pending: None,
@@ -444,6 +449,8 @@ struct HostApp {
     /// The GPU instance, made on the first attach: a process that never
     /// opens a window loads no graphics driver.
     instance: Option<wgpu::Instance>,
+    /// The open game window, for the event loop's message hook.
+    game_window: crate::platform::GameWindow,
     machine: AttachMachine,
     window: Option<AttachedWindow>,
     /// The spec and scene source of the attach being processed.
@@ -582,6 +589,7 @@ impl HostApp {
                 window.set_layout_store(self.store.clone());
                 self.report(HostEvent::Attached(window.adapter().clone()));
                 window.request_redraw();
+                self.game_window.opened(window.winit_window());
                 self.window = Some(window);
             }
             Err(error) => {
@@ -593,6 +601,7 @@ impl HostApp {
 
     fn close(&mut self, reason: DetachReason) {
         if let Some(window) = self.window.take() {
+            self.game_window.closed();
             let (frames_presented, failure) = window.close();
             // The window's loaders are gone with it: the dats and caches it
             // read go too, and the next window opens them again.
