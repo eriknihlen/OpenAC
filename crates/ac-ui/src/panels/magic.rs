@@ -492,6 +492,13 @@ impl SpellbookWindowController {
         set_open(ui, self.component_tab, page == SpellbookPage::Components);
     }
 
+    /// The list rebuilt on the next update though the book is the same: the
+    /// icons it found missing may be there now (a host whose dats arrive
+    /// while it runs).
+    pub fn reread(&mut self) {
+        self.shown = None;
+    }
+
     /// Show `view`: the learned spells that pass the filters, in display
     /// order (rebuilt when the book or the filters changed).
     pub fn update(&mut self, ui: &mut UiRoot, view: &MagicView<'_>, icons: &mut dyn IconSource) {
@@ -893,6 +900,13 @@ impl SpellcastingController {
     #[must_use]
     pub fn endowment_slot(&self) -> ElementId {
         self.endowment_slot
+    }
+
+    /// The bars rebuilt on the next update though the book is the same: the
+    /// icons they found missing may be there now (a host whose dats arrive
+    /// while it runs).
+    pub fn reread(&mut self) {
+        self.shown_revision = None;
     }
 
     /// Show `view`: rebuild the bars when the book changed (not while a

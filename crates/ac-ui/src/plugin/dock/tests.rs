@@ -2815,6 +2815,35 @@ fn a_change_of_theme_swaps_the_version_only_between_light_and_dark() {
 }
 
 #[test]
+fn a_slot_whose_image_was_missing_asks_again_when_told_files_arrived() {
+    // A page's dats arrive while it runs: the slot's dat image was not
+    // there at the first sync, so the slot shows its letters.
+    let mut rig = Rig::new(SCREEN.1, PluginTheme::Classic);
+    let descriptor = PanelDescriptor {
+        icon_surface_id: 0x165,
+        ..PanelDescriptor::new("main", "Test Plugin")
+    };
+    rig.add("acdream.test", "Test Plugin", descriptor);
+    let panels: Vec<PanelView> = rig.ui.panels().cloned().collect();
+    let mut icons = StubIcons::none();
+    let sync = |rig: &mut Rig, icons: &mut StubIcons| {
+        rig.host.with_controller::<PluginDock, _>(WINDOW, |c, ui| {
+            c.sync(ui, &panels, icons);
+        });
+    };
+    sync(&mut rig, &mut icons);
+    assert_eq!(icons.surface_calls.len(), 1);
+    // The same windows: the image is not asked for again.
+    sync(&mut rig, &mut icons);
+    assert_eq!(icons.surface_calls.len(), 1);
+    // Files arrived: the next sync asks again, once.
+    rig.with(|c, _| c.reread());
+    sync(&mut rig, &mut icons);
+    sync(&mut rig, &mut icons);
+    assert_eq!(icons.surface_calls, [0x0600_0165, 0x0600_0165]);
+}
+
+#[test]
 fn a_windows_own_png_dims_while_its_window_is_closed() {
     let icon = ac_plugin_ui::WindowIcon {
         named: Some(filled(2)),

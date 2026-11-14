@@ -42,6 +42,10 @@ pub const LAYOUTS_KEY: &str = "window-layouts/settings.json";
 /// settings file of their own.
 pub const PLUGIN_CONTROLS_KEY: &str = "plugin-controls/settings.json";
 
+/// The most stream bytes held while the game tables are read; past it the
+/// frames are decoded without them.
+const MAX_HELD_BYTES: usize = 64 * 1024 * 1024;
+
 /// The canvas: its size in pixels and its pixels per UI unit.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Canvas {
@@ -149,6 +153,11 @@ pub struct ClientPanels {
     waiting_textures: HashSet<TextureRef>,
     /// Dat files arrived since the panels last forgot their misses.
     arrived: bool,
+    /// Stream frames held while the game tables are read: what is decoded
+    /// without them keeps no spell names or icons (the spellbook is sent
+    /// once, at the attach), so they wait, in order, and the bytes held.
+    held_frames: Vec<Vec<u8>>,
+    held_bytes: usize,
     storage: PageStorage,
     clipboard: PageClipboard,
     settings: PlayerSettings,
@@ -425,6 +434,8 @@ impl ClientPanels {
     /// decoded from its own first frame, and the panels are built again
     /// (from the files already in) to show what it brings.
     fn start_over(&mut self) {
+        self.held_frames.clear();
+        self.held_bytes = 0;
         self.scene = None;
         self.decode = None;
         if self.ui.take().is_some() {
@@ -454,6 +465,8 @@ impl ClientPanels {
             in_flight: HashSet::new(),
             waiting_textures: HashSet::new(),
             arrived: false,
+            held_frames: Vec::new(),
+            held_bytes: 0,
             storage: PageStorage::default(),
             clipboard: PageClipboard::default(),
             settings: PlayerSettings::default(),
@@ -558,6 +571,35 @@ impl ClientPanels {
             Err(error) => {
                 self.log.push(format!("ui: no game tables: {error}"));
                 self.tables = Tables::Failed;
+            }
+        }
+        self.decode_held();
+    }
+
+    /// Decode one stream frame into the scene, with the tables as they are.
+    fn decode_frame(&mut self, frame: &[u8]) -> Result<(), String> {
+        if self.decode.is_none() {
+            let (spells, formulas) = self.table_parts();
+            self.decode = Some(DecodeContext::new(Instant::now(), spells, formulas));
+        }
+        let Some(cx) = self.decode.as_ref() else {
+            return Ok(());
+        };
+        let events = ac_remote_wire::decode_batch(frame, cx).map_err(|e| e.to_string())?;
+        let scene = self.scene.get_or_insert_with(Scene::default);
+        for event in events {
+            scene.apply(event);
+        }
+        Ok(())
+    }
+
+    /// The frames held while the tables were read, decoded now, in order.
+    fn decode_held(&mut self) {
+        let held = std::mem::take(&mut self.held_frames);
+        self.held_bytes = 0;
+        for frame in held {
+            if let Err(error) = self.decode_frame(&frame) {
+                self.log.push(format!("ui: a held stream frame: {error}"));
             }
         }
     }
@@ -1167,19 +1209,16 @@ impl Panels for ClientPanels {
         if std::mem::take(&mut self.attach_ended) {
             self.start_over();
         }
-        if self.decode.is_none() {
-            let (spells, formulas) = self.table_parts();
-            self.decode = Some(DecodeContext::new(Instant::now(), spells, formulas));
-        }
-        let Some(cx) = self.decode.as_ref() else {
+        // While the tables are read the frames wait, unless so much has
+        // come that the page would rather draw without spell names.
+        if matches!(self.tables, Tables::Waiting) && self.held_bytes + frame.len() <= MAX_HELD_BYTES
+        {
+            self.held_bytes += frame.len();
+            self.held_frames.push(frame.to_vec());
             return Ok(());
-        };
-        let events = ac_remote_wire::decode_batch(frame, cx).map_err(|e| e.to_string())?;
-        let scene = self.scene.get_or_insert_with(Scene::default);
-        for event in events {
-            scene.apply(event);
         }
-        Ok(())
+        self.decode_held();
+        self.decode_frame(frame)
     }
 
     fn detached(&mut self) {
@@ -1598,8 +1637,38 @@ mod tests {
     /// last picture stands: the scene is replaced when the new stream
     /// starts, not when the old one stops.
     #[test]
+    fn frames_wait_for_the_game_tables_and_are_decoded_in_order_once_read() {
+        let mut panels = ClientPanels::new();
+        let epoch = Instant::now();
+        let frame = |text: &str| {
+            ac_remote_wire::encode_batch(
+                &[ac_runtime::session::PresentationEvent::StatusText(
+                    text.into(),
+                )],
+                &ac_remote_wire::EncodeContext::new(epoch),
+            )
+            .unwrap()
+        };
+        // The spellbook comes once, at the attach: decoded before the
+        // tables, it would keep no spell names or icons.
+        panels.stream(&frame("first"), 1.0).unwrap();
+        panels.stream(&frame("second"), 2.0).unwrap();
+        assert!(panels.scene.is_none(), "nothing decoded yet");
+        assert_eq!(panels.held_frames.len(), 2);
+        // The tables are settled (here: could not be read): the frames are
+        // decoded, then each new one at once.
+        panels.tables = Tables::Failed;
+        panels.stream(&frame("third"), 3.0).unwrap();
+        assert!(panels.scene.is_some());
+        assert!(panels.held_frames.is_empty());
+        assert_eq!(panels.held_bytes, 0);
+    }
+
+    #[test]
     fn a_detach_keeps_the_scene_until_the_next_attach_speaks() {
         let mut panels = ClientPanels::new();
+        // The tables are settled: frames are decoded as they come.
+        panels.tables = Tables::Failed;
         let epoch = Instant::now();
         let frame = ac_remote_wire::encode_batch(
             &[ac_runtime::session::PresentationEvent::StatusText(

@@ -206,6 +206,9 @@ pub struct PluginDock {
     theme: PluginTheme,
     /// Whether the slots' icons were last picked for a light theme.
     icons_light: bool,
+    /// The slots' icons are picked again at the next sync: images they
+    /// found missing may be there now.
+    icons_stale: bool,
     first: usize,
     /// How many slots it shows at most; none for as many as the screen has room
     /// for.
@@ -320,6 +323,7 @@ impl PluginDock {
             outbox,
             theme: PluginTheme::Classic,
             icons_light: false,
+            icons_stale: false,
             first: 0,
             slot_limit: None,
             layout,
@@ -548,6 +552,13 @@ impl PluginDock {
         }
     }
 
+    /// Pick the slots' icons again at the next sync though the windows are
+    /// the same: a dat image a slot found missing may be there now (a host
+    /// whose dats arrive while it runs).
+    pub fn reread(&mut self) {
+        self.icons_stale = true;
+    }
+
     /// The panels with a slot: the windows that asked for one, in
     /// registration order, each open or not, with its icon ([`slot_icon`]). A
     /// change between a light theme and a dark one draws each window's PNG in
@@ -592,7 +603,7 @@ impl PluginDock {
             }
         }
         let light = self.palette().is_light();
-        let resolve = !same || self.icons_light != light;
+        let resolve = !same || self.icons_light != light || std::mem::take(&mut self.icons_stale);
         self.icons_light = light;
         for (entry, panel) in self.entries.iter_mut().zip(&wanted) {
             entry.open = panel.shown();

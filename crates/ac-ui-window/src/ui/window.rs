@@ -759,6 +759,25 @@ impl WindowUi {
                 None => false,
             });
         self.facts.reread();
+        // The panels that rebuild only when the spellbook changes asked for
+        // spell icons once; they ask again.
+        let host = &mut self.host;
+        host.with_controller::<SpellcastingController, _>(COMBAT_WINDOW, |c, _| c.reread());
+        host.with_controller::<SpellbookWindowController, _>(SPELLBOOK_WINDOW, |c, _| c.reread());
+        for window in [
+            super::indicator_panels::POSITIVE_EFFECTS_WINDOW,
+            super::indicator_panels::NEGATIVE_EFFECTS_WINDOW,
+        ] {
+            host.with_controller::<ac_ui::panels::indicators::EffectsWindowController, _>(
+                window,
+                |c, _| c.effects.invalidate(),
+            );
+        }
+        // So did the plugin dock for its slots' pictures.
+        host.with_controller::<ac_ui::plugin::dock::PluginDock, _>(
+            ac_ui::plugin::dock::WINDOW,
+            |c, _| c.reread(),
+        );
     }
 
     /// The client settings in force in this window.
