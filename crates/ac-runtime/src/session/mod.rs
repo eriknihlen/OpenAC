@@ -18,7 +18,12 @@ mod link;
 mod outbox;
 #[cfg(feature = "host")]
 pub mod policy;
+// It reports on the transport, which only a live session has.
+#[cfg(feature = "host")]
 mod portal_failure;
+// Its watch and trail are the runner's; without it only the public facts stay
+// in use.
+#[cfg_attr(not(feature = "host"), allow(dead_code))]
 mod position_trail;
 pub mod pregame;
 // Its recovery steps are the runner's; without it only the public facts stay
@@ -46,6 +51,7 @@ pub use flow::{
 pub use generation::{CommandStatus, Generation, Lifecycle, LifecycleState};
 pub use link::{LinkStatus, PingClock};
 pub use outbox::{Outbox, Outgoing, Queue};
+#[cfg(feature = "host")]
 pub use portal_failure::{
     InboundNote, PORTAL_SPACE_LIMIT, PortalFailure, PortalWait, PortalWorldState, RECENT_INBOUND,
 };
