@@ -21,7 +21,7 @@ use ac_remote::{LinkConfig, RelayUrl, Secret};
 use ac_runtime::communication::remote_command::RemoteCommand;
 use ac_runtime::session::{HostEvent, SessionCommand, SessionEvent};
 
-use crate::remote_settings::{Place, Settings, StoreKey, write_token};
+use crate::remote_settings::{Place, RELAY_TOKEN, Settings, write_token};
 use crate::stdio::errln;
 
 /// The version of the browser interface this client's panels are built
@@ -96,8 +96,6 @@ pub(crate) struct RemoteControl {
     session_id: String,
     place: Place,
     config_directory: PathBuf,
-    /// The session's own token file, relative to the config directory.
-    token_reference: String,
     settings: Settings,
     /// Why the kept settings could not be read: nothing is saved over them.
     unreadable: Option<String>,
@@ -130,7 +128,6 @@ impl RemoteControl {
             session_id: session.id.clone(),
             place,
             config_directory: config_directory.to_path_buf(),
-            token_reference: StoreKey::of(session).token_reference(),
             settings,
             unreadable,
             hello: hello(&session.id, &session.endpoint.host, session.endpoint.port),
@@ -186,20 +183,28 @@ impl RemoteControl {
     /// Carry out `command`; the answer for the chat. No answer names the
     /// token.
     fn handle(&mut self, command: RemoteCommand) -> String {
+        // Another client of the install may have set the relay since.
+        match self.place.reload(&self.settings) {
+            Ok(settings) => {
+                self.settings = settings;
+                self.unreadable = None;
+            }
+            Err(error) => self.unreadable = Some(error),
+        }
         match command {
             RemoteCommand::Url(text) => {
                 if let Err(error) = RelayUrl::parse(&text) {
                     return format!("remoteac: {error}");
                 }
                 let before = self.settings.url.replace(text);
-                if let Err(error) = self.place.save(&self.settings) {
+                if let Err(error) = self.place.save_relay(&self.settings) {
                     self.settings.url = before;
                     return format!("remoteac: the url was not set: {error}");
                 }
                 self.reconnect_if_on("url set")
             }
             RemoteCommand::Secret(token) => {
-                let reference = self.token_reference.clone();
+                let reference = RELAY_TOKEN.to_owned();
                 if let Err(error) = write_token(&self.config_directory, &reference, token.reveal())
                 {
                     return format!("remoteac: {error}");
@@ -209,7 +214,7 @@ impl RemoteControl {
                     provider: CredentialProvider::File,
                     reference,
                 });
-                if let Err(error) = self.place.save(&self.settings) {
+                if let Err(error) = self.place.save_relay(&self.settings) {
                     self.settings.credential = before;
                     return format!("remoteac: the secret was not set: {error}");
                 }
@@ -231,7 +236,7 @@ impl RemoteControl {
                 } else {
                     ""
                 };
-                match self.place.save(&self.settings) {
+                match self.place.save_switch(&self.settings) {
                     Ok(()) => format!("remoteac: enabled{late}"),
                     Err(error) => format!("remoteac: enabled for this run only{late}: {error}"),
                 }
@@ -243,7 +248,7 @@ impl RemoteControl {
                 let keep = ac_runtime::session::world_tap::WorldTapCommand::Keep(false);
                 let _ = self.commands.send(SessionCommand::WorldTap(keep));
                 self.settings.enabled = false;
-                match self.place.save(&self.settings) {
+                match self.place.save_switch(&self.settings) {
                     Ok(()) => "remoteac: disabled".to_owned(),
                     Err(error) => format!("remoteac: disabled for this run only: {error}"),
                 }
@@ -416,8 +421,8 @@ mod tests {
         assert_eq!(status_for(&HostEvent::InterfaceText("hi".into())), None);
     }
 
+    use crate::remote_settings::RELAY_SETTINGS;
     use crate::remote_settings::tests::{scratch, session};
-    use crate::remote_settings::{STORE_FILE_NAME, StoreKey};
     use ac_host::CharacterSelector;
     use ac_runtime::communication::remote_command::parse;
     use std::sync::mpsc::{self, Receiver};
@@ -472,9 +477,9 @@ mod tests {
         let status = typed(&mut control, &chat, "/remoteac status");
         assert!(status.contains("secret: set"), "{status}");
         assert!(!status.contains("hunter2"), "{status}");
-        let store = std::fs::read_to_string(dir.join(STORE_FILE_NAME)).unwrap();
+        let store = std::fs::read_to_string(dir.join(RELAY_SETTINGS)).unwrap();
         assert!(!store.contains("hunter2"), "{store}");
-        let token = dir.join(StoreKey::of(&me).token_reference());
+        let token = dir.join(RELAY_TOKEN);
         assert_eq!(std::fs::read_to_string(token).unwrap(), "hunter2-token");
         // On: the link runs (a closed loopback port: it backs off).
         assert_eq!(
@@ -499,12 +504,20 @@ mod tests {
         assert!(status.contains("url: ws://127.0.0.1:9/ws"), "{status}");
         assert!(status.contains("secret: set"), "{status}");
         assert!(status.contains("link: off"), "{status}");
-        // Another character of the same account has nothing set.
+        // Another character of the install shares the relay and the secret
+        // but has its own switch: it is off until enabled there.
         let other = session(Some(CharacterSelector::Name("Someone".into())));
         let (to_other, other_chat) = mpsc::channel();
         let mut theirs = RemoteControl::new(&other, &document, &dir, None, to_other);
         let status = typed(&mut theirs, &other_chat, "/remoteac status");
-        assert!(status.contains("url: not set"), "{status}");
+        assert!(status.contains("url: ws://127.0.0.1:9/ws"), "{status}");
+        assert!(status.contains("secret: set"), "{status}");
+        assert!(status.contains("remoteac: disabled"), "{status}");
+        // A relay set on one running client is the one the other uses
+        // next, with no restart.
+        typed(&mut again, &chat, "/remoteac url ws://127.0.0.1:10/ws");
+        let status = typed(&mut theirs, &other_chat, "/remoteac status");
+        assert!(status.contains("url: ws://127.0.0.1:10/ws"), "{status}");
         drop((again, theirs));
         let _ = std::fs::remove_dir_all(&dir);
     }

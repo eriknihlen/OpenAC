@@ -207,13 +207,16 @@ comments and trailing commas are refused:
   `/remoteac status` says whether it is on, the address, the link
   (connected, refused or trying again) and whether a browser is attached,
   never the token. A session whose document has a `remote` block keeps the
-  settings in that block. Every other session keeps them in
-  `<config>/remote.json`, by server, account and character, since the
-  launcher writes a new document for every start; that file holds where
-  the token is, never the token. The token is written to
-  `<config>/remote/<server>/<account>/<character>.token`, readable only by
-  its owner on Unix. Turned on in the middle of a session, a browser sees
-  the world from that point on.
+  settings in that block. Every other session keeps them in the settings
+  folder, since the launcher writes a new document for every start: the
+  address and the token are the install's, shared by all its sessions
+  (`<config>/remote/relay.json`, which holds where the token is, never the
+  token, and the token in `<config>/remote/relay.token`, readable only by
+  its owner on Unix), so they are set once on any client and every other
+  client of the install uses them from its next command; whether a session
+  connects is its own (`<config>/remote/<server>/<account>/<character>.json`),
+  so `/remoteac enable` is typed on each one that should connect. Turned on
+  in the middle of a session, a browser sees the world from that point on.
 - `process.content.preparedAssetPath` and the overlay members are parsed and
   checked but not used: this client reads the dats directly and has no
   prepared asset package.

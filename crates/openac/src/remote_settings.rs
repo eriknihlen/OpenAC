@@ -2,27 +2,36 @@
 //! `/remoteac`.
 //!
 //! A session whose document has a `remote` block keeps them there. Every
-//! other session keeps them in the client's own store,
-//! `<config>/remote.json`, by server, account and character: the launcher
+//! other session keeps them in the client's settings folder: the launcher
 //! writes a new document for every start, so a setting written into it
-//! would not outlive the run. The store holds the address, the switch and
-//! where the token is, never the token. The token is a file of its own,
-//! `<config>/remote/<server>/<account>/<character>.token`, readable only by
-//! its owner, read as any `file` credential is.
+//! would not outlive the run.
+//!
+//! The relay's address and its token are the install's, shared by every
+//! session of it: `<config>/remote/relay.json` holds the address and where
+//! the token is (never the token), and the token is
+//! `<config>/remote/relay.token`, readable only by its owner, read as any
+//! `file` credential is. Whether a session connects is its own:
+//! `<config>/remote/<server>/<account>/<character>.json`. Many clients of
+//! one install are often told the same command at once, so each value is
+//! written only by the command that sets it, and read again before it is
+//! used.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ac_host::json::{self, Member, Node, Value};
 use ac_host::{
     CharacterSelector, CredentialProvider, CredentialReference, SessionDescriptor, SessionMode,
 };
 
-/// The store's file name in the config directory.
-pub(crate) const STORE_FILE_NAME: &str = "remote.json";
-/// The folder of the tokens in the config directory.
-pub(crate) const TOKEN_FOLDER: &str = "remote";
-/// The store's format.
+/// The folder of the remote settings in the config directory.
+pub(crate) const REMOTE_FOLDER: &str = "remote";
+/// The install's relay settings, relative to the config directory.
+pub(crate) const RELAY_SETTINGS: &str = "remote/relay.json";
+/// The install's relay token, relative to the config directory.
+pub(crate) const RELAY_TOKEN: &str = "remote/relay.token";
+/// The settings files' format.
 const STORE_VERSION: u32 = 1;
 
 /// What a session's remote window is set to.
@@ -36,8 +45,8 @@ pub(crate) struct Settings {
     pub(crate) enabled: bool,
 }
 
-/// Which session the store's entry is: its server, its account and how it
-/// names its character.
+/// Which session a switch is: its server, its account and how it names its
+/// character.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StoreKey {
     pub(crate) server: String,
@@ -70,12 +79,10 @@ impl StoreKey {
         }
     }
 
-    /// The token file's reference, relative to the config directory: one
-    /// file per key, so each session's token can be replaced or revoked on
-    /// its own.
-    pub(crate) fn token_reference(&self) -> String {
+    /// The session's switch file, relative to the config directory.
+    pub(crate) fn switch_reference(&self) -> String {
         format!(
-            "{TOKEN_FOLDER}/{}/{}/{}.token",
+            "{REMOTE_FOLDER}/{}/{}/{}.json",
             file_name_part(&self.server),
             file_name_part(&self.account),
             file_name_part(&self.character)
@@ -113,19 +120,19 @@ pub(crate) enum Place {
         /// The session's id in it.
         session_id: String,
     },
-    /// In the client's store.
+    /// In the settings folder: the install's relay, the session's switch.
     Store {
-        /// The store file.
-        path: PathBuf,
-        /// The session's entry.
-        key: StoreKey,
+        /// The install's relay settings.
+        relay: PathBuf,
+        /// The session's switch.
+        switch: PathBuf,
     },
 }
 
 impl Place {
     /// Where `session`'s settings live, and what they are now. The
-    /// document's block wins; without one the store's entry; without that,
-    /// nothing is set and nothing connects.
+    /// document's block wins; without one the settings folder's; without
+    /// those, nothing is set and nothing connects.
     pub(crate) fn find(
         session: &SessionDescriptor,
         document: &Path,
@@ -143,49 +150,89 @@ impl Place {
             };
             return (place, Ok(settings));
         }
-        let key = StoreKey::of(session);
-        let path = config_directory.join(STORE_FILE_NAME);
-        let settings = read_store(&path).map(|entries| {
-            entries
-                .into_iter()
-                .find(|(k, _)| *k == key)
-                .map(|(_, settings)| settings)
-                .unwrap_or_default()
-        });
-        (Self::Store { path, key }, settings)
+        let place = Self::Store {
+            relay: config_directory.join(RELAY_SETTINGS),
+            switch: config_directory.join(StoreKey::of(session).switch_reference()),
+        };
+        let settings = place.reload(&Settings::default());
+        (place, settings)
+    }
+
+    /// The settings as they stand now: another client of the install may
+    /// have set the relay since. A document's block is this session's
+    /// alone: `current` is what it holds.
+    pub(crate) fn reload(&self, current: &Settings) -> Result<Settings, String> {
+        match self {
+            Self::Document { .. } => Ok(current.clone()),
+            Self::Store { relay, switch } => {
+                let relay = read_file(relay)?;
+                let switch = read_file(switch)?;
+                let shared = relay.as_deref().and_then(read_relay);
+                Ok(Settings {
+                    url: shared.as_ref().and_then(|s| s.0.clone()),
+                    credential: shared.and_then(|s| s.1),
+                    enabled: switch.as_deref().is_some_and(read_switch),
+                })
+            }
+        }
     }
 
     /// Where the settings are kept, for `/remoteac status`.
     pub(crate) fn describe(&self) -> String {
         match self {
             Self::Document { path, .. } => format!("the session document {}", path.display()),
-            Self::Store { path, .. } => path.display().to_string(),
+            Self::Store { relay, switch } => {
+                format!("{} and {}", relay.display(), switch.display())
+            }
         }
     }
 
-    /// Keep `settings` here.
-    pub(crate) fn save(&self, settings: &Settings) -> Result<(), String> {
+    /// Keep the relay's address and token reference of `settings`: in the
+    /// settings folder, for every session of the install.
+    pub(crate) fn save_relay(&self, settings: &Settings) -> Result<(), String> {
         match self {
             Self::Document { path, session_id } => save_document(path, session_id, settings),
-            Self::Store { path, key } => save_store(path, key, settings),
+            Self::Store { relay, .. } => {
+                // A file that cannot be read is never written over.
+                read_file(relay)?;
+                let mut members = vec![version_member()];
+                members.extend(relay_members(settings));
+                write_json(relay, &Node::made(Value::Object(members)))
+            }
+        }
+    }
+
+    /// Keep whether this session connects.
+    pub(crate) fn save_switch(&self, settings: &Settings) -> Result<(), String> {
+        match self {
+            Self::Document { path, session_id } => save_document(path, session_id, settings),
+            Self::Store { switch, .. } => {
+                read_file(switch)?;
+                let members = vec![
+                    version_member(),
+                    Member::made("enabled", Value::Bool(settings.enabled)),
+                ];
+                write_json(switch, &Node::made(Value::Object(members)))
+            }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// The store.
+// The settings folder's files.
 
-/// Every entry of the store at `path`; none when there is no store.
-fn read_store(path: &Path) -> Result<Vec<(StoreKey, Settings)>, String> {
+/// The members of the settings file at `path`, checked for its format;
+/// none when there is no such file.
+fn read_file(path: &Path) -> Result<Option<Vec<Member>>, String> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
     };
     let node =
         json::parse(&bytes).map_err(|error| format!("{} is not JSON: {error}", path.display()))?;
-    let unreadable = || format!("{} is not a remote settings store", path.display());
-    let members = json::object_members(&node).map_err(|_| unreadable())?;
+    let members = json::object_members(&node)
+        .map_err(|_| format!("{} is not a remote settings file", path.display()))?;
     let version = member(members, "version").and_then(|v| json::uint32(v).ok());
     if version != Some(STORE_VERSION) {
         return Err(format!(
@@ -193,13 +240,25 @@ fn read_store(path: &Path) -> Result<Vec<(StoreKey, Settings)>, String> {
             path.display()
         ));
     }
-    let sessions = member(members, "sessions")
-        .and_then(|s| json::array_items(s).ok())
-        .ok_or_else(unreadable)?;
-    sessions
-        .iter()
-        .map(|entry| read_entry(entry).ok_or_else(unreadable))
-        .collect()
+    Ok(Some(members.to_vec()))
+}
+
+fn version_member() -> Member {
+    Member::made("version", Value::Number(STORE_VERSION.to_string()))
+}
+
+/// The address and token reference of the relay settings.
+fn read_relay(members: &[Member]) -> Option<(Option<String>, Option<CredentialReference>)> {
+    let credential = match member(members, "credential") {
+        Some(node) if !json::is_null(node) => Some(read_credential(node)?),
+        _ => None,
+    };
+    Some((text(members, "url"), credential))
+}
+
+/// Whether a session's switch is on.
+fn read_switch(members: &[Member]) -> bool {
+    member(members, "enabled").is_some_and(|e| json::boolean(e) == Ok(true))
 }
 
 fn member<'a>(members: &'a [Member], name: &str) -> Option<&'a Node> {
@@ -208,25 +267,6 @@ fn member<'a>(members: &'a [Member], name: &str) -> Option<&'a Node> {
 
 fn text(members: &[Member], name: &str) -> Option<String> {
     member(members, name).and_then(|node| json::string_or_null(node).ok().flatten())
-}
-
-fn read_entry(node: &Node) -> Option<(StoreKey, Settings)> {
-    let members = json::object_members(node).ok()?;
-    let key = StoreKey {
-        server: text(members, "server")?,
-        account: text(members, "account")?,
-        character: text(members, "character")?,
-    };
-    let credential = match member(members, "credential") {
-        Some(node) if !json::is_null(node) => Some(read_credential(node)?),
-        _ => None,
-    };
-    let settings = Settings {
-        url: text(members, "url"),
-        credential,
-        enabled: member(members, "enabled").is_some_and(|e| json::boolean(e) == Ok(true)),
-    };
-    Some((key, settings))
 }
 
 fn read_credential(node: &Node) -> Option<CredentialReference> {
@@ -243,40 +283,8 @@ fn read_credential(node: &Node) -> Option<CredentialReference> {
     })
 }
 
-fn save_store(path: &Path, key: &StoreKey, settings: &Settings) -> Result<(), String> {
-    let mut entries = read_store(path)?;
-    match entries.iter_mut().find(|(k, _)| k == key) {
-        Some(entry) => entry.1 = settings.clone(),
-        None => entries.push((key.clone(), settings.clone())),
-    }
-    let sessions = entries
-        .iter()
-        .map(|(key, settings)| {
-            let mut members = vec![
-                Member::made("server", Value::String(key.server.clone())),
-                Member::made("account", Value::String(key.account.clone())),
-                Member::made("character", Value::String(key.character.clone())),
-            ];
-            members.extend(remote_members(settings));
-            Node::made(Value::Object(members))
-        })
-        .collect();
-    let store = Node::made(Value::Object(vec![
-        Member::made("version", Value::Number(STORE_VERSION.to_string())),
-        Member::made("sessions", Value::Array(sessions)),
-    ]));
-    write_json(path, &store)
-}
-
-/// The members a remote block or a store entry holds: never the token.
-fn remote_members(settings: &Settings) -> Vec<Member> {
-    let mut members = vec![
-        Member::made(
-            "url",
-            settings.url.clone().map_or(Value::Null, Value::String),
-        ),
-        Member::made("enabled", Value::Bool(settings.enabled)),
-    ];
+/// The address and the token reference: never the token.
+fn relay_members(settings: &Settings) -> Vec<Member> {
     let credential = settings.credential.as_ref().map_or(Value::Null, |c| {
         Value::Object(vec![
             Member::made(
@@ -286,7 +294,19 @@ fn remote_members(settings: &Settings) -> Vec<Member> {
             Member::made("reference", Value::String(c.reference.clone())),
         ])
     });
-    members.push(Member::made("credential", credential));
+    vec![
+        Member::made(
+            "url",
+            settings.url.clone().map_or(Value::Null, Value::String),
+        ),
+        Member::made("credential", credential),
+    ]
+}
+
+/// The members a document's remote block holds: never the token.
+fn remote_members(settings: &Settings) -> Vec<Member> {
+    let mut members = relay_members(settings);
+    members.insert(1, Member::made("enabled", Value::Bool(settings.enabled)));
     members
 }
 
@@ -360,8 +380,14 @@ fn replace_file(path: &Path, bytes: &[u8], private: bool) -> std::io::Result<()>
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    // Named for this process and this write: two writers never share it.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     let mut beside = path.as_os_str().to_owned();
-    beside.push(".new");
+    beside.push(format!(
+        ".{}-{}.new",
+        std::process::id(),
+        WRITES.fetch_add(1, Ordering::Relaxed)
+    ));
     let beside = PathBuf::from(beside);
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -460,7 +486,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn each_character_has_its_own_entry_and_token_file() {
+    fn each_character_has_its_own_switch_file() {
         let a = StoreKey::of(&session(Some(CharacterSelector::Name(
             "A guy/..\\x".into(),
         ))));
@@ -471,54 +497,106 @@ pub(crate) mod tests {
         assert_eq!(b.character, "id:0x50000001");
         assert_eq!(c.character, "choose");
         assert_eq!(
-            a.token_reference(),
-            "remote/play_example_9000/acct/name_A_guy____x.token"
+            a.switch_reference(),
+            "remote/play_example_9000/acct/name_A_guy____x.json"
         );
-        let references = [a, b, c].map(|k| k.token_reference());
+        let references = [a, b, c].map(|k| k.switch_reference());
         assert_ne!(references[0], references[1]);
         assert_ne!(references[1], references[2]);
     }
 
     #[test]
-    fn the_store_keeps_each_session_and_never_the_token() {
+    fn the_relay_is_the_installs_and_the_switch_each_sessions() {
         let dir = scratch("store");
         let document = dir.join("session.json");
         let first = session(Some(CharacterSelector::Name("One".into())));
         let second = session(Some(CharacterSelector::Name("Two".into())));
         // Nothing stored: nothing set, nothing on.
-        let (place, settings) = Place::find(&first, &document, &dir);
+        let (one, settings) = Place::find(&first, &document, &dir);
         assert_eq!(settings, Ok(Settings::default()));
-        let one = set(
-            "wss://relay.example/a",
-            &StoreKey::of(&first).token_reference(),
-            true,
-        );
-        place.save(&one).unwrap();
-        write_token(
-            &dir,
-            &StoreKey::of(&first).token_reference(),
-            "hunter2-token",
-        )
-        .unwrap();
-        let (place2, _) = Place::find(&second, &document, &dir);
-        let two = set("wss://relay.example/b", "remote/b.token", false);
-        place2.save(&two).unwrap();
-        // Read back, each its own.
-        assert_eq!(Place::find(&first, &document, &dir).1, Ok(one.clone()));
-        assert_eq!(Place::find(&second, &document, &dir).1, Ok(two));
-        // Saved again: replaced, not added.
-        let off = Settings {
-            enabled: false,
-            ..one
+        let (two, _) = Place::find(&second, &document, &dir);
+        // One session sets the relay: the other sees it too.
+        let relay = set("wss://relay.example/a", RELAY_TOKEN, false);
+        one.save_relay(&relay).unwrap();
+        write_token(&dir, RELAY_TOKEN, "hunter2-token").unwrap();
+        assert_eq!(two.reload(&Settings::default()), Ok(relay.clone()));
+        // A switch is the session's own.
+        let on = Settings {
+            enabled: true,
+            ..relay.clone()
         };
-        place.save(&off).unwrap();
-        assert_eq!(Place::find(&first, &document, &dir).1, Ok(off));
-        let store = std::fs::read_to_string(dir.join(STORE_FILE_NAME)).unwrap();
-        assert_eq!(store.matches("\"server\"").count(), 2, "{store}");
-        assert!(!store.contains("hunter2"), "{store}");
-        let token = std::fs::read_to_string(dir.join(StoreKey::of(&first).token_reference()));
+        one.save_switch(&on).unwrap();
+        assert_eq!(one.reload(&Settings::default()), Ok(on));
+        assert_eq!(two.reload(&Settings::default()), Ok(relay));
+        // Neither file holds the token, and the switch holds no relay.
+        let shared = std::fs::read_to_string(dir.join(RELAY_SETTINGS)).unwrap();
+        assert!(!shared.contains("hunter2"), "{shared}");
+        let own = dir.join(StoreKey::of(&first).switch_reference());
+        let own = std::fs::read_to_string(own).unwrap();
+        assert!(!own.contains("hunter2") && !own.contains("url"), "{own}");
+        let token = std::fs::read_to_string(dir.join(RELAY_TOKEN));
         assert_eq!(token.unwrap(), "hunter2-token");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sessions_told_the_same_commands_at_once_all_keep_them() {
+        // One install's clients, all told the same commands at once.
+        let dir = scratch("at-once");
+        let document = dir.join("session.json");
+        let threads: Vec<_> = (0..24)
+            .map(|n| {
+                let dir = dir.clone();
+                let document = document.clone();
+                std::thread::spawn(move || {
+                    let me = session(Some(CharacterSelector::Id(0x5000_0000 + n)));
+                    let (place, settings) = Place::find(&me, &document, &dir);
+                    settings.unwrap();
+                    let relay = set("wss://relay.example/ws", RELAY_TOKEN, false);
+                    place.save_relay(&relay).unwrap();
+                    write_token(&dir, RELAY_TOKEN, "shared-token").unwrap();
+                    let on = Settings {
+                        enabled: true,
+                        ..place.reload(&Settings::default()).unwrap()
+                    };
+                    place.save_switch(&on).unwrap();
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let expected = set("wss://relay.example/ws", RELAY_TOKEN, true);
+        for n in 0..24 {
+            let me = session(Some(CharacterSelector::Id(0x5000_0000 + n)));
+            assert_eq!(
+                Place::find(&me, &document, &dir).1,
+                Ok(expected.clone()),
+                "{n}"
+            );
+        }
+        let token = std::fs::read_to_string(dir.join(RELAY_TOKEN));
+        assert_eq!(token.unwrap(), "shared-token");
+        // No file is left half-written beside them.
+        let leftovers: Vec<_> = walk(&dir)
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "new"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn walk(dir: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(walk(&path));
+            } else {
+                found.push(path);
+            }
+        }
+        found
     }
 
     #[cfg(unix)]
@@ -526,8 +604,8 @@ pub(crate) mod tests {
     fn the_token_file_is_readable_only_by_its_owner() {
         use std::os::unix::fs::PermissionsExt as _;
         let dir = scratch("mode");
-        write_token(&dir, "remote/x/y.token", "t").unwrap();
-        let mode = std::fs::metadata(dir.join("remote/x/y.token"))
+        write_token(&dir, RELAY_TOKEN, "t").unwrap();
+        let mode = std::fs::metadata(dir.join(RELAY_TOKEN))
             .unwrap()
             .permissions()
             .mode();
@@ -536,14 +614,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_store_that_cannot_be_read_is_never_overwritten() {
+    fn a_settings_file_that_cannot_be_read_is_never_overwritten() {
         let dir = scratch("broken");
-        let path = dir.join(STORE_FILE_NAME);
-        std::fs::write(&path, "{ not json").unwrap();
         let first = session(None);
+        let path = dir.join(RELAY_SETTINGS);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{ not json").unwrap();
         let (place, settings) = Place::find(&first, &dir.join("d.json"), &dir);
         assert!(settings.is_err());
-        assert!(place.save(&set("wss://a.example/", "r", true)).is_err());
+        assert!(
+            place
+                .save_relay(&set("wss://a.example/", "r", true))
+                .is_err()
+        );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -580,7 +663,7 @@ pub(crate) mod tests {
         assert!(matches!(place, Place::Document { .. }));
         assert!(settings.unwrap().enabled);
         place
-            .save(&set("wss://new.example/ws", "remote/t.token", false))
+            .save_switch(&set("wss://new.example/ws", "remote/t.token", false))
             .unwrap();
         let written = json::parse(&std::fs::read(&path).unwrap()).unwrap();
         let mut out = String::new();
@@ -591,7 +674,7 @@ pub(crate) mod tests {
         assert!(out.contains("\"enabled\": false"), "{out}");
         assert!(!out.contains("RELAY_TOKEN"), "{out}");
         // A block without both a url and a secret is never written.
-        assert!(place.save(&Settings::default()).is_err());
+        assert!(place.save_relay(&Settings::default()).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

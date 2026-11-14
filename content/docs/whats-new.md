@@ -12,6 +12,16 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.11 (2026-11-14)
+
+- The remote window's relay address and secret are now shared by every
+  client of an install: type `/remoteac url` and `/remoteac secret` once,
+  on any of them, and `/remoteac enable` on each one that should connect.
+  In 0.2.10 every character kept its own, and many clients told the same
+  commands at once (several bots at the same time) could lose each other's
+  settings or answer "cannot be written". Set the address and the secret
+  again once after updating.
+
 ## OpenAC (Rust) 0.2.10 (2026-11-14)
 
 - A session can now be shown and played in a web browser, through a relay
