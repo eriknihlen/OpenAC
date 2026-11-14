@@ -265,7 +265,14 @@ fn what_the_session_is_doing_reaches_the_relay() {
 fn a_fault_that_ends_an_attach_leaves_a_line_for_the_console() {
     let (_relay, remote, session, mut conn) = start();
     let _to_remote = attach(&mut conn, &session);
-    assert!(remote.take_notes().is_empty());
+    // The attach itself is told, and nothing else yet.
+    let attached = remote.take_notes();
+    assert!(
+        attached
+            .iter()
+            .all(|note| note.starts_with("remote: a browser attaches")),
+        "{attached:?}"
+    );
     conn.send_text(r#"{"type":"control","request_id":7,"on":true}"#);
     conn.send_binary(&[0xFF, 0x00]);
     session.expect_detach();

@@ -223,13 +223,25 @@ impl RemoteControl {
                     return format!("remoteac: {error}");
                 }
                 self.settings.enabled = true;
+                // The world's messages are kept from the endpoint's start: a
+                // browser sees only what came after it, until the server
+                // sends the world again.
+                let late = if self.hello.state == SessionState::InWorld {
+                    "; the 3D world fills in from the next login, portal or recall"
+                } else {
+                    ""
+                };
                 match self.place.save(&self.settings) {
-                    Ok(()) => "remoteac: enabled".to_owned(),
-                    Err(error) => format!("remoteac: enabled for this run only: {error}"),
+                    Ok(()) => format!("remoteac: enabled{late}"),
+                    Err(error) => format!("remoteac: enabled for this run only{late}: {error}"),
                 }
             }
             RemoteCommand::Disable => {
                 self.stop();
+                // Nothing is offered any more: the session stops keeping the
+                // world's messages.
+                let keep = ac_runtime::session::world_tap::WorldTapCommand::Keep(false);
+                let _ = self.commands.send(SessionCommand::WorldTap(keep));
                 self.settings.enabled = false;
                 match self.place.save(&self.settings) {
                     Ok(()) => "remoteac: disabled".to_owned(),
@@ -310,7 +322,7 @@ impl RemoteControl {
                 retry_in.as_secs()
             ),
         };
-        let attached = state.is_some_and(|s| s.attached);
+        let attached = state.as_ref().is_some_and(|s| s.attached);
         let on = if self.settings.enabled {
             "enabled"
         } else {
@@ -327,6 +339,11 @@ impl RemoteControl {
             format!("secret: {secret}"),
             format!("link: {link}"),
             format!("browser: {}", if attached { "attached" } else { "none" }),
+            format!(
+                "world sent: {} frames, {} KB",
+                state.as_ref().map_or(0, |s| s.world_frames),
+                state.as_ref().map_or(0, |s| s.world_bytes) / 1024
+            ),
             format!("kept in: {}", self.place.describe()),
         ];
         if let Some(error) = &self.unreadable {
