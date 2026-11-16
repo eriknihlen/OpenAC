@@ -57,9 +57,10 @@ pub use barber::{BarberCommand, BarberState, BarberView};
 pub use book::{BookFlushAction, BookPageAction, BookPageTurn, BookState, BookView};
 pub use chess::{ChessCommand, ChessStage, ChessState, ChessView};
 pub use combat::{
-    CombatAttackCommand, CombatAttackState, CombatModeHistory, CombatModeHistoryEvent,
-    CombatModeRequestResult, CombatModeRequestStatus, CombatModeState, CombatTargetState,
-    CreatureDeathState, HealthQuery, InputActivation, ParkedModeReport, ParkedModeWatch,
+    CombatAttackCommand, CombatAttackState, CombatModeHistory, CombatModeHistoryEntry,
+    CombatModeHistoryEvent, CombatModeRequestResult, CombatModeRequestStatus, CombatModeState,
+    CombatTargetState, CreatureDeathState, HealthQuery, InputActivation, ModeMismatchReport,
+    ModeMismatchWatch, ParkedModeReport, ParkedModeWatch,
 };
 pub use death::{
     CorpseSummary, DeathState, LAST_OUTSIDE_DEATH_POSITION, VitaeView, corpses,
@@ -494,6 +495,7 @@ pub struct Gameplay {
     combat: CombatState,
     mode: CombatModeState,
     parked_mode_watch: ParkedModeWatch,
+    mode_mismatch_watch: ModeMismatchWatch,
     combat_mode_history: CombatModeHistory,
     last_body_style: Option<u32>,
     attack: CombatAttackState,
@@ -538,6 +540,7 @@ impl Gameplay {
             combat: CombatState::new(),
             mode: CombatModeState::default(),
             parked_mode_watch: ParkedModeWatch::default(),
+            mode_mismatch_watch: ModeMismatchWatch::default(),
             combat_mode_history: CombatModeHistory::default(),
             last_body_style: None,
             attack: CombatAttackState::default(),
@@ -1274,17 +1277,17 @@ impl Gameplay {
         }
         self.note_body_stance(ctx);
         if let Some((line, history)) = self.parked_mode_log_line(ctx) {
-            let stamp = crate::world::motion_log_stamp();
-            eprintln!("[combat-mode] {stamp} {line}");
-            if let Some(history) = history {
-                eprintln!(
-                    "[combat-mode-history] {stamp} s={now:.3} the last {} combat-mode events, oldest first:",
-                    history.len()
-                );
-                for entry in history {
-                    eprintln!("[combat-mode-history]   {entry}");
-                }
-            }
+            write_combat_mode_log(now, &line, history.as_deref());
+        }
+        if let Some(report) = self.mode_mismatch_watch.observe(
+            self.combat.current_mode(),
+            self.combat.server_mode(),
+            self.mode.pending_mode(),
+            now,
+        ) {
+            let history = matches!(report, ModeMismatchReport::Started { .. })
+                .then(|| self.combat_mode_history.lines());
+            write_combat_mode_log(now, &combat::mode_mismatch_line(report), history.as_deref());
         }
         let mut ops = ops!(self, ctx);
         self.attack.tick(&mut ops, now);
@@ -1352,6 +1355,7 @@ impl Gameplay {
             name: None,
         });
         self.combat.clear();
+        self.mode_mismatch_watch.reset();
         self.mode.reset();
         self.parked_mode_watch.reset();
         self.combat_mode_history.reset();
@@ -2553,6 +2557,22 @@ fn is_dual_wield(body: Option<&Movement>, world: &World) -> bool {
         None => Some(player_motion(world).0),
     };
     style == Some(ac_core::combat::DUAL_WIELD_COMBAT_STYLE)
+}
+
+/// Writes a `[combat-mode]` line to the client log, and after it the
+/// combat-mode history that led there when there is one.
+fn write_combat_mode_log(now: f64, line: &str, history: Option<&[String]>) {
+    let stamp = crate::world::motion_log_stamp();
+    eprintln!("[combat-mode] {stamp} {line}");
+    if let Some(history) = history {
+        eprintln!(
+            "[combat-mode-history] {stamp} s={now:.3} the last {} combat-mode events, oldest first:",
+            history.len()
+        );
+        for entry in history {
+            eprintln!("[combat-mode-history]   {entry}");
+        }
+    }
 }
 
 /// The client log's line for a mode change that waited on the body: the

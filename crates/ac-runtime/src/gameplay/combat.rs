@@ -341,22 +341,52 @@ pub enum CombatModeHistoryEvent {
     BodyStance(u32),
 }
 
+/// One kept event: when it first happened, and when and how often it
+/// happened again with nothing else between.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CombatModeHistoryEntry {
+    /// Session seconds of the first time.
+    pub at: f64,
+    /// Session seconds of the last repeat (`at` when it never repeated).
+    pub last_at: f64,
+    /// What happened.
+    pub event: CombatModeHistoryEvent,
+    /// How many times in a row, at least 1.
+    pub count: u32,
+}
+
 /// The last [`COMBAT_MODE_HISTORY_LEN`] combat-mode events, with the
 /// session clock in seconds, for the client log: written out with the first
-/// report of a mode change that waits on the body, so the log shows how it
-/// came to wait. A diagnostic only: it decides nothing.
+/// report of a mode change that waits on the body, or of a client mode the
+/// server's word disagrees with, so the log shows how it came about. An
+/// event that repeats with nothing else between is kept once with a count:
+/// a plugin asking again every pass would otherwise push out everything
+/// that led there. A diagnostic only: it decides nothing.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CombatModeHistory {
-    entries: std::collections::VecDeque<(f64, CombatModeHistoryEvent)>,
+    entries: std::collections::VecDeque<CombatModeHistoryEntry>,
 }
 
 impl CombatModeHistory {
-    /// Keep `event` at `now`, dropping the oldest past the limit.
+    /// Keep `event` at `now`: a repeat of the newest event counts on it,
+    /// anything else is a new entry, dropping the oldest past the limit.
     pub fn record(&mut self, now: f64, event: CombatModeHistoryEvent) {
+        if let Some(last) = self.entries.back_mut()
+            && last.event == event
+        {
+            last.count = last.count.saturating_add(1);
+            last.last_at = now;
+            return;
+        }
         if self.entries.len() == COMBAT_MODE_HISTORY_LEN {
             self.entries.pop_front();
         }
-        self.entries.push_back((now, event));
+        self.entries.push_back(CombatModeHistoryEntry {
+            at: now,
+            last_at: now,
+            event,
+            count: 1,
+        });
     }
 
     /// Forget everything (the session ended).
@@ -365,17 +395,152 @@ impl CombatModeHistory {
     }
 
     /// The events kept, oldest first.
-    pub fn entries(&self) -> impl ExactSizeIterator<Item = &(f64, CombatModeHistoryEvent)> {
+    pub fn entries(&self) -> impl ExactSizeIterator<Item = &CombatModeHistoryEntry> {
         self.entries.iter()
     }
 
-    /// One log line per event, oldest first: `s=<session seconds> <what>`.
+    /// One log line per event, oldest first: `s=<session seconds> <what>`,
+    /// with `(N times, to s=<last>)` after one that repeated.
     #[must_use]
     pub fn lines(&self) -> Vec<String> {
         self.entries
             .iter()
-            .map(|(at, event)| format!("s={at:.3} {}", describe_history_event(*event)))
+            .map(|entry| {
+                let what = describe_history_event(entry.event);
+                if entry.count > 1 {
+                    format!(
+                        "s={:.3} {what} ({} times, to s={:.3})",
+                        entry.at, entry.count, entry.last_at
+                    )
+                } else {
+                    format!("s={:.3} {what}", entry.at)
+                }
+            })
             .collect()
+    }
+}
+
+/// Seconds the client's mode may differ from the server's last word, with
+/// no change waiting on the body, before the log says so. Shorter than a
+/// plugin's own re-ask after such a wait, so the log sees it first.
+pub const MODE_MISMATCH_REPORT_AFTER_SECONDS: f64 = 5.0;
+/// Seconds after one report before another mismatch is reported: a server
+/// that keeps not answering, and a plugin that keeps asking, would
+/// otherwise fill the log.
+pub const MODE_MISMATCH_REPORT_SPACING_SECONDS: f64 = 60.0;
+
+/// What the mismatch watch has to say on a pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ModeMismatchReport {
+    /// The client has shown `client` for `seconds` while the server's last
+    /// word is `server`.
+    Started {
+        client: CombatMode,
+        server: CombatMode,
+        seconds: f64,
+    },
+    /// A reported mismatch ended after `seconds` with the two agreeing on
+    /// `mode`.
+    Agreed { mode: CombatMode, seconds: f64 },
+    /// A reported mismatch ended after `seconds` with a change to `mode`
+    /// waiting on the body (the parked watch takes over).
+    Parked { mode: CombatMode, seconds: f64 },
+}
+
+/// Watches for a client mode the server never confirmed: the client takes
+/// a requested mode at once, and the server's update follows. When none
+/// follows, the two disagree with nothing waiting, and nothing asks again
+/// (a request for the mode the client already shows sends nothing). Such a
+/// disagreement that lasts [`MODE_MISMATCH_REPORT_AFTER_SECONDS`] is
+/// reported once, and its end once it was reported, at most one report per
+/// [`MODE_MISMATCH_REPORT_SPACING_SECONDS`]. A diagnostic only: it decides
+/// nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ModeMismatchWatch {
+    since: Option<f64>,
+    reported: bool,
+    last_report: Option<f64>,
+}
+
+impl ModeMismatchWatch {
+    /// Once a pass: `client` is the client's mode, `server` the server's
+    /// last word (`None` before its first), `pending` a change parked on
+    /// the body, `now` the session clock in seconds.
+    pub fn observe(
+        &mut self,
+        client: CombatMode,
+        server: Option<CombatMode>,
+        pending: Option<CombatMode>,
+        now: f64,
+    ) -> Option<ModeMismatchReport> {
+        let differs = pending.is_none() && server.is_some_and(|server| server != client);
+        let Some(since) = self.since else {
+            if differs {
+                self.since = Some(now);
+                self.reported = false;
+            }
+            return None;
+        };
+        if !differs {
+            self.since = None;
+            if !std::mem::take(&mut self.reported) {
+                return None;
+            }
+            let seconds = now - since;
+            return Some(match pending {
+                Some(mode) => ModeMismatchReport::Parked { mode, seconds },
+                None => ModeMismatchReport::Agreed {
+                    mode: client,
+                    seconds,
+                },
+            });
+        }
+        if self.reported
+            || now - since < MODE_MISMATCH_REPORT_AFTER_SECONDS
+            || self
+                .last_report
+                .is_some_and(|last| now - last < MODE_MISMATCH_REPORT_SPACING_SECONDS)
+        {
+            return None;
+        }
+        self.reported = true;
+        self.last_report = Some(now);
+        Some(ModeMismatchReport::Started {
+            client,
+            server: server.unwrap_or(client),
+            seconds: now - since,
+        })
+    }
+
+    /// Forget the watched mismatch without a word (the session ended).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// The client-log line for a mismatch report.
+#[must_use]
+pub fn mode_mismatch_line(report: ModeMismatchReport) -> String {
+    match report {
+        ModeMismatchReport::Started {
+            client,
+            server,
+            seconds,
+        } => format!(
+            "client mode {} unconfirmed {seconds:.1} s: the server's last word is {}, \
+             and no change waits",
+            mode_name(client),
+            mode_name(server)
+        ),
+        ModeMismatchReport::Agreed { mode, seconds } => format!(
+            "client mode {} and the server's word agree again after {seconds:.1} s",
+            mode_name(mode)
+        ),
+        ModeMismatchReport::Parked { mode, seconds } => format!(
+            "client mode still unconfirmed after {seconds:.1} s; a change to {} now \
+             waits on the body",
+            mode_name(mode)
+        ),
     }
 }
 

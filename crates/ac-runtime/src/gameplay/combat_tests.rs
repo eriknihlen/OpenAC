@@ -369,7 +369,9 @@ fn a_reported_wait_replaced_by_another_mode_is_given_up() {
 fn the_history_keeps_the_latest_events_and_words_each() {
     let mut h = CombatModeHistory::default();
     for i in 0..COMBAT_MODE_HISTORY_LEN {
-        h.record(i as f64, CombatModeHistoryEvent::BodyStance(0x8000_003D));
+        // Alternating stances: no two neighbours repeat, so none fold.
+        let style = if i % 2 == 0 { 0x8000_003D } else { 0x8000_0049 };
+        h.record(i as f64, CombatModeHistoryEvent::BodyStance(style));
     }
     h.record(
         100.0,
@@ -385,7 +387,7 @@ fn the_history_keeps_the_latest_events_and_words_each() {
     );
     assert_eq!(h.entries().len(), COMBAT_MODE_HISTORY_LEN);
     // The two oldest made room.
-    assert_eq!(h.entries().next().map(|e| e.0), Some(2.0));
+    assert_eq!(h.entries().next().map(|e| e.at), Some(2.0));
     let lines = h.lines();
     assert_eq!(lines[0], "s=2.000 body stance now 0x8000003D");
     assert_eq!(
@@ -397,6 +399,166 @@ fn the_history_keeps_the_latest_events_and_words_each() {
     );
     h.reset();
     assert!(h.lines().is_empty());
+}
+
+#[test]
+fn a_repeated_event_is_kept_once_with_its_count() {
+    // A plugin asking every pass for a change that waits on the body: the
+    // repeats fold into one line, and what came before them survives.
+    let mut h = CombatModeHistory::default();
+    h.record(
+        10.0,
+        CombatModeHistoryEvent::ServerUpdate {
+            mode: CombatMode::NON_COMBAT,
+            sequence: 4,
+            taken: true,
+        },
+    );
+    for i in 0..1000 {
+        h.record(
+            20.0 + f64::from(i) * 0.06,
+            CombatModeHistoryEvent::RequestHeldBack(CombatMode::MAGIC),
+        );
+    }
+    h.record(
+        90.0,
+        CombatModeHistoryEvent::RequestSent(CombatMode::NON_COMBAT),
+    );
+    h.record(
+        91.0,
+        CombatModeHistoryEvent::RequestSent(CombatMode::NON_COMBAT),
+    );
+    assert_eq!(
+        h.lines(),
+        [
+            "s=10.000 server update: NonCombat seq=4 taken",
+            "s=20.000 request for Magic held back until the body is ready \
+             (1000 times, to s=79.940)",
+            "s=90.000 request for NonCombat sent (2 times, to s=91.000)",
+        ]
+    );
+    // Only neighbours fold: the same event after another is a new line.
+    h.record(
+        92.0,
+        CombatModeHistoryEvent::RequestHeldBack(CombatMode::MAGIC),
+    );
+    assert_eq!(h.entries().len(), 4);
+}
+
+// -- Client mode the server never confirmed (the client log's diagnostic) --------
+
+#[test]
+fn a_mode_the_server_never_confirmed_is_reported_once_then_ended() {
+    let mut w = ModeMismatchWatch::default();
+    let magic = CombatMode::MAGIC;
+    let peace = Some(CombatMode::NON_COMBAT);
+    // The request went out; the server has not answered yet.
+    assert_eq!(w.observe(magic, peace, None, 100.0), None);
+    assert_eq!(w.observe(magic, peace, None, 104.9), None);
+    assert_eq!(
+        w.observe(magic, peace, None, 105.0),
+        Some(ModeMismatchReport::Started {
+            client: magic,
+            server: CombatMode::NON_COMBAT,
+            seconds: 5.0
+        })
+    );
+    // Reported once only.
+    assert_eq!(w.observe(magic, peace, None, 500.0), None);
+    // The server's word arrives.
+    let agreed = w.observe(magic, Some(magic), None, 600.0);
+    assert_eq!(
+        agreed,
+        Some(ModeMismatchReport::Agreed {
+            mode: magic,
+            seconds: 500.0
+        })
+    );
+    assert_eq!(
+        mode_mismatch_line(agreed.unwrap()),
+        "client mode Magic and the server's word agree again after 500.0 s"
+    );
+    assert_eq!(w.observe(magic, Some(magic), None, 601.0), None);
+}
+
+#[test]
+fn a_prompt_answer_a_parked_change_or_no_server_word_is_no_mismatch() {
+    let mut w = ModeMismatchWatch::default();
+    let magic = CombatMode::MAGIC;
+    let peace = Some(CombatMode::NON_COMBAT);
+    // Answered within the bound: never reported, nothing to end.
+    assert_eq!(w.observe(magic, peace, None, 0.0), None);
+    assert_eq!(w.observe(magic, Some(magic), None, 0.4), None);
+    // A change waiting on the body is the parked watch's to report.
+    assert_eq!(w.observe(magic, peace, Some(magic), 1.0), None);
+    assert_eq!(w.observe(magic, peace, Some(magic), 60.0), None);
+    // Before the server's first word there is nothing to disagree with.
+    assert_eq!(w.observe(magic, None, None, 61.0), None);
+    assert_eq!(w.observe(magic, None, None, 200.0), None);
+    // A reported mismatch that turns into a parked change ends, and the
+    // line says the two still disagree.
+    assert_eq!(w.observe(magic, peace, None, 300.0), None);
+    assert!(matches!(
+        w.observe(magic, peace, None, 305.0),
+        Some(ModeMismatchReport::Started { .. })
+    ));
+    let parked = w.observe(magic, peace, Some(CombatMode::NON_COMBAT), 311.0);
+    assert_eq!(
+        parked,
+        Some(ModeMismatchReport::Parked {
+            mode: CombatMode::NON_COMBAT,
+            seconds: 11.0
+        })
+    );
+    assert_eq!(
+        mode_mismatch_line(parked.unwrap()),
+        "client mode still unconfirmed after 11.0 s; a change to NonCombat now waits on the body"
+    );
+    assert_eq!(
+        mode_mismatch_line(ModeMismatchReport::Started {
+            client: magic,
+            server: CombatMode::NON_COMBAT,
+            seconds: 5.0
+        }),
+        "client mode Magic unconfirmed 5.0 s: the server's last word is NonCombat, \
+         and no change waits"
+    );
+}
+
+#[test]
+fn a_mismatch_that_keeps_coming_back_is_reported_at_most_once_a_minute() {
+    // A server that never answers and a plugin that re-asks through peace
+    // every 10 s: one report, then quiet for a minute.
+    let mut w = ModeMismatchWatch::default();
+    let magic = CombatMode::MAGIC;
+    let peace = Some(CombatMode::NON_COMBAT);
+    let mut started = Vec::new();
+    let mut agreed = 0;
+    let mut t = 0.0;
+    while t < 125.0 {
+        // 10 s apart, then half a second agreeing on peace.
+        let in_cycle = t % 10.5;
+        let report = if in_cycle < 10.0 {
+            w.observe(magic, peace, None, t)
+        } else {
+            w.observe(CombatMode::NON_COMBAT, peace, None, t)
+        };
+        match report {
+            Some(ModeMismatchReport::Started { .. }) => started.push(t),
+            Some(ModeMismatchReport::Agreed { .. }) => agreed += 1,
+            _ => {}
+        }
+        t += 0.25;
+    }
+    assert_eq!(started, [5.0, 68.0]);
+    assert_eq!(agreed, 2);
+    // Leaving the world forgets the spacing with the rest.
+    w.reset();
+    assert_eq!(w.observe(magic, peace, None, 130.0), None);
+    assert!(matches!(
+        w.observe(magic, peace, None, 135.0),
+        Some(ModeMismatchReport::Started { .. })
+    ));
 }
 
 // -- Attack -----------------------------------------------------------------------
