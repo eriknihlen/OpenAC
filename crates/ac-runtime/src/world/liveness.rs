@@ -659,10 +659,12 @@ impl World {
         {
             return;
         }
+        self.forgetting = true;
         self.apply(&ac_proto::Inbound::DeleteObject(ac_proto::DeleteObject {
             guid: candidate.guid,
             instance_sequence: candidate.generation,
         }));
+        self.forgetting = false;
     }
 }
 

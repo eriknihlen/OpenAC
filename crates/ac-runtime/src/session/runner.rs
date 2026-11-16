@@ -532,6 +532,9 @@ fn run(
     if config.diagnostics.position_log {
         state.movement.enable_position_log();
     }
+    if config.diagnostics.probe_objects {
+        state.world.enable_object_probe();
+    }
     let chargen = config
         .tables
         .as_ref()
@@ -1474,6 +1477,11 @@ impl Drive<'_> {
         }
         if self.config.diagnostics.position_log {
             for line in self.state.movement.take_position_log_lines() {
+                eprintln!("{line}");
+            }
+        }
+        if self.config.diagnostics.probe_objects {
+            for line in self.state.world.take_object_probe_lines() {
                 eprintln!("{line}");
             }
         }

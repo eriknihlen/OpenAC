@@ -13,6 +13,7 @@ mod attachments;
 mod items;
 pub mod liveness;
 mod object;
+pub mod object_probe;
 mod player;
 mod presentation;
 mod time;
@@ -25,8 +26,8 @@ use ac_core::items::{
     ClientObject, ClientObjectTable, QualityKind, QualityStamps, STACK_SIZE_PROPERTY, TableEvent,
 };
 use ac_core::physics::{
-    CreateDisposition, PhysicsTimestampGate, PhysicsTimestamps, PositionDisposition, is_newer,
-    is_valid_position,
+    CreateDisposition, PhysicsState, PhysicsTimestampGate, PhysicsTimestamps, PositionDisposition,
+    is_newer, is_valid_position,
 };
 use ac_core::player::{LocalPlayerState, SkillFormulaBonusResolver};
 use ac_core::spells::{SpellTable, Spellbook};
@@ -132,6 +133,11 @@ pub struct World {
     /// not take (older than the one held, or for an object it has no record
     /// of).
     refused_update: bool,
+    /// The object probe (`OPENAC_PROBE_OBJECTS=1`); off by default.
+    object_probe: object_probe::ObjectProbe,
+    /// The delete being applied is the client forgetting an object out of
+    /// range, not the server's (the object probe tells the two apart).
+    forgetting: bool,
 }
 
 impl World {
@@ -157,9 +163,13 @@ impl World {
         let rules = std::mem::take(&mut self.player_rules);
         let clock = std::mem::take(&mut self.clock);
         let environ_override = self.environ_override;
+        // The probe is the process's switch, not the session's.
+        self.object_probe.emptied(self.objects.len());
+        let object_probe = std::mem::take(&mut self.object_probe);
         *self = Self::new();
         self.player_rules = rules;
         self.clock = clock;
+        self.object_probe = object_probe;
         // The environment is the runtime's for its whole life, as the clock
         // is (OpenAC's runtime environment state is one per runtime).
         self.environ_override = environ_override;
@@ -173,6 +183,71 @@ impl World {
     #[must_use]
     pub fn environ_override(&self) -> Option<u32> {
         self.environ_override
+    }
+
+    /// Switch the object probe on (`OPENAC_PROBE_OBJECTS=1`).
+    pub fn enable_object_probe(&mut self) {
+        self.object_probe.enable();
+    }
+
+    /// Take the object probe's lines kept since the last call, oldest
+    /// first (none while it is off).
+    pub fn take_object_probe_lines(&mut self) -> Vec<String> {
+        self.object_probe.take_lines()
+    }
+
+    /// Where the object stands when the object probe follows it: an object
+    /// other than the player, standing in the world (not in a container,
+    /// held, or a projectile in flight). `None` while the probe is off.
+    fn probed_place(&self, guid: u32) -> Option<ac_proto::Position> {
+        if !self.object_probe.is_on() || self.is_player(guid) {
+            return None;
+        }
+        let object = self.objects.get(&guid)?;
+        if object.physics().state & PhysicsState::MISSILE.bits() != 0 || object.parent().is_some() {
+            return None;
+        }
+        if self
+            .items
+            .get(guid)
+            .is_some_and(|i| i.container_id != 0 || i.wielder_id != 0)
+        {
+            return None;
+        }
+        object.position().filter(|p| p.cell_id != 0).copied()
+    }
+
+    /// One object probe line about `guid`, with the player's place as it
+    /// is now.
+    fn probe_object(
+        &mut self,
+        event: object_probe::ObjectEvent,
+        guid: u32,
+        incarnation: u16,
+        at: Option<ac_proto::Position>,
+    ) {
+        let player = self
+            .player_guid
+            .and_then(|g| self.objects.get(&g))
+            .and_then(|o| o.position())
+            .copied();
+        let name = self.name(guid).map(str::to_owned);
+        self.object_probe.object(&object_probe::ObjectLine {
+            event,
+            guid,
+            name: name.as_deref(),
+            incarnation,
+            at: at.as_ref(),
+            player: player.as_ref(),
+        });
+    }
+
+    /// The object probe line for a create or description just applied,
+    /// when the probe follows the object.
+    fn probe_placed(&mut self, event: object_probe::ObjectEvent, guid: u32, incarnation: u16) {
+        if let Some(at) = self.probed_place(guid) {
+            self.probe_object(event, guid, incarnation, Some(at));
+        }
     }
 
     /// Forget the game clock's sync: the session time it was measured
@@ -732,6 +807,7 @@ impl World {
     }
 
     fn apply_create(&mut self, create: &CreateObject) {
+        use object_probe::ObjectEvent;
         let stamps = timestamps(create);
         let Some(existing) = self.objects.get_mut(&create.guid) else {
             // A new object starts its quality counters afresh.
@@ -743,11 +819,14 @@ impl World {
             self.queue_notes
                 .push(liveness::QueueNote::Spawned(create.guid));
             self.attach_after_spawn(create);
+            self.probe_placed(ObjectEvent::Created, create.guid, stamps.instance);
             self.replay_held_deletes(create.guid);
             return;
         };
         match existing.gate.seed_for_create_object(stamps) {
-            CreateDisposition::StaleGeneration => {}
+            CreateDisposition::StaleGeneration => {
+                self.probe_placed(ObjectEvent::StaleCreate, create.guid, stamps.instance);
+            }
             CreateDisposition::InitialGeneration | CreateDisposition::NewGeneration => {
                 let gate = existing.gate.clone();
                 // The old incarnation's relations end with it.
@@ -758,6 +837,7 @@ impl World {
                 self.queue_notes
                     .push(liveness::QueueNote::Spawned(create.guid));
                 self.attach_after_spawn(create);
+                self.probe_placed(ObjectEvent::CreatedAgain, create.guid, stamps.instance);
             }
             CreateDisposition::ExistingGeneration => {
                 let key = existing.key;
@@ -766,6 +846,7 @@ impl World {
                 self.queue_notes
                     .push(liveness::QueueNote::Spawned(create.guid));
                 self.apply_same_generation_parts(create);
+                self.probe_placed(ObjectEvent::Resent, create.guid, stamps.instance);
             }
         }
     }
@@ -890,6 +971,11 @@ impl World {
         self.queue_notes
             .push(liveness::QueueNote::Spawned(update.guid));
         self.attach_after_spawn(update);
+        self.probe_placed(
+            object_probe::ObjectEvent::Described,
+            update.guid,
+            stamps.instance,
+        );
     }
 
     fn apply_delete(&mut self, delete: &DeleteObject) {
@@ -898,6 +984,7 @@ impl World {
         if delete.guid == 0 || self.is_player(delete.guid) {
             return;
         }
+        use object_probe::ObjectEvent;
         let Some(object) = self.objects.get(&delete.guid) else {
             // A delete that overtook its object's create (a resent create
             // after packet loss) waits for that create, which replays it;
@@ -908,6 +995,14 @@ impl World {
                 .push(delete.instance_sequence);
             self.queue_notes
                 .push(liveness::QueueNote::DeleteHeld(delete.guid));
+            if self.object_probe.is_on() {
+                self.probe_object(
+                    ObjectEvent::DeleteHeld,
+                    delete.guid,
+                    delete.instance_sequence,
+                    None,
+                );
+            }
             return;
         };
         // Only the exact incarnation held is deleted; an older one is
@@ -916,6 +1011,14 @@ impl World {
         let accepted = object
             .gate
             .try_accept_delete(delete.instance_sequence, false);
+        if let Some(at) = self.probed_place(delete.guid) {
+            let event = match (accepted, self.forgetting) {
+                (false, _) => ObjectEvent::DeleteIgnored,
+                (true, false) => ObjectEvent::Deleted,
+                (true, true) => ObjectEvent::Forgotten,
+            };
+            self.probe_object(event, delete.guid, delete.instance_sequence, Some(at));
+        }
         if accepted && let Some(object) = self.objects.remove(&delete.guid) {
             self.attachments
                 .delete_generation(delete.guid, delete.instance_sequence);

@@ -52,6 +52,10 @@ pub struct NetDiagnostics {
     /// and a body that stays more than 4 m from the server's place), and
     /// for each movement the server orders for the character.
     pub position_log: bool,
+    /// `OPENAC_PROBE_OBJECTS=1`: an `[objects]` line for each object
+    /// standing in the world that is created, deleted by the server, held
+    /// for its create or forgotten out of range, and when the world empties.
+    pub probe_objects: bool,
 }
 
 impl NetDiagnostics {
@@ -66,6 +70,7 @@ impl NetDiagnostics {
             motion_log: one(MOTION_LOG_VAR),
             probe_external_container: one("OPENAC_PROBE_EXTERNAL_CONTAINER"),
             position_log: one("OPENAC_POSITION_LOG"),
+            probe_objects: one("OPENAC_PROBE_OBJECTS"),
         }
     }
 
@@ -573,6 +578,7 @@ mod tests {
                 ("OPENAC_MOTION_LOG", "1"),
                 ("OPENAC_PROBE_EXTERNAL_CONTAINER", "1"),
                 ("OPENAC_POSITION_LOG", "1"),
+                ("OPENAC_PROBE_OBJECTS", "1"),
             ])),
             NetDiagnostics {
                 dump_opcodes: true,
@@ -581,6 +587,7 @@ mod tests {
                 motion_log: true,
                 probe_external_container: true,
                 position_log: true,
+                probe_objects: true,
             }
         );
     }
