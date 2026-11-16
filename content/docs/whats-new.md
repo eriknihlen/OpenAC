@@ -12,6 +12,17 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.12 (2026-11-16)
+
+- When the client shows a combat mode the server never confirmed (it asked
+  for magic, say, and no answer came), the client log now says so after
+  5 s, with the combat-mode events that led there. Seen on bots right
+  after a death: the character stood at the lifestone, waiting for a mode
+  the server never sent.
+- The client log's combat-mode history keeps an event that repeats only
+  once, with how many times and until when. A plugin asking again many
+  times a second no longer pushes the events that matter out of it.
+
 ## OpenAC (Rust) 0.2.11 (2026-11-14)
 
 - The remote window's relay address and secret are now shared by every
