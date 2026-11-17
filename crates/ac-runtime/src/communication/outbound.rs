@@ -437,6 +437,36 @@ impl Communication {
         }
     }
 
+    /// The server withdraws a question (it waited too long, or the offer
+    /// lapsed). The open one closes as its dialog does when the server
+    /// closes it: answered no, with its kind and id, for the server waits
+    /// for that answer before it asks another question of the kind. A
+    /// question already answered, or another one, gets nothing. True when
+    /// it was the open one.
+    pub fn server_confirmation_done(
+        &mut self,
+        done: &ac_proto::social::ConfirmationDone,
+        out: &mut Outbound<'_>,
+    ) -> bool {
+        let open = matches!(
+            &self.server_confirmation,
+            Some(ClientConfirmation::Server { confirmation_type, context_id, .. })
+                if *confirmation_type == done.confirmation_type && *context_id == done.context_id
+        );
+        if open {
+            self.server_confirmation = None;
+            self.send_plain(out, |seq| {
+                ac_proto::social::build_confirmation_response(
+                    seq,
+                    done.confirmation_type,
+                    done.context_id,
+                    false,
+                )
+            });
+        }
+        open
+    }
+
     /// The player answered a question: an answer to a question not asked
     /// (or already answered) does nothing; a yes to `/die` sends the
     /// suicide; the server's question gets the answer either way, with its

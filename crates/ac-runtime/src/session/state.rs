@@ -334,7 +334,15 @@ impl SessionState {
                 GameEventType::CHARACTER_CONFIRMATION_DONE => {
                     match ConfirmationDone::parse(event.payload) {
                         Ok(done) => {
-                            self.communication.server_confirmation_done(&done);
+                            let player = self.player_facts_now();
+                            let mut out = Outbound {
+                                outbox,
+                                player,
+                                now_unix_ms: clocks.wall_unix_ms,
+                                active,
+                                options: &mut self.options,
+                            };
+                            self.communication.server_confirmation_done(&done, &mut out);
                         }
                         Err(_) => self.world.record_parse_failure(failure),
                     }
@@ -4500,6 +4508,78 @@ mod tests {
             CLOCKS,
         );
         assert!(outbox.is_empty());
+    }
+
+    #[test]
+    fn a_question_the_server_withdraws_is_answered_no() {
+        // The game's confirmation dialog, closed by the server's done,
+        // answers with its result (no): the server keeps a withdrawn
+        // question of a kind until that answer comes, and asks no other of
+        // that kind meanwhile. Without it a character that missed one
+        // yes/no question never saw another until it logged in again.
+        use crate::communication::ClientConfirmation;
+        let (mut state, mut outbox) = state();
+        state.world.set_player(0x5000_000A);
+        let request = crate::world::tests::game_event(
+            GameEventType::CHARACTER_CONFIRMATION_REQUEST,
+            &[7, 41, 0],
+        );
+        state.apply(
+            &Inbound::parse(&request).unwrap(),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        let question = ClientConfirmation::Server {
+            confirmation_type: 7,
+            context_id: 41,
+            message: String::new(),
+        };
+        assert_eq!(state.communication.server_confirmation(), Some(&question));
+        assert!(outbox.is_empty());
+
+        // A done for another question changes nothing and sends nothing.
+        let other =
+            crate::world::tests::game_event(GameEventType::CHARACTER_CONFIRMATION_DONE, &[7, 40]);
+        state.apply(&Inbound::parse(&other).unwrap(), &mut outbox, true, CLOCKS);
+        assert_eq!(state.communication.server_confirmation(), Some(&question));
+        assert!(outbox.is_empty());
+
+        // The open one's done closes it, answered no with its kind and id.
+        let done =
+            crate::world::tests::game_event(GameEventType::CHARACTER_CONFIRMATION_DONE, &[7, 41]);
+        state.apply(&Inbound::parse(&done).unwrap(), &mut outbox, true, CLOCKS);
+        assert!(state.communication.server_confirmation().is_none());
+        assert_eq!(
+            bodies(&mut outbox),
+            [ac_proto::social::build_confirmation_response(
+                1, 7, 41, false
+            )]
+        );
+
+        // A second done, or a late answer from a plugin, sends nothing more.
+        state.apply(&Inbound::parse(&done).unwrap(), &mut outbox, true, CLOCKS);
+        state.command(
+            SessionCommand::AnswerConfirmation {
+                confirmation: question,
+                accepted: true,
+            },
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        assert!(outbox.is_empty());
+
+        // The next question of the kind opens.
+        let next = crate::world::tests::game_event(
+            GameEventType::CHARACTER_CONFIRMATION_REQUEST,
+            &[7, 42, 0],
+        );
+        state.apply(&Inbound::parse(&next).unwrap(), &mut outbox, true, CLOCKS);
+        assert!(matches!(
+            state.communication.server_confirmation(),
+            Some(ClientConfirmation::Server { context_id: 42, .. })
+        ));
     }
 
     #[test]

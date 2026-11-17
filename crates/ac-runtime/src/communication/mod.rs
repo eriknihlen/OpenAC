@@ -355,19 +355,6 @@ impl Communication {
         true
     }
 
-    /// The server withdraws a question; true when it was the open one.
-    pub fn server_confirmation_done(&mut self, done: &ac_proto::social::ConfirmationDone) -> bool {
-        let open = matches!(
-            &self.server_confirmation,
-            Some(ClientConfirmation::Server { confirmation_type, context_id, .. })
-                if *confirmation_type == done.confirmation_type && *context_id == done.context_id
-        );
-        if open {
-            self.server_confirmation = None;
-        }
-        open
-    }
-
     /// Ask the player `confirmation` (another owner's question: an item
     /// use); one question is open at a time, a later one waits its turn.
     pub fn ask(&mut self, confirmation: ClientConfirmation) {
