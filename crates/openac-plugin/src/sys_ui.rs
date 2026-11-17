@@ -27,6 +27,7 @@ mod raw {
         pub(super) fn ui_windows(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_window_apply(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_windows_apply(ptr: *const u8, len: usize) -> i32;
+        pub(super) fn ui_windows_hold(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_canvas_register(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_canvas_paint(ptr: *const u8, len: usize) -> i32;
         pub(super) fn ui_canvas_set(ptr: *const u8, len: usize) -> i32;
@@ -96,6 +97,7 @@ wrappers!(
     ui_windows,
     ui_window_apply,
     ui_windows_apply,
+    ui_windows_hold,
     ui_canvas_register,
     ui_canvas_paint,
     ui_canvas_set,

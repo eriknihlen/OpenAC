@@ -231,7 +231,7 @@ pub fn compose(
 fn shown(root: &UiRoot, id: ElementId) -> bool {
     let mut at = Some(id);
     while let Some(e) = at {
-        if !root.element(e).is_some_and(|e| e.visible) {
+        if !root.element(e).is_some_and(|e| e.drawn()) {
             return false;
         }
         at = root.parent(e);

@@ -765,6 +765,32 @@ impl UiRoot {
         }
     }
 
+    /// Hold `id` out of sight (`true`) or let it go: while held it is not
+    /// drawn and takes no input, but stays shown as far as everything else
+    /// is concerned (its window reports no visibility change, and what is
+    /// saved of it does not change). Holding releases focus, capture, hover
+    /// and drag state inside it, as hiding does; letting go gives a
+    /// registered window back its default text input.
+    pub fn set_held(&mut self, id: ElementId, held: bool) {
+        let Some(e) = self.element(id) else {
+            return;
+        };
+        if e.held == held {
+            return;
+        }
+        let connected = self.is_connected(id);
+        if connected && held {
+            self.windows_prepare_to_hide(id);
+            self.clear_subtree_ownership(id, false);
+        }
+        if let Some(e) = self.element_mut(id) {
+            e.held = held;
+        }
+        if connected && !held {
+            self.windows_restore_default_input(id);
+        }
+    }
+
     /// Enable or disable input to `id`.
     pub fn set_enabled(&mut self, id: ElementId, enabled: bool) {
         let Some(e) = self.element_mut(id) else {
@@ -1571,7 +1597,7 @@ impl UiRoot {
         let Some(e) = self.element(id) else {
             return;
         };
-        if !e.visible {
+        if !e.drawn() {
             return;
         }
         let (left, top, opacity) = (e.left, e.top, e.opacity);
@@ -1638,7 +1664,7 @@ impl UiRoot {
         let Some(e) = self.element(id) else {
             return;
         };
-        if !e.visible {
+        if !e.drawn() {
             return;
         }
         let (left, top, opacity, w, h) = (e.left, e.top, e.opacity, e.width, e.height);
@@ -1692,7 +1718,7 @@ impl UiRoot {
     pub fn hit_test(&mut self, id: ElementId, x: f32, y: f32) -> Option<ElementId> {
         let node = self.node(id)?;
         let e = &node.element;
-        if !e.visible || !e.enabled {
+        if !e.drawn() || !e.enabled {
             return None;
         }
         let clips = node.widget.as_ref().is_none_or(|w| w.clips_children());
@@ -1939,7 +1965,7 @@ impl UiRoot {
                 break;
             }
             let stale = match self.element(c) {
-                Some(e) => !e.visible || !e.enabled || self.parent(c).is_none(),
+                Some(e) => !e.drawn() || !e.enabled || self.parent(c).is_none(),
                 None => true,
             };
             if stale {
@@ -1993,7 +2019,7 @@ impl UiRoot {
         let Some(element) = self.element(id) else {
             return;
         };
-        if !element.visible || !element.enabled {
+        if !element.drawn() || !element.enabled {
             return;
         }
         if element.tab_stop && element.accepts_focus {
@@ -2051,14 +2077,14 @@ impl UiRoot {
     }
 
     /// `id` is in the tree, and it and every ancestor up to the root are
-    /// visible and enabled.
+    /// visible, not held out of sight, and enabled.
     fn is_available_input_target(&self, id: ElementId) -> bool {
         let mut current = Some(id);
         while let Some(c) = current {
             let Some(e) = self.element(c) else {
                 return false;
             };
-            if !e.visible || !e.enabled {
+            if !e.drawn() || !e.enabled {
                 return false;
             }
             if c == self.root {

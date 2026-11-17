@@ -149,9 +149,9 @@ pub(crate) struct AnchorCapture {
 ///
 /// `visible`, `enabled`, `z_order` and `anchors` may be set when building
 /// an element; once it is in the tree, change them through
-/// [`UiRoot::set_visible`], [`UiRoot::set_enabled`], [`UiRoot::set_z_order`]
-/// and [`UiRoot::set_anchors`], so focus, capture, windows and layout
-/// follow.
+/// [`UiRoot::set_visible`], [`UiRoot::set_held`], [`UiRoot::set_enabled`],
+/// [`UiRoot::set_z_order`] and [`UiRoot::set_anchors`], so focus, capture,
+/// windows and layout follow.
 #[derive(Debug)]
 pub struct Element {
     /// Dat element id of an imported element (0 for synthesized ones).
@@ -174,6 +174,10 @@ pub struct Element {
     pub height: f32,
     /// Shown (ancestors may still hide it).
     pub visible: bool,
+    /// Kept out of sight while shown: not drawn and takes no input, though
+    /// `visible` still says it is shown, so what is saved of it does not
+    /// change. Set through [`UiRoot::set_held`].
+    pub held: bool,
     /// Takes input.
     pub enabled: bool,
     /// Hit testing passes through to what is below.
@@ -258,6 +262,7 @@ impl Default for Element {
             width: 0.0,
             height: 0.0,
             visible: true,
+            held: false,
             enabled: true,
             click_through: false,
             accepts_focus: false,
@@ -328,6 +333,13 @@ impl Element {
     #[must_use]
     pub fn visible(&self) -> bool {
         self.visible
+    }
+
+    /// True when shown and not held out of sight: it is drawn and takes
+    /// input (ancestors may still hide it).
+    #[must_use]
+    pub fn drawn(&self) -> bool {
+        self.visible && !self.held
     }
 
     /// True when it takes input.

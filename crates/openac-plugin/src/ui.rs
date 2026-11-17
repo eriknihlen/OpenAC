@@ -78,7 +78,8 @@ use ac_plugin_abi::ui::{
     RgbaImage, ShapeSet, TextSize, TriangleSet, TypedPanelRegistration, TypedPanelValues, ViewShow,
 };
 pub use ac_plugin_abi::ui::{
-    ScreenSize, UiWindowApplied, UiWindowInfo, UiWindowLayout, UiWindowOwner,
+    ScreenSize, UI_WINDOWS_MAIN_PANELS, UiWindowApplied, UiWindowHoldRefused, UiWindowInfo,
+    UiWindowLayout, UiWindowOwner, UiWindowsHeld,
 };
 use ac_plugin_abi::{Import, Wire};
 
@@ -1510,6 +1511,37 @@ impl Host<'_> {
         let request = request.to_bytes();
         let reply = ui_call!(self, UiWindowsApply, ui_windows_apply, &request);
         decode(Import::UiWindowsApply, &reply)
+    }
+
+    /// Holds registered windows `names` out of sight, in place of the ones
+    /// this plugin held; an empty list lets them all go. A held window is
+    /// not drawn and takes no pointer or keys, the game's own windows
+    /// included (the vitals, the combat bar, the main panels), so a canvas
+    /// under it shows. Nothing the client saves changes: the window stays
+    /// shown or hidden as the game has it (the game goes on showing and
+    /// hiding it underneath, which shows once the hold ends),
+    /// [`Self::windows`] still reports its `layout.visible` as the game has
+    /// it, with `held` set, and `/saveui` saves it as it is. Placing a held
+    /// window with [`Self::apply_window`] still applies and saves; the
+    /// window stays held. Holding one main panel holds only that one: hold
+    /// every window with the same `shares_place` to hold the group.
+    ///
+    /// A window is held while any plugin holds it. The hold ends by itself
+    /// when this plugin unloads, is reloaded or turned off, and when the
+    /// character leaves the world, so a forgotten hold never leaves a
+    /// window missing. The answer names the windows now held and refuses
+    /// each name no registered window has.
+    ///
+    /// # Errors
+    /// For a list that is not empty: no window is attached, or the
+    /// character's window layout is not restored yet (hold windows after
+    /// the screen and windows events that follow it). The plugin's holds
+    /// stay as they were (API 1.14).
+    pub fn hold_windows<S: AsRef<str>>(&mut self, names: &[S]) -> Result<UiWindowsHeld, String> {
+        let request: Vec<String> = names.iter().map(|n| n.as_ref().to_owned()).collect();
+        let request = request.to_bytes();
+        let reply = ui_call!(self, UiWindowsHold, ui_windows_hold, &request);
+        decode(Import::UiWindowsHold, &reply)
     }
 
     /// The client's art for a render surface (a full id or a bare index).

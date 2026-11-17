@@ -1131,6 +1131,7 @@ fn plugin_ui_changes() -> Vec<UiChange> {
                 state: false,
             },
         },
+        UiChange::WindowsHeld(vec!["inventory".into(), "vitals".into()]),
     ]
 }
 
@@ -2162,6 +2163,7 @@ fn every_command() -> Vec<SessionCommand> {
                 min_size: (100.0, 50.0),
                 max_size: (f32::MAX, 900.0),
                 resizable: (true, at != 0),
+                shares_place: (at == 0).then(|| ac_plugin_ui::MAIN_PANELS.to_owned()),
             })
             .collect(),
         },
@@ -2174,6 +2176,7 @@ fn every_command() -> Vec<SessionCommand> {
             min_size: (40.0, 40.0),
             max_size: (400.0, 400.0),
             resizable: (true, true),
+            shares_place: None,
         }]),
     ];
     let mut commands = vec![
@@ -2793,7 +2796,7 @@ fn the_subscription_filters_the_stateless_kinds() {
 /// a link must be built from the same layout).
 #[test]
 fn the_shape_is_pinned() {
-    assert_eq!(shape_hex(), "e82009acbce004bd", "{:#x}", shape());
+    assert_eq!(shape_hex(), "3f0d6f736e6d1818", "{:#x}", shape());
 }
 
 /// The size of a representative attach: a snapshot of a busy spot, a full
@@ -2900,7 +2903,7 @@ variants! {
         ControlVisible, CanvasAdded, CanvasRemoved, CanvasPaint, CanvasPlacement,
         CanvasListening, CanvasReleasePointer, CanvasResized, ImageAdded, FileIcon,
         ImageRemoved, Labels, Lines, Triangles, Icons, Shapes, ProjectileDebug, ClientWindow,
-        Hotkeys, FontAdded, FontRemoved, DialogAdded, DialogRemoved, Modal, WindowApply,
+        Hotkeys, FontAdded, FontRemoved, DialogAdded, DialogRemoved, Modal, WindowApply, WindowsHeld,
     }
     pregame_variant, PREGAME: PreGameEvent { Connection, Selection, Creation, Options, Refused }
     portal_variant, PORTAL: PortalSpaceEvent {

@@ -55,6 +55,7 @@ record! {
         min_size: (f32, f32),
         max_size: (f32, f32),
         resizable: (bool, bool),
+        shares_place: Option<String>,
     }
     PluginIcon { width: u32, height: u32, rgba: Arc<Vec<u8>> }
     WindowIcon { named: Option<PluginIcon>, light: Option<PluginIcon>, dark: Option<PluginIcon> }
@@ -588,6 +589,7 @@ union! {
         28 => DialogRemoved(dialog: u32),
         29 => Modal { panel: u32, owner: Option<u32> },
         30 => WindowApply { name: String, layout: WindowLayout, parts: WindowParts },
+        31 => WindowsHeld(names: Vec<String>),
     }
     WindowOwner: "window owner" {
         0 => Client,

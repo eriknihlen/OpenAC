@@ -290,6 +290,26 @@ impl UiRoot {
             .is_some_and(|e| e.visible())
     }
 
+    /// Hold window `name` out of sight (`true`) or let it go
+    /// ([`UiRoot::set_held`]): while held it is not drawn and takes no
+    /// input, but stays shown or hidden as the game has it. False for an
+    /// unknown name.
+    pub fn hold_window(&mut self, name: &str, held: bool) -> bool {
+        let Some(frame) = self.window(name).map(|w| w.frame) else {
+            return false;
+        };
+        self.set_held(frame, held);
+        true
+    }
+
+    /// True when window `name` exists and is held out of sight.
+    #[must_use]
+    pub fn is_window_held(&self, name: &str) -> bool {
+        self.window(name)
+            .and_then(|w| self.element(w.frame))
+            .is_some_and(|e| e.held)
+    }
+
     /// Move window `name`, kept inside its parent. False for an unknown
     /// name.
     pub fn move_window(&mut self, name: &str, left: f32, top: f32) -> bool {
@@ -437,16 +457,30 @@ impl UiRoot {
             return;
         };
         let name = self.windows.windows[i].name.clone();
+        if visible {
+            self.windows_restore_default_input(element);
+        }
+        self.notify_visibility(i, visible);
+        self.emit_window(&name, WindowEvent::VisibilityChanged(visible));
+    }
+
+    /// Registered window frame `element` is back in sight: it takes back
+    /// the default text input it had when it was hidden or held, unless
+    /// another window has one.
+    pub(crate) fn windows_restore_default_input(&mut self, element: ElementId) {
+        let Some(i) = self.window_index_of_frame(element) else {
+            return;
+        };
         let frame = self.windows.windows[i].frame;
-        if visible
-            && self.default_text_input.is_none()
-            && let Some(&input) = self.windows.default_inputs.get(&name)
+        if self.default_text_input.is_none()
+            && let Some(&input) = self
+                .windows
+                .default_inputs
+                .get(&self.windows.windows[i].name)
             && self.is_within(Some(input), frame)
         {
             self.default_text_input = Some(input);
         }
-        self.notify_visibility(i, visible);
-        self.emit_window(&name, WindowEvent::VisibilityChanged(visible));
     }
 
     fn notify_visibility(&mut self, i: usize, visible: bool) {

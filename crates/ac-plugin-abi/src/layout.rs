@@ -213,8 +213,8 @@ mod tests {
     /// windows, resizing a canvas) again, API 1.13 published the same
     /// value as 1.12: it added WebP to the image formats the client
     /// decodes, not a shape, and API 1.14 (the screen and the registered
-    /// windows: two events and four imports) changed it again.
-    const PUBLISHED: u64 = 0xc024_a62d_1364_3a66;
+    /// windows: two events and five imports) changed it again.
+    const PUBLISHED: u64 = 0xfd19_c60b_acd2_81be;
 
     /// The fingerprint API 1.12 was published with.
     const PUBLISHED_1_12: u64 = 0x4ae5_d2f7_29f5_02b6;
@@ -237,17 +237,18 @@ mod tests {
     /// The core shape every plugin built for API 1.12 or 1.13 carries.
     const API_1_13_CORE: u64 = 0xd1c7_b9f7_fff1_9a8d;
 
-    /// The imports API 1.14 added: the screen, the registered windows, and
-    /// placing one or several.
-    const API_1_14_WINDOWS: [Import; 4] = [
+    /// The imports API 1.14 added: the screen, the registered windows,
+    /// placing one or several, and holding them out of sight.
+    const API_1_14_WINDOWS: [Import; 5] = [
         Import::UiScreenSize,
         Import::UiWindows,
         Import::UiWindowApply,
         Import::UiWindowsApply,
+        Import::UiWindowsHold,
     ];
 
     /// API 1.14 added two events (the screen's new size, a window
-    /// registered or unregistered), which change the core shape, and four
+    /// registered or unregistered), which change the core shape, and five
     /// imports, each marked `since`; no existing call changed. A plugin
     /// built for API 1.13 keeps its core shape, lacks the imports, and has
     /// every other import as it is now.

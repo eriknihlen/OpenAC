@@ -143,6 +143,15 @@ impl MainPanels {
             .map(|e| e.panel)
     }
 
+    /// Whether window `window` is a main panel that shares its place and
+    /// size with the others: placing it places them all.
+    #[must_use]
+    pub fn shares_place(&self, window: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.window == window && e.shares_geometry)
+    }
+
     /// The window of main panel `panel`.
     #[must_use]
     pub fn window_of(&self, panel: u32) -> Option<&str> {

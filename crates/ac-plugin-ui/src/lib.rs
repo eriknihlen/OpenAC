@@ -55,4 +55,6 @@ pub use state::{
 pub use theme::{ThemeKind, ThemePalette};
 pub use value::{BindingKind, BindingSchema, ItemRecord, Rgba, UiValue};
 pub use view::{PluginUiView, ViewDirty};
-pub use windows::{WindowApplied, WindowLayout, WindowOwner, WindowParts, WindowReport};
+pub use windows::{
+    MAIN_PANELS, WindowApplied, WindowLayout, WindowOwner, WindowParts, WindowReport, WindowsHeld,
+};

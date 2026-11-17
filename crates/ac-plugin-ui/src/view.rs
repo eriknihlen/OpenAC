@@ -59,6 +59,8 @@ pub struct PluginUiView {
         crate::windows::WindowLayout,
         crate::windows::WindowParts,
     )>,
+    /// The registered windows plugins hold out of sight, sorted.
+    pub held_windows: Vec<String>,
     /// The dialogs waiting for an answer, in the order asked.
     pub dialogs: Vec<crate::model::DialogView>,
     /// The windows shown modal and the windows they block.
@@ -152,6 +154,7 @@ impl PluginUiView {
                 self.hotkeys = Arc::default();
                 self.client_requests.clear();
                 self.window_applies.clear();
+                self.held_windows.clear();
                 self.dialogs.clear();
                 self.modals.clear();
                 self.dirty = ViewDirty {
@@ -277,6 +280,7 @@ impl PluginUiView {
                 layout,
                 parts,
             } => self.window_applies.push((name, layout, parts)),
+            UiChange::WindowsHeld(names) => self.held_windows = names,
             UiChange::Hotkeys(table) => self.hotkeys = table,
             UiChange::DialogAdded(dialog) => self.dialogs.push(*dialog),
             UiChange::DialogRemoved(handle) => self.dialogs.retain(|d| d.handle != handle),

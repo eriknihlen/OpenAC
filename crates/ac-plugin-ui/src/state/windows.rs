@@ -4,12 +4,36 @@
 //! ([`WindowReport::fit`]), and the window's next report is where it went.
 //! Placings wait for the character's layout: before it is restored the
 //! window would put them back, and nothing would be saved.
+//!
+//! Plugins can also hold registered windows out of sight: the window keeps
+//! them shown or hidden as the game has them, and saves them so, but does
+//! not draw them or give them input. Each plugin's holds are its own; a
+//! window is held while any plugin holds it. Holds end when the plugin is
+//! released and when the character leaves the world, so a forgotten hold
+//! never leaves a window missing.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::PluginUi;
 use crate::model::UiChange;
-use crate::windows::{WindowApplied, WindowLayout, WindowParts, WindowReport, merged};
+use crate::windows::{WindowApplied, WindowLayout, WindowParts, WindowReport, WindowsHeld, merged};
+
+/// The windows each plugin holds out of sight.
+#[derive(Debug, Default)]
+pub(super) struct WindowHolds {
+    /// Each plugin's held windows, by plugin id.
+    by_owner: BTreeMap<String, BTreeSet<String>>,
+    /// The held windows as last told to the window, sorted.
+    told: Vec<String>,
+}
+
+impl WindowHolds {
+    /// Every window some plugin holds, sorted.
+    fn all(&self) -> Vec<String> {
+        let all: BTreeSet<&String> = self.by_owner.values().flatten().collect();
+        all.into_iter().cloned().collect()
+    }
+}
 
 /// What the session knows of the window's screen and registered windows.
 #[derive(Debug, Default)]
@@ -150,6 +174,101 @@ impl PluginUi {
         Ok(applied)
     }
 
+    /// Holds registered windows `names` out of sight for plugin `owner`,
+    /// in place of the ones it held: the window does not draw them or give
+    /// them input, but keeps them shown or hidden as the game has them (it
+    /// goes on showing and hiding them as usual underneath) and saves them
+    /// as they are. Placings of a held window still apply. An empty list
+    /// lets every window of the plugin's go. The hold ends by itself when
+    /// the plugin is released ([`Self::release`]) and when the character
+    /// leaves the world.
+    ///
+    /// # Errors
+    /// For a list that is not empty: no window is attached, or the
+    /// character's layout is not restored (before login, or while a
+    /// pre-game screen covers the game). The plugin's holds stay as they
+    /// were. A name no registered window has is refused in the answer.
+    pub fn hold_windows(&mut self, owner: &str, names: &[String]) -> Result<WindowsHeld, String> {
+        if names.is_empty() {
+            self.window_holds.by_owner.remove(owner);
+            self.follow_window_holds();
+            return Ok(WindowsHeld::default());
+        }
+        if !self.window_attached || self.window_mirror.screen.is_none() {
+            return Err("no window is attached".to_owned());
+        }
+        if !self.window_mirror.ready {
+            return Err(
+                "the character's window layout is not restored yet: hold windows after the \
+                 screen and windows events that follow it"
+                    .to_owned(),
+            );
+        }
+        let mut answer = WindowsHeld::default();
+        let mut set = BTreeSet::new();
+        for name in names {
+            if set.contains(name) {
+                continue;
+            }
+            if self.window_mirror.windows.iter().any(|w| &w.name == name) {
+                set.insert(name.clone());
+                answer.held.push(name.clone());
+            } else if !answer.refused.iter().any(|(n, _)| n == name) {
+                answer.refused.push((
+                    name.clone(),
+                    format!("no registered window is called '{name}'"),
+                ));
+            }
+        }
+        if set.is_empty() {
+            self.window_holds.by_owner.remove(owner);
+        } else {
+            self.window_holds.by_owner.insert(owner.to_owned(), set);
+        }
+        self.follow_window_holds();
+        Ok(answer)
+    }
+
+    /// Whether some plugin holds window `name` out of sight.
+    #[must_use]
+    pub fn is_window_held(&self, name: &str) -> bool {
+        self.window_holds
+            .by_owner
+            .values()
+            .any(|names| names.contains(name))
+    }
+
+    /// Every hold of `owner` ends (it was released).
+    pub(super) fn release_window_holds(&mut self, owner: &str) {
+        if self.window_holds.by_owner.remove(owner).is_some() {
+            self.follow_window_holds();
+        }
+    }
+
+    /// Every plugin's holds end (the character left the world).
+    pub(super) fn end_window_holds(&mut self) {
+        if !self.window_holds.by_owner.is_empty() {
+            self.window_holds.by_owner.clear();
+            self.follow_window_holds();
+        }
+    }
+
+    /// Tell the window the held windows when they changed.
+    fn follow_window_holds(&mut self) {
+        let all = self.window_holds.all();
+        if all != self.window_holds.told {
+            self.window_holds.told.clone_from(&all);
+            self.changes.push(UiChange::WindowsHeld(all));
+        }
+    }
+
+    /// The held windows for a window that attaches: none when nothing is
+    /// held.
+    pub(super) fn window_holds_snapshot(&self) -> Option<UiChange> {
+        (!self.window_holds.told.is_empty())
+            .then(|| UiChange::WindowsHeld(self.window_holds.told.clone()))
+    }
+
     /// The screen's new size, once, when it changed since the last call
     /// (the first report of an attached window is a change, and so is the
     /// character's layout being restored).
@@ -189,6 +308,7 @@ mod tests {
             min_size: (50.0, 50.0),
             max_size: (500.0, 500.0),
             resizable: (true, true),
+            shares_place: None,
         }
     }
 
@@ -381,5 +501,110 @@ mod tests {
         assert_eq!(radar.layout.x, 390.0, "from where it went");
         let chat = ui.apply_window("chat", &at, size).unwrap();
         assert_eq!(chat.layout.x, 400.0, "still from its own placing");
+    }
+
+    /// The held windows told to the window since the last call.
+    fn told_holds(ui: &mut PluginUi) -> Vec<Vec<String>> {
+        ui.take_changes()
+            .into_iter()
+            .filter_map(|c| match c {
+                UiChange::WindowsHeld(names) => Some(names),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|n| (*n).to_owned()).collect()
+    }
+
+    // Each plugin holds its own windows, a window is held while any plugin
+    // holds it, each call replaces the plugin's set, an unknown name is
+    // refused, and the window is told the union only when it changed.
+    #[test]
+    fn plugins_hold_windows_out_of_sight_each_their_own() {
+        let mut ui = PluginUi::new();
+        // Without a window, or before the layout is restored, refused.
+        assert!(ui.hold_windows("a", &names(&["radar"])).is_err());
+        ui.set_window_attached(true);
+        ui.input(input((800, 600), false, &["radar", "vendor", "chat"]));
+        let early = ui.hold_windows("a", &names(&["radar"])).unwrap_err();
+        assert!(early.contains("not restored"), "{early}");
+        // Letting go always works.
+        assert!(ui.hold_windows("a", &[]).is_ok());
+        ui.input(input((800, 600), true, &["radar", "vendor", "chat"]));
+        ui.take_changes();
+
+        let held = ui
+            .hold_windows("a", &names(&["vendor", "radar", "nowhere", "radar"]))
+            .unwrap();
+        assert_eq!(held.held, ["vendor", "radar"]);
+        assert_eq!(held.refused.len(), 1);
+        assert_eq!(held.refused[0].0, "nowhere");
+        assert!(ui.is_window_held("vendor") && !ui.is_window_held("chat"));
+        assert_eq!(told_holds(&mut ui), [names(&["radar", "vendor"])]);
+        // Another plugin's hold adds to it; the same set again tells nothing.
+        ui.hold_windows("b", &names(&["chat", "radar"])).unwrap();
+        assert_eq!(told_holds(&mut ui), [names(&["chat", "radar", "vendor"])]);
+        ui.hold_windows("b", &names(&["radar", "chat"])).unwrap();
+        assert!(told_holds(&mut ui).is_empty());
+        // A plugin's new set replaces its old one; the other's stays.
+        ui.hold_windows("a", &names(&["chat"])).unwrap();
+        assert!(!ui.is_window_held("vendor"));
+        assert!(ui.is_window_held("radar"), "b holds it");
+        assert_eq!(told_holds(&mut ui), [names(&["chat", "radar"])]);
+        // A window that attaches is told what is held.
+        assert!(
+            ui.snapshot()
+                .iter()
+                .any(|c| *c == UiChange::WindowsHeld(names(&["chat", "radar"])))
+        );
+        // Releasing a plugin ends its holds.
+        ui.release("b");
+        assert_eq!(told_holds(&mut ui), [names(&["chat"])]);
+        ui.hold_windows("a", &[]).unwrap();
+        assert_eq!(told_holds(&mut ui), [Vec::<String>::new()]);
+        assert!(
+            !ui.snapshot()
+                .iter()
+                .any(|c| matches!(c, UiChange::WindowsHeld(_)))
+        );
+    }
+
+    // The character leaving the world (the window's layout no longer
+    // restored) ends every hold; a placing of a held window still goes to
+    // the window, and the window stays held.
+    #[test]
+    fn leaving_the_world_ends_every_hold_and_a_held_window_is_still_placed() {
+        let mut ui = PluginUi::new();
+        ui.set_window_attached(true);
+        ui.input(input((800, 600), true, &["radar", "chat"]));
+        ui.hold_windows("a", &names(&["radar"])).unwrap();
+        ui.hold_windows("b", &names(&["chat"])).unwrap();
+        ui.take_changes();
+        let at = WindowLayout {
+            x: 300.0,
+            ..report("radar", false).layout
+        };
+        let place = WindowParts {
+            place: true,
+            ..WindowParts::default()
+        };
+        assert_eq!(
+            ui.apply_window("radar", &at, place).unwrap().layout.x,
+            300.0
+        );
+        assert!(
+            ui.take_changes()
+                .iter()
+                .any(|c| matches!(c, UiChange::WindowApply { name, .. } if name == "radar"))
+        );
+        assert!(ui.is_window_held("radar"));
+        ui.input(input((800, 600), false, &["radar", "chat"]));
+        assert!(!ui.is_window_held("radar") && !ui.is_window_held("chat"));
+        assert_eq!(told_holds(&mut ui), [Vec::<String>::new()]);
+        // Back in the world, nothing is held until a plugin asks again.
+        ui.input(input((800, 600), true, &["radar", "chat"]));
+        assert!(!ui.is_window_held("radar"));
     }
 }

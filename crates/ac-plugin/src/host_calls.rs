@@ -331,6 +331,7 @@ pub(crate) fn handle_import(
         | Import::UiWindows
         | Import::UiWindowApply
         | Import::UiWindowsApply
+        | Import::UiWindowsHold
         | Import::UiMeasureText
         | Import::UiFontBundled
         | Import::UiFontLoad

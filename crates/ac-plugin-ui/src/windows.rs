@@ -80,7 +80,15 @@ pub struct WindowReport {
     /// Whether its width, and its height, can change: a window fixed on an
     /// axis keeps its size there whatever is asked.
     pub resizable: (bool, bool),
+    /// The windows that share one place and size carry the same key here
+    /// ([`MAIN_PANELS`] for the main panels); none for a window on its
+    /// own. Placing one of them places them all.
+    pub shares_place: Option<String>,
 }
+
+/// [`WindowReport::shares_place`] of the main panels (inventory,
+/// character, spellbook and the rest), which share one place and size.
+pub const MAIN_PANELS: &str = "main-panels";
 
 impl WindowReport {
     /// Where the window ends up when `parts` of `layout` are applied to it
@@ -196,6 +204,15 @@ pub struct WindowApplied {
     pub shown_ignored: bool,
 }
 
+/// What holding windows out of sight answers.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WindowsHeld {
+    /// The windows the plugin now holds, in the order asked.
+    pub held: Vec<String>,
+    /// The names it asked for that are not held, each with why.
+    pub refused: Vec<(String, String)>,
+}
+
 /// `value` within `min..=max`, `min` winning when they cross (the same
 /// rule the window's layouts use).
 fn clamp(value: f32, min: f32, max: f32) -> f32 {
@@ -230,6 +247,7 @@ mod tests {
             min_size: (100.0, 80.0),
             max_size: (400.0, 300.0),
             resizable: (true, true),
+            shares_place: None,
         }
     }
 

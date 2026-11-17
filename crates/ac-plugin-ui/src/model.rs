@@ -1044,6 +1044,10 @@ pub enum UiChange {
         /// Which parts were asked for.
         parts: crate::windows::WindowParts,
     },
+    /// The registered windows plugins hold out of sight, by name, sorted:
+    /// they are not drawn and take no input, but stay shown or hidden as
+    /// the game has them and save as they are. Every other window is let go.
+    WindowsHeld(Vec<String>),
 }
 
 /// A plugin's question in a dialog box (OpenAC `PluginDialog`), as a window

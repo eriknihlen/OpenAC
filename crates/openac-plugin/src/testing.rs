@@ -110,6 +110,10 @@ pub struct FakeHost {
     /// The fake window does not have the character's layout restored
     /// ([`Self::set_layout_restored`]); it has by default.
     layout_not_restored: bool,
+    /// Every list of windows the plugin asked to hold out of sight, in
+    /// order, as it asked (`Host::hold_windows`); [`Self::held_windows`]
+    /// says which are held now.
+    pub window_holds: Vec<Vec<String>>,
 }
 
 impl FakeHost {
@@ -155,9 +159,11 @@ impl FakeHost {
         crate::__export::start(plugin, &mut host, &info.to_bytes())
     }
 
-    /// Stops a plugin.
+    /// Stops a plugin. Its window holds end, as when the client turns a
+    /// plugin off.
     pub fn disable<P: Plugin>(&mut self, plugin: &mut P) {
         plugin.disable(&mut Host::with_transport(self));
+        let _ = self.ui.hold_windows(&self.plugin_id, &[]);
     }
 
     /// Runs `f` with a host on this fake, as a plugin call would.
@@ -353,6 +359,10 @@ impl FakeHost {
         if matches!(import, Import::UiWindowApply | Import::UiWindowsApply) {
             self.place_windows(import, bytes);
         }
+        if import == Import::UiWindowsHold {
+            self.window_holds
+                .push(Vec::<String>::from_bytes(bytes).unwrap_or_default());
+        }
         for (_, line) in reports(&mut self.ui) {
             self.logs.push((LogLevel::Warn, line));
         }
@@ -405,17 +415,25 @@ impl FakeHost {
     /// `Host::apply_window` places them as the client would (within their
     /// limits and the screen, a shown state left alone for a window the
     /// game manages), and its requests are kept in
-    /// [`Self::window_applies`]. Needs an attached window
-    /// ([`Self::attach_window`]).
+    /// [`Self::window_applies`]. A window set `held` is held out of sight
+    /// by another plugin (while the layout is restored), so it reads
+    /// `held` whatever this plugin holds; `shares_place` is kept as set.
+    /// Needs an attached window ([`Self::attach_window`]).
     pub fn report_windows<P: Plugin>(
         &mut self,
         plugin: &mut P,
         screen: (i32, i32),
         windows: Vec<crate::ui::UiWindowInfo>,
     ) {
+        let held_elsewhere: Vec<String> = windows
+            .iter()
+            .filter(|w| w.held)
+            .map(|w| w.name.clone())
+            .collect();
         self.screen = Some(screen);
         self.windows = windows.into_iter().map(window_report).collect();
         self.tell_windows(plugin);
+        let _ = self.ui.hold_windows(ANOTHER_PLUGIN, &held_elsewhere);
     }
 
     /// A new screen, the windows as they are: as [`Self::report_windows`].
@@ -436,13 +454,28 @@ impl FakeHost {
         self.tell_windows(plugin);
     }
 
-    /// The registered windows as the fake window has them now: as set, and
-    /// placed where the plugin's placings put them.
+    /// The registered windows as the fake window has them now: as set,
+    /// placed where the plugin's placings put them, and `held` while the
+    /// plugin holds them out of sight.
     #[must_use]
     pub fn windows(&self) -> Vec<crate::ui::UiWindowInfo> {
         self.windows
             .iter()
-            .map(ac_plugin_abi::ui_host::window_info)
+            .map(|w| ac_plugin_abi::ui_host::window_info(w, self.ui.is_window_held(&w.name)))
+            .collect()
+    }
+
+    /// The names of the windows the plugin holds out of sight now, in
+    /// registration order. Holds end when the plugin is disabled
+    /// ([`Self::disable`]) and when the layout stops being restored
+    /// ([`Self::set_layout_restored`]), as the character leaving the world
+    /// ends them in the client.
+    #[must_use]
+    pub fn held_windows(&self) -> Vec<String> {
+        self.windows
+            .iter()
+            .filter(|w| self.ui.is_window_held(&w.name))
+            .map(|w| w.name.clone())
             .collect()
     }
 
@@ -766,6 +799,7 @@ impl Transport for FakeHost {
             | Import::UiWindows
             | Import::UiWindowApply
             | Import::UiWindowsApply
+            | Import::UiWindowsHold
             | Import::UiMeasureText
             | Import::UiFontBundled
             | Import::UiFontLoad
@@ -797,6 +831,9 @@ impl Transport for FakeHost {
     }
 }
 
+/// The plugin that holds the windows a test reports `held`.
+const ANOTHER_PLUGIN: &str = "openac.testing.another-plugin";
+
 /// A registered window as a test sets it, as the window reports it.
 fn window_report(w: crate::ui::UiWindowInfo) -> ac_plugin_ui::WindowReport {
     let l = w.layout;
@@ -821,6 +858,7 @@ fn window_report(w: crate::ui::UiWindowInfo) -> ac_plugin_ui::WindowReport {
         min_size: (w.min_width, w.min_height),
         max_size: (w.max_width, w.max_height),
         resizable: (w.resizable_width, w.resizable_height),
+        shares_place: w.shares_place,
     }
 }
 
@@ -1482,6 +1520,8 @@ mod tests {
             max_height: 400.0,
             resizable_width: true,
             resizable_height: true,
+            shares_place: None,
+            held: false,
         }
     }
 
@@ -1543,5 +1583,64 @@ mod tests {
         host.set_layout_restored(&mut plugin, true);
         assert_eq!(plugin.heard, ["screen 800x600", "windows radar,vendor"]);
         assert!(plugin.answers[0].is_ok());
+    }
+
+    /// A plugin's own test reports which windows share a place and which
+    /// another plugin holds; the plugin's holds are answered and recorded,
+    /// read back on the window list, and end when the plugin is turned off
+    /// or the layout stops being restored (the character left the world).
+    #[test]
+    fn a_plugin_holds_the_windows_the_fake_window_reports() {
+        use crate::ui::UI_WINDOWS_MAIN_PANELS;
+        let mut host = FakeHost::new("test.layout");
+        let mut plugin = LayoutKeeper::default();
+        host.enable(&mut plugin).unwrap();
+        host.attach_window(&mut plugin, true);
+        let panel = |name: &str| crate::ui::UiWindowInfo {
+            shares_place: Some(UI_WINDOWS_MAIN_PANELS.to_owned()),
+            ..window(name, false)
+        };
+        let held_elsewhere = crate::ui::UiWindowInfo {
+            held: true,
+            ..window("chat", false)
+        };
+        host.report_windows(
+            &mut plugin,
+            (1024, 768),
+            vec![
+                panel("inventory"),
+                panel("character"),
+                window("vitals", true),
+                held_elsewhere,
+            ],
+        );
+        let windows = host.with_host(|h| h.windows());
+        assert_eq!(windows[0].shares_place, windows[1].shares_place);
+        assert_eq!(windows[2].shares_place, None);
+        assert!(windows[3].held, "another plugin holds it");
+        assert_eq!(host.held_windows(), ["chat"]);
+
+        let held = host
+            .with_host(|h| h.hold_windows(&["vitals", "inventory", "nowhere"]))
+            .unwrap();
+        assert_eq!(held.held, ["vitals", "inventory"]);
+        assert_eq!(held.refused[0].name, "nowhere");
+        assert_eq!(host.window_holds, [vec!["vitals", "inventory", "nowhere"]]);
+        assert_eq!(host.held_windows(), ["inventory", "vitals", "chat"]);
+        let windows = host.with_host(|h| h.windows());
+        assert!(
+            windows[2].held && windows[2].layout.visible == window("vitals", true).layout.visible
+        );
+
+        // The character leaves the world: every hold ends.
+        host.set_layout_restored(&mut plugin, false);
+        assert!(host.held_windows().is_empty());
+        assert!(host.with_host(|h| h.hold_windows(&["vitals"])).is_err());
+        host.set_layout_restored(&mut plugin, true);
+        host.with_host(|h| h.hold_windows(&["vitals"])).unwrap();
+        assert_eq!(host.held_windows(), ["vitals"]);
+        // Turned off: its holds end.
+        host.disable(&mut plugin);
+        assert!(host.held_windows().is_empty());
     }
 }

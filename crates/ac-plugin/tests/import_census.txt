@@ -25,6 +25,7 @@ ui_screen_size - window
 ui_windows - window
 ui_window_apply - window
 ui_windows_apply - window
+ui_windows_hold - window
 ui_canvas_register -
 ui_canvas_paint -
 ui_canvas_set -

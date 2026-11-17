@@ -1024,6 +1024,7 @@ impl WindowUi {
             self.apply_window_layout(&name, &layout, parts);
             self.plugins.placed_since_report.insert(name);
         }
+        self.hold_plugin_windows();
         self.report_client_windows();
         let appearance_asked = self.plugins.dock
             && self
@@ -1361,6 +1362,24 @@ impl WindowUi {
         layouts.follow(&mut self.host);
     }
 
+    /// Hold out of sight the registered windows plugins hold, and let every
+    /// other go: a held window is not drawn and takes no input, but stays
+    /// shown or hidden as the game has it, so nothing saved changes. Every
+    /// frame, so a window registered while held is held from its first.
+    fn hold_plugin_windows(&mut self) {
+        let held = &self.facts.plugin_ui.held_windows;
+        let frames: Vec<(ac_ui::tree::ElementId, bool)> = self
+            .host
+            .root
+            .windows()
+            .iter()
+            .map(|w| (w.frame, held.binary_search(&w.name).is_ok()))
+            .collect();
+        for (frame, hold) in frames {
+            self.host.root.set_held(frame, hold);
+        }
+    }
+
     /// Tell the session the screen the interface lays out in and every
     /// registered window, when any of it changed: after the frame's layout
     /// work, so a new screen arrives with the windows already reflowed onto
@@ -1414,6 +1433,10 @@ impl WindowUi {
                     min_size: (frame.min_width, frame.min_height),
                     max_size: (frame.max_width, frame.max_height),
                     resizable: (frame.resize_x, frame.resize_y),
+                    shares_place: self
+                        .panels
+                        .shares_place(&w.name)
+                        .then(|| ac_plugin_ui::MAIN_PANELS.to_owned()),
                 })
             })
             .collect();

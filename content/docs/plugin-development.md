@@ -176,9 +176,11 @@ BMP, TGA and GIF before): lossy, lossless and with alpha, and an animation's
 first frame, as for a GIF. No call changed; a client older than 1.13 refuses
 the bytes (handle 0), so a plugin that ships only WebP art builds for 1.13.
 API 1.14 added the screen and the registered windows: `Host::screen_size`,
-`Host::windows`, `Host::apply_window` and `Host::apply_windows`, and the
-events `Event::ScreenSizeChanged` and `Event::UiWindowsChanged`, which a
-plugin built for an older version never gets ([Window layouts](#window-layouts)).
+`Host::windows`, `Host::apply_window`, `Host::apply_windows` and
+`Host::hold_windows`, and the events `Event::ScreenSizeChanged` and
+`Event::UiWindowsChanged`, which a plugin built for an older version never
+gets ([Window layouts](#window-layouts), [Holding windows out of
+sight](#holding-windows-out-of-sight)).
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -338,6 +340,12 @@ the client saves it), `state_managed`, and its smallest and largest width and
 height, and whether its width and its height can change at all
 (`resizable_width`, `resizable_height`). A `state_managed` window is one the
 game shows and hides by itself (a vendor, a trade, the combat bar).
+Windows that share one place and size carry the same `shares_place` key:
+every main panel (inventory, character, spellbook, the map and
+the rest) has `UI_WINDOWS_MAIN_PANELS` (`"main-panels"`), and a window on its
+own has `None`. Placing one of them places them all, so keep one place for
+the group; the one shown now has `layout.visible` set. `held` says a plugin
+holds the window out of sight.
 
 `Host::apply_window(name, &layout, parts)` places a window as the client
 restores a saved layout. `parts` (`WindowParts::PLACE`, `SIZE`, `SHOWN`,
@@ -380,6 +388,32 @@ the size, so the windows a plugin reads then are where they landed.
 plugin's window came or went, the first report of a window included), or
 the layout was restored: read `Host::windows` again. Neither needs a permission, and
 neither is raised on a session without a window.
+
+### Holding windows out of sight
+
+`Host::hold_windows(&names)` holds registered windows out of
+sight, say while a layout editor paints a box for every window on canvases,
+which sit under every window. A held window is not drawn and takes no
+pointer or keys, the game's own windows included: the vitals, the combat bar
+and the main panels. Each call replaces the windows the plugin held, and an
+empty list lets them all go. The answer's `held` lists the windows now held,
+and `refused` each name no registered window has, with the reason.
+
+Holding changes nothing the client saves. A held window stays shown or
+hidden as the game has it: `Host::windows` reports its `layout.visible` as
+before, with `held` set, and `/saveui` saves it as it is. The game goes on
+showing and hiding it underneath (a vendor opening, the combat bar on a
+stance change, the player pressing a panel key), which shows once the hold
+ends. `Host::apply_window` on a held window still applies and saves, and the
+window stays held. Holding one main panel holds only that one: hold every
+window with the same `shares_place` to hold the group.
+
+A window is held while any plugin holds it. The hold ends by itself when the
+plugin unloads, is reloaded or turned off, and when the character leaves the
+world, so a forgotten hold never leaves a window missing. Like a placing, a
+hold waits for the character's window layout: before it is restored, or with
+no window attached, holding is an error (letting go never is). It needs no
+permission.
 
 **World drawing.** A plugin can put labels over objects
 (`Host::show_labels`), lines (`Host::create_line_layer`) and filled triangles
@@ -702,7 +736,11 @@ of the screen and its windows (the plugin hears both events) and
 the character's layout not yet restored, then restored; the fake window
 places the windows
 the plugin asks for as the client would, `FakeHost::windows` reads them back,
-and `FakeHost::window_applies` records each request.
+and `FakeHost::window_applies` records each request. A window reported with
+`held` set is held by another plugin; `FakeHost::window_holds` records each
+`Host::hold_windows` list, `FakeHost::held_windows` says which are held now,
+and the holds end on `FakeHost::disable` and when the layout stops being
+restored, as when the character leaves the world.
 
 ## plugin.json
 

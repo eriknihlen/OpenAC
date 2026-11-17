@@ -962,8 +962,21 @@ wire_record! {
         pub resizable_width: bool,
         /// Its height can change.
         pub resizable_height: bool,
+        /// The windows that share one place and size carry the same key
+        /// here ([`UI_WINDOWS_MAIN_PANELS`] for the main panels: inventory,
+        /// character, spellbook and the rest); none for a window on its
+        /// own. A placing of one of them places them all, so keep one place
+        /// for the group. The one shown now has `layout.visible` set.
+        pub shares_place: Option<String>,
+        /// A plugin holds it out of sight ([`crate::Import::UiWindowsHold`]):
+        /// it is not drawn and takes no input, while `layout` says what the
+        /// game has, shown or not.
+        pub held: bool,
     }
 }
+
+/// [`UiWindowInfo::shares_place`] of the main panels (API 1.14).
+pub const UI_WINDOWS_MAIN_PANELS: &str = "main-panels";
 
 /// [`UiWindowApply::parts`]: the left and top edges.
 pub const WINDOW_PART_PLACE: u8 = 1;
@@ -1007,6 +1020,28 @@ wire_record! {
         /// The shown state was asked for and left alone: the game shows and
         /// hides this window.
         pub shown_ignored: bool,
+    }
+}
+
+wire_record! {
+    /// A window [`crate::Import::UiWindowsHold`] did not hold, and why
+    /// (API 1.14).
+    pub struct UiWindowHoldRefused {
+        /// The name asked for.
+        pub name: String,
+        /// Why it is not held (no registered window has the name, say).
+        pub reason: String,
+    }
+}
+
+wire_record! {
+    /// What holding windows out of sight answers
+    /// ([`crate::Import::UiWindowsHold`]; API 1.14).
+    pub struct UiWindowsHeld {
+        /// The windows the plugin now holds, in the order asked.
+        pub held: Vec<String>,
+        /// The names it asked for that are not held.
+        pub refused: Vec<UiWindowHoldRefused>,
     }
 }
 
