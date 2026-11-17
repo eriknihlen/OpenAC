@@ -12,6 +12,14 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.14 (2026-11-17)
+
+- A Yes/No question from the server that times out is now answered "No",
+  as the original client did. Before, the server sent no new Yes/No
+  question until you logged in again, so a character that missed one (an
+  NPC's "would you like to exchange ...?") could not finish that NPC's
+  exchange for the rest of the session.
+
 ## OpenAC (Rust) 0.2.13 (2026-11-16)
 
 - A new diagnostic, off unless you set `OPENAC_PROBE_OBJECTS=1`: the client
