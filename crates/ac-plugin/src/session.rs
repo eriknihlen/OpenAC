@@ -1371,6 +1371,17 @@ impl PluginSession {
                 theme,
             )));
         }
+        // So do a new screen and the windows coming or going: the screen
+        // first, so a plugin that places windows on it reads them after.
+        if let Some((width, height)) = state.take_screen_change() {
+            self.queue_event(Event::ScreenSizeChanged(ac_plugin_abi::ui::ScreenSize {
+                width,
+                height,
+            }));
+        }
+        if state.take_windows_change() {
+            self.queue_event(Event::UiWindowsChanged);
+        }
         for (owner, line) in reports {
             api.log(&owner, LogLevel::Warn, &line);
         }

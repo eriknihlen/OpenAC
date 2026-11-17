@@ -1489,6 +1489,7 @@ impl WindowUi {
         let now_ms =
             i64::try_from(now.duration_since(self.started).as_millis()).unwrap_or(i64::MAX);
         self.tick_status(dt, size);
+        self.report_window_layouts();
         self.tick_plugin_ui(now);
         self.tick_examination(dt);
         self.tick_keyboard_dialogs();

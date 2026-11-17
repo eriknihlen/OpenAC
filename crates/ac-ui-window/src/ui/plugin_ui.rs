@@ -20,7 +20,7 @@ use ac_dat::objects::{BspNode, GfxObj, Setup};
 use ac_plugin_ui::control_state::{ControlStateFile, ControlStateStore};
 use ac_plugin_ui::{
     ClientWindow, ClientWindowAction, ImageSource, MapPoint, MarkerAnchor, PanelView, ThemeKind,
-    UiInput, WorldIconEntry,
+    UiInput, WindowLayout, WindowOwner, WindowParts, WindowReport, WorldIconEntry,
 };
 use ac_proto::Quaternion;
 use ac_runtime::session::SessionCommand;
@@ -124,6 +124,11 @@ struct PlacedIcon {
     anchor: WorldIconAnchor,
 }
 
+/// The screen and registered windows as told to the session: the snapshot
+/// (attach) they were told in, the screen, whether the character's layout
+/// was restored, and the windows.
+type ToldWindows = (u64, (i32, i32), bool, Vec<WindowReport>);
+
 /// What the window keeps of the plugins' UI.
 #[derive(Debug, Default)]
 pub struct PluginWindowUi {
@@ -148,6 +153,12 @@ pub struct PluginWindowUi {
     files_shown: HashMap<u32, Vec<String>>,
     synced: Option<u64>,
     reported: Option<(u16, u16)>,
+    /// The screen and registered windows as last told to the session, with
+    /// the snapshot (attach) they were told in.
+    reported_windows: Option<ToldWindows>,
+    /// The windows plugins placed since the last report: the next report
+    /// carries them even when nothing about them changed.
+    placed_since_report: std::collections::BTreeSet<String>,
     /// The key map's chords as last told to the session, with the
     /// snapshot (attach) they were told in.
     reported_chords: Option<(u64, Vec<ac_plugin_ui::hotkeys::Chord>)>,
@@ -1008,6 +1019,11 @@ impl WindowUi {
         for (window, action) in requests {
             self.client_window_request(window, action);
         }
+        let applies = self.facts.plugin_ui.take_window_applies();
+        for (name, layout, parts) in applies {
+            self.apply_window_layout(&name, &layout, parts);
+            self.plugins.placed_since_report.insert(name);
+        }
         self.report_client_windows();
         let appearance_asked = self.plugins.dock
             && self
@@ -1281,6 +1297,165 @@ impl WindowUi {
                 .borrow_mut()
                 .push(UiInput::ClientWindows { mounted, visible });
         }
+    }
+
+    /// A plugin's placing of a registered window: applied as a named
+    /// layout is restored, and saved for the character as the player's own
+    /// change. Refused (with a notice) until the character's layout is
+    /// restored, as the session refuses it; a placing still on its way when
+    /// the character left lands here. A main panel is shown through the
+    /// panel switcher before it is placed (showing one puts it where the
+    /// main panels share their place), and hidden after; the other main
+    /// panels then take its place and size, as when the player moves one.
+    fn apply_window_layout(&mut self, name: &str, layout: &WindowLayout, parts: WindowParts) {
+        let Some(layouts) = self.status.layouts.as_mut() else {
+            return;
+        };
+        if !layouts.is_restored() {
+            self.notices.push(format!(
+                "ui: a plugin placed window {name} before the character's layout was restored; \
+                 left where it is"
+            ));
+            return;
+        }
+        let panel = self
+            .panels
+            .panel_of(name)
+            .filter(|_| !layouts.is_state_managed(name));
+        let wanted = ac_host::settings::UiWindowLayout {
+            x: layout.x,
+            y: layout.y,
+            width: layout.width,
+            height: layout.height,
+            visible: layout.visible,
+            collapsed: layout.collapsed,
+            maximized: layout.maximized,
+            authored_geometry_revision: 0,
+        };
+        if let Some(panel) = panel
+            && parts.shown
+            && layout.visible
+        {
+            self.panels.set_visibility(&mut self.host.root, panel, true);
+            self.host.pump();
+        }
+        let show = parts.shown && panel.is_none();
+        if layouts
+            .apply_as_player(&mut self.host, name, &wanted, show)
+            .is_none()
+        {
+            self.notices.push(format!(
+                "ui: a plugin placed window {name}, which is not registered"
+            ));
+            return;
+        }
+        if let Some(panel) = panel {
+            self.panels.observe_geometry(&mut self.host.root, name);
+            if parts.shown && !layout.visible {
+                self.panels
+                    .set_visibility(&mut self.host.root, panel, false);
+            }
+        }
+        self.host.pump();
+        // What the panel switcher did is saved as the player's change too.
+        layouts.follow(&mut self.host);
+    }
+
+    /// Tell the session the screen the interface lays out in and every
+    /// registered window, when any of it changed: after the frame's layout
+    /// work, so a new screen arrives with the windows already reflowed onto
+    /// it. Only a session that handed the window its plugin UI hears it.
+    pub(super) fn report_window_layouts(&mut self) {
+        let snapshots = self.facts.plugin_ui.snapshots;
+        if snapshots == 0 {
+            return;
+        }
+        let Some(layouts) = self.status.layouts.as_ref() else {
+            return;
+        };
+        let screen = layouts.screen();
+        let ready = layouts.is_restored();
+        let windows: Vec<WindowReport> = self
+            .host
+            .root
+            .windows()
+            .iter()
+            .filter_map(|w| {
+                let layout = ac_ui::layout_persistence::capture(&self.host, &w.name)?;
+                let frame = self.host.root.element(w.frame)?;
+                let plugin = self
+                    .plugins
+                    .panels
+                    .iter()
+                    .find(|(_, window)| **window == w.name)
+                    .and_then(|(id, _)| self.facts.plugin_ui.panel(*id));
+                let (owner, title) = match plugin {
+                    Some(panel) => (
+                        WindowOwner::Plugin(panel.owner.id.clone()),
+                        Some(panel.descriptor.title.clone()),
+                    ),
+                    None if w.name == dock::WINDOW => (WindowOwner::Dock, None),
+                    None => (WindowOwner::Client, None),
+                };
+                Some(WindowReport {
+                    name: w.name.clone(),
+                    owner,
+                    title,
+                    layout: WindowLayout {
+                        x: layout.x,
+                        y: layout.y,
+                        width: layout.width,
+                        height: layout.height,
+                        visible: layout.visible,
+                        collapsed: layout.collapsed,
+                        maximized: layout.maximized,
+                    },
+                    state_managed: layouts.is_state_managed(&w.name),
+                    min_size: (frame.min_width, frame.min_height),
+                    max_size: (frame.max_width, frame.max_height),
+                    resizable: (frame.resize_x, frame.resize_y),
+                })
+            })
+            .collect();
+        let placed = std::mem::take(&mut self.plugins.placed_since_report);
+        // The whole report when the session has none of this attach, the
+        // screen or the layout's readiness changed, or a window came or
+        // went; otherwise only the windows that changed (a drag sends the
+        // one window), and every window a plugin placed, changed or not,
+        // so the session learns where its placing went.
+        let told = self
+            .plugins
+            .reported_windows
+            .as_ref()
+            .filter(|(s, at, was_ready, told)| {
+                *s == snapshots
+                    && *at == screen
+                    && *was_ready == ready
+                    && told.len() == windows.len()
+                    && told.iter().zip(&windows).all(|(a, b)| a.name == b.name)
+            })
+            .map(|(_, _, _, told)| told);
+        let input = match told {
+            Some(told) => {
+                let changed: Vec<WindowReport> = windows
+                    .iter()
+                    .zip(told)
+                    .filter(|(now, was)| *now != *was || placed.contains(&now.name))
+                    .map(|(now, _)| now.clone())
+                    .collect();
+                if changed.is_empty() {
+                    return;
+                }
+                UiInput::WindowsChanged(changed)
+            }
+            None => UiInput::Windows {
+                screen,
+                ready,
+                windows: windows.clone(),
+            },
+        };
+        self.plugins.reported_windows = Some((snapshots, screen, ready, windows));
+        self.plugins.outbox.borrow_mut().push(input);
     }
 
     /// One frame of the plugins' overlays: the canvases on the screen and
@@ -1737,6 +1912,7 @@ impl WindowUi {
         }
         self.plugins.reported = None;
         self.plugins.reported_chords = None;
+        self.plugins.reported_windows = None;
         self.plugins.files_shown.clear();
     }
 

@@ -1134,3 +1134,81 @@ fn restore_all_and_save_all_load_once_and_save_once() {
     assert_eq!(store.calls(), ["load all"]);
     assert!(p.take_failures().is_empty());
 }
+
+#[test]
+fn a_window_applied_for_a_plugin_is_saved_as_the_players_change() {
+    let dir = Dir::new();
+    let mut host = host(800.0, 600.0);
+    mount_default(&mut host, "radar");
+    let mut p = persist(&mut host, Some(dir.store()), "Alice", (800, 600));
+    p.restore_all(&mut host);
+    let after = p
+        .apply_as_player(
+            &mut host,
+            "radar",
+            &layout(750.0, 30.0, 900.0, 150.0, false, false, false),
+            true,
+        )
+        .unwrap();
+    // Within its limits (at most 600 wide) and on the screen.
+    assert_eq!(
+        (after.x, after.y, after.width, after.height),
+        (200.0, 30.0, 600.0, 150.0)
+    );
+    assert_eq!(geometry(&host, "radar"), (200.0, 30.0, 600.0, 150.0));
+    assert!(!host.root.is_window_visible("radar"));
+    let s = saved(&dir.store(), "Alice", "800x600", "radar").unwrap();
+    assert_eq!((s.x, s.y, s.width, s.height), (200.0, 30.0, 600.0, 150.0));
+    assert!(!s.visible);
+    assert!(
+        p.apply_as_player(&mut host, "nowhere", &after, true)
+            .is_none()
+    );
+}
+
+#[test]
+fn a_window_applied_for_a_plugin_keeps_a_state_managed_shown_state() {
+    let dir = Dir::new();
+    let mut host = host(800.0, 600.0);
+    mount_default(&mut host, "combat");
+    host.root.hide_window("combat");
+    let mut p = LayoutPersistence::new(
+        &mut host,
+        Some(Box::new(dir.store())),
+        "Alice",
+        (800, 600),
+        &["combat"],
+    );
+    p.restore_all(&mut host);
+    assert!(p.is_state_managed("combat"));
+    let after = p
+        .apply_as_player(
+            &mut host,
+            "combat",
+            &layout(40.0, 50.0, 200.0, 100.0, true, false, false),
+            true,
+        )
+        .unwrap();
+    assert_eq!((after.x, after.y), (40.0, 50.0));
+    assert!(!host.root.is_window_visible("combat"));
+    let s = saved(&dir.store(), "Alice", "800x600", "combat").unwrap();
+    assert_eq!((s.x, s.y), (40.0, 50.0));
+}
+
+#[test]
+fn the_layout_is_restored_only_for_a_character_in_the_game() {
+    let dir = Dir::new();
+    let mut host = host(800.0, 600.0);
+    mount_default(&mut host, "radar");
+    let mut p = persist(&mut host, Some(dir.store()), "default", (800, 600));
+    p.restore_all(&mut host);
+    assert!(!p.is_restored(), "the pre-login key is never restored");
+    p.set_character(&mut host, "Alice");
+    assert!(!p.is_restored(), "not before the character's restore");
+    p.restore_all(&mut host);
+    assert!(p.is_restored());
+    p.set_gameplay_active(&mut host, false);
+    assert!(!p.is_restored(), "a pre-game screen covers the game");
+    p.set_gameplay_active(&mut host, true);
+    assert!(p.is_restored());
+}

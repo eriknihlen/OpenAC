@@ -210,18 +210,18 @@ mod tests {
     /// 1.10 (every enchantment on the character, an import) again, API
     /// 1.11 (who changed the selection, on the selection event) again,
     /// API 1.12 (a projectile path query's launch speed, canvases in markup
-    /// windows, resizing a canvas) again, and API 1.13 published the same
+    /// windows, resizing a canvas) again, API 1.13 published the same
     /// value as 1.12: it added WebP to the image formats the client
-    /// decodes, not a shape.
-    const PUBLISHED: u64 = 0x4ae5_d2f7_29f5_02b6;
+    /// decodes, not a shape, and API 1.14 (the screen and the registered
+    /// windows: two events and four imports) changed it again.
+    const PUBLISHED: u64 = 0xc024_a62d_1364_3a66;
 
     /// The fingerprint API 1.12 was published with.
     const PUBLISHED_1_12: u64 = 0x4ae5_d2f7_29f5_02b6;
 
     /// API 1.12 is published: it keeps the fingerprint it was published
     /// with, whatever later versions add. API 1.13 changed no shape, so a
-    /// plugin built for 1.12 carries the current core and every import as
-    /// it is now.
+    /// plugin built for 1.13 has 1.12's.
     #[test]
     fn api_1_12_keeps_its_published_fingerprint() {
         let v1_12 = ApiVersion::new(1, 12);
@@ -231,8 +231,43 @@ mod tests {
             "API 1.12's layout changed (fingerprint {fingerprint:016x}, published {PUBLISHED_1_12:016x}): \
              mark what was added `since` the version that adds it"
         );
-        assert_eq!(core_shape(v1_12), CORE_SHAPE);
-        assert_eq!(section_at(v1_12), LAYOUT_SECTION_BYTES.to_vec());
+        assert_eq!(fingerprint_at(ApiVersion::new(1, 13)), PUBLISHED_1_12);
+    }
+
+    /// The core shape every plugin built for API 1.12 or 1.13 carries.
+    const API_1_13_CORE: u64 = 0xd1c7_b9f7_fff1_9a8d;
+
+    /// The imports API 1.14 added: the screen, the registered windows, and
+    /// placing one or several.
+    const API_1_14_WINDOWS: [Import; 4] = [
+        Import::UiScreenSize,
+        Import::UiWindows,
+        Import::UiWindowApply,
+        Import::UiWindowsApply,
+    ];
+
+    /// API 1.14 added two events (the screen's new size, a window
+    /// registered or unregistered), which change the core shape, and four
+    /// imports, each marked `since`; no existing call changed. A plugin
+    /// built for API 1.13 keeps its core shape, lacks the imports, and has
+    /// every other import as it is now.
+    #[test]
+    fn api_1_13_plugins_keep_their_core_and_import_shapes() {
+        let v1_13 = ApiVersion::new(1, 13);
+        assert_eq!(core_shape(v1_13), API_1_13_CORE);
+        assert_eq!(core_shape(ApiVersion::new(1, 12)), API_1_13_CORE);
+        assert_ne!(CORE_SHAPE, API_1_13_CORE);
+        let section = PluginLayout::parse(&section_at(v1_13)).unwrap();
+        for import in Import::ALL {
+            let new = API_1_14_WINDOWS.contains(import);
+            assert_eq!(import.since() == ApiVersion::new(1, 14), new, "{import:?}");
+            assert_eq!(import.shape_at(v1_13), import.shape(), "{import:?}");
+            let expected = (!new).then(|| import.shape());
+            assert_eq!(section.import_shape(import.name()), expected, "{import:?}");
+        }
+        assert_ne!(section_at(v1_13), LAYOUT_SECTION_BYTES);
+        assert_eq!(core_shape(API_CURRENT), CORE_SHAPE);
+        assert_eq!(section_at(API_CURRENT), LAYOUT_SECTION_BYTES.to_vec());
     }
 
     /// The fingerprint API 1.11 was published with.

@@ -99,6 +99,17 @@ pub struct FakeHost {
     /// Whether the plugin is answering a callback ([`Self::ask`]): it cannot
     /// call a service then, as in the client.
     answering: bool,
+    /// The screen the fake window reports ([`Self::set_screen_size`]).
+    screen: Option<(i32, i32)>,
+    /// The registered windows the fake window reports
+    /// ([`Self::set_windows`]), placed as the plugin asked.
+    windows: Vec<ac_plugin_ui::WindowReport>,
+    /// Every window placing the plugin asked for, in order, as it asked
+    /// (one entry per window of a batch).
+    pub window_applies: Vec<ac_plugin_abi::ui::UiWindowApply>,
+    /// The fake window does not have the character's layout restored
+    /// ([`Self::set_layout_restored`]); it has by default.
+    layout_not_restored: bool,
 }
 
 impl FakeHost {
@@ -339,6 +350,9 @@ impl FakeHost {
             Ok(reply) => reply,
             Err(error) => panic!("{error}"),
         };
+        if matches!(import, Import::UiWindowApply | Import::UiWindowsApply) {
+            self.place_windows(import, bytes);
+        }
         for (_, line) in reports(&mut self.ui) {
             self.logs.push((LogLevel::Warn, line));
         }
@@ -381,6 +395,111 @@ impl FakeHost {
         size: Option<(i32, i32)>,
     ) {
         self.ui_input(plugin, ac_plugin_ui::UiInput::CanvasHosted { canvas, size });
+    }
+
+    /// What a window reports of the screen the interface lays out in and
+    /// its registered windows, as the client's window first reports them:
+    /// `Host::screen_size` and `Host::windows` read them, and the plugin
+    /// hears [`Event::ScreenSizeChanged`] when the screen changed, then
+    /// [`Event::UiWindowsChanged`] when a window came or went, at once.
+    /// `Host::apply_window` places them as the client would (within their
+    /// limits and the screen, a shown state left alone for a window the
+    /// game manages), and its requests are kept in
+    /// [`Self::window_applies`]. Needs an attached window
+    /// ([`Self::attach_window`]).
+    pub fn report_windows<P: Plugin>(
+        &mut self,
+        plugin: &mut P,
+        screen: (i32, i32),
+        windows: Vec<crate::ui::UiWindowInfo>,
+    ) {
+        self.screen = Some(screen);
+        self.windows = windows.into_iter().map(window_report).collect();
+        self.tell_windows(plugin);
+    }
+
+    /// A new screen, the windows as they are: as [`Self::report_windows`].
+    /// The client reflows its windows before it reports a new screen; set
+    /// them where they landed with [`Self::report_windows`] to play that.
+    pub fn set_screen_size<P: Plugin>(&mut self, plugin: &mut P, width: i32, height: i32) {
+        self.screen = Some((width, height));
+        self.tell_windows(plugin);
+    }
+
+    /// Whether the fake window has the character's layout restored (it has
+    /// by default). Before, a placing is refused, as before the client's
+    /// login restore; when it becomes restored the plugin hears
+    /// [`Event::ScreenSizeChanged`] and [`Event::UiWindowsChanged`] again, as
+    /// the client tells them after the restore.
+    pub fn set_layout_restored<P: Plugin>(&mut self, plugin: &mut P, restored: bool) {
+        self.layout_not_restored = !restored;
+        self.tell_windows(plugin);
+    }
+
+    /// The registered windows as the fake window has them now: as set, and
+    /// placed where the plugin's placings put them.
+    #[must_use]
+    pub fn windows(&self) -> Vec<crate::ui::UiWindowInfo> {
+        self.windows
+            .iter()
+            .map(ac_plugin_abi::ui_host::window_info)
+            .collect()
+    }
+
+    fn tell_windows<P: Plugin>(&mut self, plugin: &mut P) {
+        assert!(
+            self.window_attached,
+            "a window reports its screen and windows: attach one first"
+        );
+        let Some(screen) = self.screen else {
+            return;
+        };
+        self.ui.input(ac_plugin_ui::UiInput::Windows {
+            screen,
+            ready: !self.layout_not_restored,
+            windows: self.windows.clone(),
+        });
+        if let Some((width, height)) = self.ui.take_screen_change() {
+            self.send(
+                plugin,
+                &Event::ScreenSizeChanged(crate::ui::ScreenSize { width, height }),
+            );
+        }
+        if self.ui.take_windows_change() {
+            self.send(plugin, &Event::UiWindowsChanged);
+        }
+    }
+
+    /// The window places the windows the plugin asked it to, as the client
+    /// does, and reports them again.
+    fn place_windows(&mut self, import: Import, bytes: &[u8]) {
+        let asked = if import == Import::UiWindowApply {
+            ac_plugin_abi::ui::UiWindowApply::from_bytes(bytes)
+                .map(|one| vec![one])
+                .unwrap_or_default()
+        } else {
+            Vec::<ac_plugin_abi::ui::UiWindowApply>::from_bytes(bytes).unwrap_or_default()
+        };
+        self.window_applies.extend(asked);
+        let Some(screen) = self.screen else {
+            return;
+        };
+        for change in self.ui.take_changes() {
+            if let ac_plugin_ui::UiChange::WindowApply {
+                name,
+                layout,
+                parts,
+            } = change
+                && let Some(window) = self.windows.iter_mut().find(|w| w.name == name)
+            {
+                window.layout = window.fit(&layout, parts, screen);
+            }
+        }
+        self.ui.input(ac_plugin_ui::UiInput::Windows {
+            screen,
+            ready: !self.layout_not_restored,
+            windows: self.windows.clone(),
+        });
     }
 
     /// The value last pushed for binding `name` of panel `panel`.
@@ -643,6 +762,10 @@ impl Transport for FakeHost {
             | Import::UiCanvasAvailable
             | Import::UiCanvasRemove
             | Import::UiCanvasResize
+            | Import::UiScreenSize
+            | Import::UiWindows
+            | Import::UiWindowApply
+            | Import::UiWindowsApply
             | Import::UiMeasureText
             | Import::UiFontBundled
             | Import::UiFontLoad
@@ -671,6 +794,33 @@ impl Transport for FakeHost {
             | Import::UiInputActionsListen => self.ui_call(import, bytes),
             other => other.default_reply(),
         }
+    }
+}
+
+/// A registered window as a test sets it, as the window reports it.
+fn window_report(w: crate::ui::UiWindowInfo) -> ac_plugin_ui::WindowReport {
+    let l = w.layout;
+    ac_plugin_ui::WindowReport {
+        name: w.name,
+        owner: match w.owner {
+            crate::ui::UiWindowOwner::Client => ac_plugin_ui::WindowOwner::Client,
+            crate::ui::UiWindowOwner::Dock => ac_plugin_ui::WindowOwner::Dock,
+            crate::ui::UiWindowOwner::Plugin(id) => ac_plugin_ui::WindowOwner::Plugin(id),
+        },
+        title: w.title,
+        layout: ac_plugin_ui::WindowLayout {
+            x: l.x,
+            y: l.y,
+            width: l.width,
+            height: l.height,
+            visible: l.visible,
+            collapsed: l.collapsed,
+            maximized: l.maximized,
+        },
+        state_managed: w.state_managed,
+        min_size: (w.min_width, w.min_height),
+        max_size: (w.max_width, w.max_height),
+        resizable: (w.resizable_width, w.resizable_height),
     }
 }
 
@@ -743,7 +893,7 @@ mod tests {
         host.enable(&mut plugin).unwrap();
         assert_eq!(
             host.logs,
-            vec![(LogLevel::Info, "test.recorder on API 1.13".to_owned())]
+            vec![(LogLevel::Info, "test.recorder on API 1.14".to_owned())]
         );
         host.tick(&mut plugin);
         assert!(host.type_line(&mut plugin, " @R waves "));
@@ -1266,5 +1416,132 @@ mod tests {
         assert_eq!((state.width, state.height), (200, 80));
         assert!(!host.with_host(|h| hud.resize(h, 0, 80)));
         assert_eq!((hud.width(), hud.height()), (200, 80), "unchanged");
+    }
+
+    /// A layout keeper: on a new screen it puts the radar where it keeps
+    /// it and hides the vendor window (which the game manages); it reads
+    /// the windows again when one comes or goes.
+    #[derive(Default)]
+    struct LayoutKeeper {
+        heard: Vec<String>,
+        answers: Vec<Result<crate::ui::UiWindowApplied, String>>,
+    }
+
+    impl Plugin for LayoutKeeper {
+        fn enable(&mut self, _host: &mut Host<'_>, _info: &StartInfo) -> Result<(), String> {
+            Ok(())
+        }
+        fn on_event(&mut self, host: &mut Host<'_>, event: Event) {
+            use crate::ui::{UiWindowLayout, WindowParts};
+            match event {
+                Event::ScreenSizeChanged(size) => {
+                    self.heard
+                        .push(format!("screen {}x{}", size.width, size.height));
+                    let at = UiWindowLayout {
+                        x: 5000.0,
+                        y: 30.0,
+                        width: 900.0,
+                        height: 150.0,
+                        visible: false,
+                        collapsed: false,
+                        maximized: false,
+                    };
+                    self.answers = host.apply_windows(&[
+                        ("radar", at.clone(), WindowParts::PLACE | WindowParts::SIZE),
+                        ("vendor", at.clone(), WindowParts::ALL),
+                        ("nowhere", at, WindowParts::ALL),
+                    ]);
+                }
+                Event::UiWindowsChanged => {
+                    let names: Vec<String> = host.windows().into_iter().map(|w| w.name).collect();
+                    self.heard.push(format!("windows {}", names.join(",")));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn window(name: &str, state_managed: bool) -> crate::ui::UiWindowInfo {
+        crate::ui::UiWindowInfo {
+            name: name.into(),
+            owner: crate::ui::UiWindowOwner::Client,
+            title: None,
+            layout: crate::ui::UiWindowLayout {
+                x: 10.0,
+                y: 10.0,
+                width: 200.0,
+                height: 100.0,
+                visible: false,
+                collapsed: false,
+                maximized: false,
+            },
+            state_managed,
+            min_width: 50.0,
+            min_height: 50.0,
+            max_width: 600.0,
+            max_height: 400.0,
+            resizable_width: true,
+            resizable_height: true,
+        }
+    }
+
+    /// A plugin's own test reports the screen and the windows as a window
+    /// does: the plugin hears the screen, then the windows; its placings
+    /// are answered and applied as the client would, and recorded.
+    #[test]
+    fn a_plugin_places_the_windows_the_fake_window_reports() {
+        use crate::ui::WindowParts;
+        let mut host = FakeHost::new("test.layout");
+        let mut plugin = LayoutKeeper::default();
+        host.enable(&mut plugin).unwrap();
+        assert_eq!(host.with_host(|h| h.screen_size()), None);
+        host.attach_window(&mut plugin, true);
+        host.report_windows(
+            &mut plugin,
+            (1024, 768),
+            vec![window("radar", false), window("vendor", true)],
+        );
+        assert_eq!(plugin.heard, ["screen 1024x768", "windows radar,vendor"]);
+        let size = host.with_host(|h| h.screen_size()).unwrap();
+        assert_eq!((size.width, size.height), (1024, 768));
+        // The radar keeps its limits and the screen; the vendor window keeps
+        // its shown state; an unknown window is refused.
+        let radar = plugin.answers[0].as_ref().unwrap();
+        assert_eq!(
+            (radar.layout.x, radar.layout.width, radar.layout.visible),
+            (424.0, 600.0, false)
+        );
+        let vendor = plugin.answers[1].as_ref().unwrap();
+        assert!(vendor.shown_ignored);
+        assert!(plugin.answers[2].is_err());
+        // The fake window placed them, as the client's would.
+        let windows = host.windows();
+        assert_eq!(
+            (windows[0].layout.x, windows[0].layout.width),
+            (424.0, 600.0)
+        );
+        assert_eq!(windows[1].layout.x, 424.0);
+        assert!(!windows[1].layout.visible);
+        assert_eq!(host.with_host(|h| h.windows()), windows);
+        assert_eq!(host.window_applies.len(), 3);
+        assert_eq!(
+            host.window_applies[0].parts,
+            (WindowParts::PLACE | WindowParts::SIZE).bits()
+        );
+        // A new screen alone: heard again, the windows as they were.
+        plugin.heard.clear();
+        host.set_screen_size(&mut plugin, 800, 600);
+        assert_eq!(plugin.heard, ["screen 800x600"]);
+        // Before the character's layout is restored a placing is refused;
+        // the restore is told as both events, and the plugin places again.
+        plugin.heard.clear();
+        host.set_layout_restored(&mut plugin, false);
+        assert!(plugin.heard.is_empty());
+        let refused =
+            host.with_host(|h| h.apply_window("radar", &windows[0].layout, WindowParts::PLACE));
+        assert!(refused.is_err());
+        host.set_layout_restored(&mut plugin, true);
+        assert_eq!(plugin.heard, ["screen 800x600", "windows radar,vendor"]);
+        assert!(plugin.answers[0].is_ok());
     }
 }

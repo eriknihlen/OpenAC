@@ -33,6 +33,7 @@ mod state;
 pub mod theme;
 pub mod value;
 pub mod view;
+pub mod windows;
 
 pub use file_images::{FileImage, FileImageLoader, FileImageRead, FileImageResult};
 pub use images::{DecodedImage, ImageBudget};
@@ -54,3 +55,4 @@ pub use state::{
 pub use theme::{ThemeKind, ThemePalette};
 pub use value::{BindingKind, BindingSchema, ItemRecord, Rgba, UiValue};
 pub use view::{PluginUiView, ViewDirty};
+pub use windows::{WindowApplied, WindowLayout, WindowOwner, WindowParts, WindowReport};

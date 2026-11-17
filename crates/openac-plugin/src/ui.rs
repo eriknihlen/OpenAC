@@ -77,6 +77,9 @@ use ac_plugin_abi::ui::{
     ModalShow, NamedItemValue, NamedTypedValue, NamedValue, PanelRegistration, PanelValues,
     RgbaImage, ShapeSet, TextSize, TriangleSet, TypedPanelRegistration, TypedPanelValues, ViewShow,
 };
+pub use ac_plugin_abi::ui::{
+    ScreenSize, UiWindowApplied, UiWindowInfo, UiWindowLayout, UiWindowOwner,
+};
 use ac_plugin_abi::{Import, Wire};
 
 use crate::Host;
@@ -863,6 +866,56 @@ impl Canvas {
     }
 }
 
+/// Which parts of a [`UiWindowLayout`] [`Host::apply_window`] applies;
+/// the window keeps the others. Combine with `|`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WindowParts(u8);
+
+impl WindowParts {
+    /// The left and top edges.
+    pub const PLACE: Self = Self(ac_plugin_abi::ui::WINDOW_PART_PLACE);
+    /// Width and height.
+    pub const SIZE: Self = Self(ac_plugin_abi::ui::WINDOW_PART_SIZE);
+    /// Shown or hidden (never for a window the game shows and hides).
+    pub const SHOWN: Self = Self(ac_plugin_abi::ui::WINDOW_PART_SHOWN);
+    /// Collapsed and maximized.
+    pub const STATE: Self = Self(ac_plugin_abi::ui::WINDOW_PART_STATE);
+    /// Every part.
+    pub const ALL: Self = Self(ac_plugin_abi::ui::WINDOW_PARTS_ALL);
+
+    /// The parts as the wire's bits.
+    #[must_use]
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// Whether every part of `other` is here.
+    #[must_use]
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
+impl std::ops::BitOr for WindowParts {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
+fn window_apply(
+    name: &str,
+    layout: &UiWindowLayout,
+    parts: WindowParts,
+) -> ac_plugin_abi::ui::UiWindowApply {
+    ac_plugin_abi::ui::UiWindowApply {
+        name: name.to_owned(),
+        layout: layout.clone(),
+        parts: parts.bits(),
+    }
+}
+
 /// One of the client's own windows (OpenAC `PluginClientWindow`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClientWindow {
@@ -1392,6 +1445,71 @@ impl Host<'_> {
         let request = ().to_bytes();
         let reply = ui_call!(self, UiTheme, ui_theme, &request);
         decode(Import::UiTheme, &reply)
+    }
+
+    /// The screen the client's interface lays out in, pixels (the game
+    /// window's size): `None` until a window tells the session.
+    /// `Event::ScreenSizeChanged` carries each change, after the client has
+    /// reflowed its windows onto the new size (API 1.14).
+    #[must_use]
+    pub fn screen_size(&mut self) -> Option<ScreenSize> {
+        let request = ().to_bytes();
+        let reply = ui_call!(self, UiScreenSize, ui_screen_size, &request);
+        decode(Import::UiScreenSize, &reply)
+    }
+
+    /// Every registered window, in registration order: the client's own,
+    /// the plugin dock and every plugin's, each with its name (what the
+    /// client saves its layout under), owner, title, where it is, whether
+    /// the game shows and hides it, and its size limits. Empty without a
+    /// window. This is what the window last reported, so a window just
+    /// placed reads where it went from the next pass on.
+    /// `Event::UiWindowsChanged` says when one was registered or
+    /// unregistered (API 1.14).
+    #[must_use]
+    pub fn windows(&mut self) -> Vec<UiWindowInfo> {
+        let request = ().to_bytes();
+        let reply = ui_call!(self, UiWindows, ui_windows, &request);
+        decode(Import::UiWindows, &reply)
+    }
+
+    /// Places registered window `name` as the client restores a saved
+    /// layout: the `parts` of `layout`, its size within its limits and the
+    /// screen, its place on the screen, collapsed and maximized as its own
+    /// state allows. A shown state is never applied to a window the game
+    /// shows and hides by itself (the answer's `shown_ignored` says so);
+    /// its place and size still are. The client saves the result for the
+    /// character, per screen size, as if the player had moved the window,
+    /// so the character keeps it if the plugin goes. The window does the
+    /// placing before the next frame; the answer is where it ends up.
+    ///
+    /// # Errors
+    /// No window is attached, or no registered window is called `name`
+    /// (API 1.14).
+    pub fn apply_window(
+        &mut self,
+        name: &str,
+        layout: &UiWindowLayout,
+        parts: WindowParts,
+    ) -> Result<UiWindowApplied, String> {
+        let request = window_apply(name, layout, parts).to_bytes();
+        let reply = ui_call!(self, UiWindowApply, ui_window_apply, &request);
+        decode(Import::UiWindowApply, &reply)
+    }
+
+    /// Places several registered windows in one call, in order: one answer
+    /// each, as [`Self::apply_window`] gives it (API 1.14).
+    pub fn apply_windows(
+        &mut self,
+        placings: &[(&str, UiWindowLayout, WindowParts)],
+    ) -> Vec<Result<UiWindowApplied, String>> {
+        let request: Vec<ac_plugin_abi::ui::UiWindowApply> = placings
+            .iter()
+            .map(|(name, layout, parts)| window_apply(name, layout, *parts))
+            .collect();
+        let request = request.to_bytes();
+        let reply = ui_call!(self, UiWindowsApply, ui_windows_apply, &request);
+        decode(Import::UiWindowsApply, &reply)
     }
 
     /// The client's art for a render surface (a full id or a bare index).

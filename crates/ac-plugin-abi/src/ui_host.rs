@@ -565,6 +565,27 @@ pub fn handle(
             let canvas = u32::from_bytes(request).map_err(bad)?;
             state.remove_canvas(id, canvas).to_bytes()
         }
+        Import::UiScreenSize => state
+            .screen_size()
+            .map(|(width, height)| abi::ScreenSize { width, height })
+            .to_bytes(),
+        Import::UiWindows => state
+            .registered_windows()
+            .iter()
+            .map(window_info)
+            .collect::<Vec<_>>()
+            .to_bytes(),
+        Import::UiWindowApply => {
+            let r = abi::UiWindowApply::from_bytes(request).map_err(bad)?;
+            apply_window(state, &r).to_bytes()
+        }
+        Import::UiWindowsApply => {
+            let all = Vec::<abi::UiWindowApply>::from_bytes(request).map_err(bad)?;
+            all.iter()
+                .map(|r| apply_window(state, r))
+                .collect::<Vec<_>>()
+                .to_bytes()
+        }
         Import::UiCanvasResize => {
             let r = CanvasResize::from_bytes(request).map_err(bad)?;
             state
@@ -780,6 +801,69 @@ pub fn handle(
     Ok(reply)
 }
 
+fn window_layout(l: &ui::WindowLayout) -> abi::UiWindowLayout {
+    abi::UiWindowLayout {
+        x: l.x,
+        y: l.y,
+        width: l.width,
+        height: l.height,
+        visible: l.visible,
+        collapsed: l.collapsed,
+        maximized: l.maximized,
+    }
+}
+
+/// A registered window as a plugin reads it.
+#[must_use]
+pub fn window_info(w: &ui::WindowReport) -> abi::UiWindowInfo {
+    abi::UiWindowInfo {
+        name: w.name.clone(),
+        owner: match &w.owner {
+            ui::WindowOwner::Client => abi::UiWindowOwner::Client,
+            ui::WindowOwner::Dock => abi::UiWindowOwner::Dock,
+            ui::WindowOwner::Plugin(id) => abi::UiWindowOwner::Plugin(id.clone()),
+        },
+        title: w.title.clone(),
+        layout: window_layout(&w.layout),
+        state_managed: w.state_managed,
+        min_width: w.min_size.0,
+        min_height: w.min_size.1,
+        max_width: w.max_size.0,
+        max_height: w.max_size.1,
+        resizable_width: w.resizable.0,
+        resizable_height: w.resizable.1,
+    }
+}
+
+/// A plugin's placing of a window, asked of the session's UI.
+fn apply_window(
+    state: &mut PluginUi,
+    r: &abi::UiWindowApply,
+) -> Result<abi::UiWindowApplied, String> {
+    let l = &r.layout;
+    let layout = ui::WindowLayout {
+        x: l.x,
+        y: l.y,
+        width: l.width,
+        height: l.height,
+        visible: l.visible,
+        collapsed: l.collapsed,
+        maximized: l.maximized,
+    };
+    let parts = ui::WindowParts {
+        place: r.parts & abi::WINDOW_PART_PLACE != 0,
+        size: r.parts & abi::WINDOW_PART_SIZE != 0,
+        shown: r.parts & abi::WINDOW_PART_SHOWN != 0,
+        state: r.parts & abi::WINDOW_PART_STATE != 0,
+    };
+    state
+        .apply_window(&r.name, &layout, parts)
+        .map(|applied| abi::UiWindowApplied {
+            layout: window_layout(&applied.layout),
+            shown_ignored: applied.shown_ignored,
+        })
+}
+
 /// The session's UI event as the plugin's event.
 #[must_use]
 pub fn event(event: ui::UiEvent) -> Event {
@@ -974,6 +1058,131 @@ mod theme_tests {
         assert_eq!(abi::FONT_MAXIMUM_GLYPHS as usize, f::MAXIMUM_GLYPHS);
         assert_eq!(abi::FONT_MINIMUM_PIXEL_SIZE, f::MINIMUM_PIXEL_SIZE);
         assert_eq!(abi::FONT_MAXIMUM_PIXEL_SIZE, f::MAXIMUM_PIXEL_SIZE);
+    }
+
+    // API 1.14: the screen and the registered windows as the window last
+    // reported them, and placing them, answered at once.
+    #[test]
+    fn the_screen_and_the_windows_came_with_api_1_14() {
+        let owner = UiOwner::new("test.layout", "Layout");
+        let mut state = PluginUi::new();
+        let call = |state: &mut PluginUi, import, request: &[u8]| {
+            handle(import, request, &owner, state, None, crate::API_CURRENT).unwrap()
+        };
+        let screen = |state: &mut PluginUi| {
+            Option::<abi::ScreenSize>::from_bytes(&call(state, Import::UiScreenSize, &[])).unwrap()
+        };
+        assert_eq!(screen(&mut state), None);
+        state.set_window_attached(true);
+        let report = |name: &str, owner, state_managed| ui::WindowReport {
+            name: name.into(),
+            owner,
+            title: None,
+            layout: ui::WindowLayout {
+                x: 10.0,
+                y: 20.0,
+                width: 200.0,
+                height: 100.0,
+                visible: false,
+                collapsed: false,
+                maximized: false,
+            },
+            state_managed,
+            min_size: (50.0, 40.0),
+            max_size: (400.0, 300.0),
+            resizable: (true, true),
+        };
+        state.input(ui::UiInput::Windows {
+            screen: (1024, 768),
+            ready: true,
+            windows: vec![
+                report("radar", ui::WindowOwner::Client, false),
+                report("vendor", ui::WindowOwner::Client, true),
+                report(
+                    "plugin:test.layout:main",
+                    ui::WindowOwner::Plugin("test.layout".into()),
+                    false,
+                ),
+            ],
+        });
+        assert_eq!(
+            screen(&mut state),
+            Some(abi::ScreenSize {
+                width: 1024,
+                height: 768
+            })
+        );
+        let windows =
+            Vec::<abi::UiWindowInfo>::from_bytes(&call(&mut state, Import::UiWindows, &[]))
+                .unwrap();
+        assert_eq!(windows.len(), 3);
+        assert_eq!(
+            windows[2].owner,
+            abi::UiWindowOwner::Plugin("test.layout".into())
+        );
+        assert!(windows[1].state_managed);
+        assert_eq!((windows[0].max_width, windows[0].min_height), (400.0, 40.0));
+
+        let request = |name: &str, x, parts| abi::UiWindowApply {
+            name: name.into(),
+            layout: abi::UiWindowLayout {
+                x,
+                visible: true,
+                ..windows[0].layout.clone()
+            },
+            parts,
+        };
+        let one = |state: &mut PluginUi, r: abi::UiWindowApply| {
+            Result::<abi::UiWindowApplied, String>::from_bytes(&call(
+                state,
+                Import::UiWindowApply,
+                &r.to_bytes(),
+            ))
+            .unwrap()
+        };
+        let applied = one(&mut state, request("radar", 2000.0, abi::WINDOW_PARTS_ALL)).unwrap();
+        assert_eq!(applied.layout.x, 824.0);
+        assert!(applied.layout.visible && !applied.shown_ignored);
+        assert!(one(&mut state, request("nowhere", 0.0, abi::WINDOW_PARTS_ALL)).is_err());
+        let batch = vec![
+            request("vendor", 5.0, abi::WINDOW_PARTS_ALL),
+            request("plugin:test.layout:main", 7.0, abi::WINDOW_PART_PLACE),
+        ];
+        let answers = Vec::<Result<abi::UiWindowApplied, String>>::from_bytes(&call(
+            &mut state,
+            Import::UiWindowsApply,
+            &batch.to_bytes(),
+        ))
+        .unwrap();
+        let vendor = answers[0].as_ref().unwrap();
+        assert!(vendor.shown_ignored && !vendor.layout.visible);
+        let main = answers[1].as_ref().unwrap();
+        assert_eq!(main.layout.x, 7.0);
+        assert!(!main.layout.visible, "shown was not asked for");
+        assert_eq!(
+            state
+                .take_changes()
+                .iter()
+                .filter(|c| matches!(c, ui::UiChange::WindowApply { .. }))
+                .count(),
+            3
+        );
+
+        for import in [
+            Import::UiScreenSize,
+            Import::UiWindows,
+            Import::UiWindowApply,
+            Import::UiWindowsApply,
+        ] {
+            assert_eq!(import.since(), ApiVersion::new(1, 14), "{import:?}");
+            assert_eq!(import.permission(), None, "{import:?}");
+        }
+        let resized = Event::ScreenSizeChanged(abi::ScreenSize {
+            width: 800,
+            height: 600,
+        });
+        assert_eq!(resized.since(), ApiVersion::new(1, 14));
+        assert_eq!(Event::UiWindowsChanged.since(), ApiVersion::new(1, 14));
     }
 
     // A plugin built before API 1.12 registers a canvas without saying

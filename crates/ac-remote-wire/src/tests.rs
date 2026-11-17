@@ -1113,6 +1113,24 @@ fn plugin_ui_changes() -> Vec<UiChange> {
             panel: 3,
             owner: Some(6),
         },
+        UiChange::WindowApply {
+            name: "plugin:test.atlas:main".into(),
+            layout: ac_plugin_ui::WindowLayout {
+                x: 12.0,
+                y: 34.0,
+                width: 300.0,
+                height: 200.0,
+                visible: true,
+                collapsed: false,
+                maximized: true,
+            },
+            parts: ac_plugin_ui::WindowParts {
+                place: true,
+                size: false,
+                shown: true,
+                state: false,
+            },
+        },
     ]
 }
 
@@ -2117,6 +2135,46 @@ fn every_command() -> Vec<SessionCommand> {
             handle: 6,
             button: 1,
         },
+        UiInput::Windows {
+            screen: (1920, 1080),
+            ready: true,
+            windows: [
+                ac_plugin_ui::WindowOwner::Client,
+                ac_plugin_ui::WindowOwner::Dock,
+                ac_plugin_ui::WindowOwner::Plugin("test.atlas".into()),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(at, owner)| ac_plugin_ui::WindowReport {
+                name: format!("window-{at}"),
+                owner,
+                title: (at == 2).then(|| "Atlas".to_owned()),
+                layout: ac_plugin_ui::WindowLayout {
+                    x: 1.0,
+                    y: 2.0,
+                    width: 300.0,
+                    height: 200.0,
+                    visible: at != 1,
+                    collapsed: at == 0,
+                    maximized: false,
+                },
+                state_managed: at == 0,
+                min_size: (100.0, 50.0),
+                max_size: (f32::MAX, 900.0),
+                resizable: (true, at != 0),
+            })
+            .collect(),
+        },
+        UiInput::WindowsChanged(vec![ac_plugin_ui::WindowReport {
+            name: "radar".into(),
+            owner: ac_plugin_ui::WindowOwner::Client,
+            title: None,
+            layout: ac_plugin_ui::WindowLayout::default(),
+            state_managed: false,
+            min_size: (40.0, 40.0),
+            max_size: (400.0, 400.0),
+            resizable: (true, true),
+        }]),
     ];
     let mut commands = vec![
         C::Chat("/who".into()),
@@ -2735,7 +2793,7 @@ fn the_subscription_filters_the_stateless_kinds() {
 /// a link must be built from the same layout).
 #[test]
 fn the_shape_is_pinned() {
-    assert_eq!(shape_hex(), "a5d6f5fd8af69fd7", "{:#x}", shape());
+    assert_eq!(shape_hex(), "e82009acbce004bd", "{:#x}", shape());
 }
 
 /// The size of a representative attach: a snapshot of a busy spot, a full
@@ -2830,7 +2888,7 @@ variants! {
     }
     ui_input_variant, UI_INPUT: UiInput {
         Action, PanelShown, Pointer, ClientWindows, ClientChords, Hotkey, InputAction, Theme,
-        FileIconsShown, DisplayDensity, CanvasHosted, DialogAnswered,
+        FileIconsShown, DisplayDensity, CanvasHosted, DialogAnswered, Windows, WindowsChanged,
     }
     interface_variant, INTERFACE: InterfaceEvent {
         Items, Player, State, Appraisal, Trade, Vendor, Social, Contracts, Book, House,
@@ -2842,7 +2900,7 @@ variants! {
         ControlVisible, CanvasAdded, CanvasRemoved, CanvasPaint, CanvasPlacement,
         CanvasListening, CanvasReleasePointer, CanvasResized, ImageAdded, FileIcon,
         ImageRemoved, Labels, Lines, Triangles, Icons, Shapes, ProjectileDebug, ClientWindow,
-        Hotkeys, FontAdded, FontRemoved, DialogAdded, DialogRemoved, Modal,
+        Hotkeys, FontAdded, FontRemoved, DialogAdded, DialogRemoved, Modal, WindowApply,
     }
     pregame_variant, PREGAME: PreGameEvent { Connection, Selection, Creation, Options, Refused }
     portal_variant, PORTAL: PortalSpaceEvent {

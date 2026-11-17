@@ -832,6 +832,66 @@ impl LayoutPersistence {
         self.resync(host);
     }
 
+    /// The screen the layouts are placed on.
+    #[must_use]
+    pub fn screen(&self) -> (i32, i32) {
+        self.valid_screen()
+    }
+
+    /// Whether the character's layout is restored and the game is shown:
+    /// what the windows show now is the character's, and what changes is
+    /// saved for it. False before the first restore (the windows at their
+    /// default places), for the pre-login "default" key, and while a
+    /// pre-game screen covers the game.
+    #[must_use]
+    pub fn is_restored(&self) -> bool {
+        self.gameplay_active
+            && can_persist(&self.character)
+            && self.restored_character.as_deref() == Some(self.character.as_str())
+    }
+
+    /// Whether the game shows and hides window `name` by itself (its
+    /// visibility is never restored or saved).
+    #[must_use]
+    pub fn is_state_managed(&self, name: &str) -> bool {
+        self.state_managed.contains(name)
+    }
+
+    /// Size and place window `name` as `layout` says, within its limits and
+    /// the screen, and put back its state, the way a named profile is
+    /// restored; show or hide it as `layout` says when `show` and the game
+    /// does not manage its visibility. Unlike a restore this is the
+    /// player's own change: it is saved for the character as if the player
+    /// had moved the window. Answers what the window looks like after
+    /// (none for a window not registered).
+    pub fn apply_as_player(
+        &mut self,
+        host: &mut UiHost,
+        name: &str,
+        layout: &UiWindowLayout,
+        show: bool,
+    ) -> Option<UiWindowLayout> {
+        self.follow(host);
+        let current = capture(host, name)?;
+        let layout = UiWindowLayout {
+            authored_geometry_revision: current.authored_geometry_revision,
+            ..*layout
+        };
+        let screen = self.valid_screen();
+        apply(
+            host,
+            name,
+            &layout,
+            screen,
+            show && !self.state_managed.contains(name),
+            &|_, _| (layout.x, layout.y),
+        );
+        // What `apply` did is not in the persistence's record of the
+        // windows, so following now saves it as the player's change.
+        self.follow(host);
+        capture(host, name)
+    }
+
     /// Save every window for the character (`/saveautoui`).
     pub fn save_all(&mut self, host: &mut UiHost) {
         self.follow(host);

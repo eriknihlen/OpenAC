@@ -24,6 +24,7 @@ mod dialogs;
 mod file_icons;
 mod fonts;
 mod window_icons;
+mod windows;
 pub use dialogs::{DEFAULT_DIALOG_BUTTONS, MAXIMUM_DIALOG_BUTTONS};
 pub use file_icons::{MAXIMUM_STEP_MS, RELEASE_AFTER_MS, RELEASE_CHECK_INTERVAL_MS};
 
@@ -269,6 +270,8 @@ pub struct PluginUi {
     dialogs: Vec<crate::model::DialogView>,
     /// The windows shown modal and the windows they block.
     modals: Vec<(u32, u32)>,
+    /// The screen and the registered windows, as the window reported them.
+    window_mirror: windows::WindowMirror,
 }
 
 /// Every item record holds only names its item type declares, each of its
@@ -602,6 +605,7 @@ impl PluginUi {
             self.window_attached = attached;
             self.client_mounted = 0;
             self.client_visible = 0;
+            self.window_mirror.forget();
             if !attached {
                 // Nothing draws the file icons any more.
                 self.drop_all_panel_files();
@@ -1754,6 +1758,20 @@ impl PluginUi {
             UiInput::FileIconsShown { panel, paths } => self.file_icons_shown(panel, paths),
             UiInput::DisplayDensity(density) => self.set_font_density(density),
             UiInput::CanvasHosted { canvas, size } => self.canvas_hosted(canvas, size),
+            UiInput::Windows {
+                screen,
+                ready,
+                windows,
+            } => {
+                if self.window_attached {
+                    self.window_mirror.report(screen, ready, windows);
+                }
+            }
+            UiInput::WindowsChanged(windows) => {
+                if self.window_attached {
+                    self.window_mirror.update(windows);
+                }
+            }
         }
     }
 
