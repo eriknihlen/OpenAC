@@ -99,7 +99,7 @@ miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-a
 # The plugin releases Atom feed; pure Rust, refuses DTDs by default.
 roxmltree = { version = "0.21.1", default-features = false, features = ["std"] }
 # SIGINT to a supervised child on Unix (already in the graph through ctrlc).
-nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
+nix = { version = "0.32.0", default-features = false, features = ["signal", "process"] }
 # Console control events to a supervised child on Windows (already in the graph); bindings
 # only, linked through windows-link.
 windows-sys = { version = "0.61.2", default-features = false }
