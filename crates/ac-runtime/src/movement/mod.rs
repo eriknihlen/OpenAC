@@ -735,6 +735,12 @@ impl Movement {
         self.outbound.drain_sent()
     }
 
+    /// As if an autonomous position at `position` had been sent.
+    #[cfg(test)]
+    pub(crate) fn note_sent_position_for_tests(&mut self, position: ac_proto::Position) {
+        self.outbound.note_sent_for_tests(position);
+    }
+
     /// Objects the world forgot on its own (their time out of range ran
     /// out, recorded after `mark`) lose their bodies.
     pub fn observe_expiry(&mut self, world: &mut World, mark: usize) {
