@@ -129,6 +129,77 @@ struct PlacedIcon {
 /// was restored, and the windows.
 type ToldWindows = (u64, (i32, i32), bool, Vec<WindowReport>);
 
+/// A registered window as it is this frame, with its texts borrowed: what
+/// a [`WindowReport`] is made from, and compared with one without making
+/// it.
+struct WindowNow<'a> {
+    name: &'a str,
+    /// The owning plugin's id and the panel's title, for a plugin's window.
+    plugin: Option<(&'a str, &'a str)>,
+    layout: WindowLayout,
+    state_managed: bool,
+    min_size: (f32, f32),
+    max_size: (f32, f32),
+    resizable: (bool, bool),
+    shares_place: bool,
+}
+
+impl WindowNow<'_> {
+    /// True when `told` says exactly this.
+    fn is(&self, told: &WindowReport) -> bool {
+        let WindowReport {
+            name,
+            owner,
+            title,
+            layout,
+            state_managed,
+            min_size,
+            max_size,
+            resizable,
+            shares_place,
+        } = told;
+        let owned = match (owner, self.plugin) {
+            (WindowOwner::Plugin(id), Some((plugin, _))) => id == plugin,
+            (WindowOwner::Dock, None) => self.name == dock::WINDOW,
+            (WindowOwner::Client, None) => self.name != dock::WINDOW,
+            _ => false,
+        };
+        owned
+            && name == self.name
+            && title.as_deref() == self.plugin.map(|(_, title)| title)
+            && *layout == self.layout
+            && *state_managed == self.state_managed
+            && *min_size == self.min_size
+            && *max_size == self.max_size
+            && *resizable == self.resizable
+            && shares_place.is_some() == self.shares_place
+    }
+
+    fn report(&self) -> WindowReport {
+        let (owner, title) = match self.plugin {
+            Some((plugin, title)) => (
+                WindowOwner::Plugin(plugin.to_owned()),
+                Some(title.to_owned()),
+            ),
+            None if self.name == dock::WINDOW => (WindowOwner::Dock, None),
+            None => (WindowOwner::Client, None),
+        };
+        WindowReport {
+            name: self.name.to_owned(),
+            owner,
+            title,
+            layout: self.layout,
+            state_managed: self.state_managed,
+            min_size: self.min_size,
+            max_size: self.max_size,
+            resizable: self.resizable,
+            shares_place: self
+                .shares_place
+                .then(|| ac_plugin_ui::MAIN_PANELS.to_owned()),
+        }
+    }
+}
+
 /// What the window keeps of the plugins' UI.
 #[derive(Debug, Default)]
 pub struct PluginWindowUi {
@@ -1387,16 +1458,46 @@ impl WindowUi {
     /// frame, so a window registered while held is held from its first.
     fn hold_plugin_windows(&mut self) {
         let held = &self.facts.plugin_ui.held_windows;
-        let frames: Vec<(ac_ui::tree::ElementId, bool)> = self
-            .host
-            .root
-            .windows()
-            .iter()
-            .map(|w| (w.frame, held.binary_search(&w.name).is_ok()))
-            .collect();
-        for (frame, hold) in frames {
-            self.host.root.set_held(frame, hold);
+        let root = &mut self.host.root;
+        for i in 0..root.windows().len() {
+            let window = &root.windows()[i];
+            let (frame, hold) = (window.frame, held.binary_search(&window.name).is_ok());
+            root.set_held(frame, hold);
         }
+    }
+
+    /// Registered window `w` as it is now, for the report to the session.
+    fn window_now<'a>(
+        &'a self,
+        w: &'a ac_ui::windows::WindowHandle,
+        layouts: &ac_ui::layout_persistence::LayoutPersistence,
+    ) -> Option<WindowNow<'a>> {
+        let layout = ac_ui::layout_persistence::capture(&self.host, &w.name)?;
+        let frame = self.host.root.element(w.frame)?;
+        let plugin = self
+            .plugins
+            .panels
+            .iter()
+            .find(|(_, window)| **window == w.name)
+            .and_then(|(id, _)| self.facts.plugin_ui.panel(*id));
+        Some(WindowNow {
+            name: &w.name,
+            plugin: plugin.map(|p| (p.owner.id.as_str(), p.descriptor.title.as_str())),
+            layout: WindowLayout {
+                x: layout.x,
+                y: layout.y,
+                width: layout.width,
+                height: layout.height,
+                visible: layout.visible,
+                collapsed: layout.collapsed,
+                maximized: layout.maximized,
+            },
+            state_managed: layouts.is_state_managed(&w.name),
+            min_size: (frame.min_width, frame.min_height),
+            max_size: (frame.max_width, frame.max_height),
+            resizable: (frame.resize_x, frame.resize_y),
+            shares_place: self.panels.shares_place(&w.name),
+        })
     }
 
     /// Tell the session the screen the interface lays out in and every
@@ -1413,51 +1514,29 @@ impl WindowUi {
         };
         let screen = layouts.screen();
         let ready = layouts.is_restored();
+        // Most frames nothing changed: that is seen against what was told,
+        // window by window, without building a report.
+        if self.plugins.placed_since_report.is_empty()
+            && let Some((s, at, was_ready, told)) = &self.plugins.reported_windows
+            && (*s, *at, *was_ready) == (snapshots, screen, ready)
+        {
+            let mut now = self
+                .host
+                .root
+                .windows()
+                .iter()
+                .filter_map(|w| self.window_now(w, layouts));
+            if told.iter().all(|t| now.next().is_some_and(|n| n.is(t))) && now.next().is_none() {
+                return;
+            }
+        }
         let windows: Vec<WindowReport> = self
             .host
             .root
             .windows()
             .iter()
-            .filter_map(|w| {
-                let layout = ac_ui::layout_persistence::capture(&self.host, &w.name)?;
-                let frame = self.host.root.element(w.frame)?;
-                let plugin = self
-                    .plugins
-                    .panels
-                    .iter()
-                    .find(|(_, window)| **window == w.name)
-                    .and_then(|(id, _)| self.facts.plugin_ui.panel(*id));
-                let (owner, title) = match plugin {
-                    Some(panel) => (
-                        WindowOwner::Plugin(panel.owner.id.clone()),
-                        Some(panel.descriptor.title.clone()),
-                    ),
-                    None if w.name == dock::WINDOW => (WindowOwner::Dock, None),
-                    None => (WindowOwner::Client, None),
-                };
-                Some(WindowReport {
-                    name: w.name.clone(),
-                    owner,
-                    title,
-                    layout: WindowLayout {
-                        x: layout.x,
-                        y: layout.y,
-                        width: layout.width,
-                        height: layout.height,
-                        visible: layout.visible,
-                        collapsed: layout.collapsed,
-                        maximized: layout.maximized,
-                    },
-                    state_managed: layouts.is_state_managed(&w.name),
-                    min_size: (frame.min_width, frame.min_height),
-                    max_size: (frame.max_width, frame.max_height),
-                    resizable: (frame.resize_x, frame.resize_y),
-                    shares_place: self
-                        .panels
-                        .shares_place(&w.name)
-                        .then(|| ac_plugin_ui::MAIN_PANELS.to_owned()),
-                })
-            })
+            .filter_map(|w| self.window_now(w, layouts))
+            .map(|n| n.report())
             .collect();
         let placed = std::mem::take(&mut self.plugins.placed_since_report);
         // The whole report when the session has none of this attach, the

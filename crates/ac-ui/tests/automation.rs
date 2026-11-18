@@ -497,3 +497,20 @@ fn unknown_commands_and_missing_files_stop_with_a_line() {
     assert!(runner.completed());
     assert!(log[0].starts_with("failed to load UI probe script"));
 }
+
+#[test]
+fn the_snapshot_leaves_out_what_is_held_out_of_sight() {
+    let mut f = fake();
+    let window = f.ui.children(f.ui.root())[0];
+    f.ui.set_held(window, true);
+    let rows = snapshot(&f.ui, true);
+    assert!(
+        rows.iter().all(|r| r.item_id != 0x5001),
+        "a held window's cells are not on the screen"
+    );
+    let all = snapshot(&f.ui, false);
+    let item = all.iter().find(|r| r.item_id == 0x5001).unwrap();
+    assert!(!item.visible, "listed, but not as showing");
+    f.ui.set_held(window, false);
+    assert!(snapshot(&f.ui, true).iter().any(|r| r.item_id == 0x5001));
+}

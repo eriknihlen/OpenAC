@@ -110,12 +110,12 @@ impl ItemCooldownController {
     }
 }
 
-/// `element` and every parent are visible.
+/// `element` and every parent are visible, and none is held out of sight.
 #[must_use]
 pub fn effectively_visible(ui: &UiRoot, element: ElementId) -> bool {
     let mut at = Some(element);
     while let Some(e) = at {
-        if !ui.element(e).is_some_and(|e| e.visible) {
+        if !ui.element(e).is_some_and(|e| e.drawn()) {
             return false;
         }
         at = ui.parent(e);
