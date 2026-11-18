@@ -17,6 +17,7 @@ use ac_ui::overlay::{
     OverlayCamera, OverlayHost, VividTargetIndicator, VividTargetInfo, WorldIconOverlay,
     WorldLabelOverlay, load_vivid_target_images,
 };
+use ac_ui::plugin::world_drawings::WorldDrawingOverlay;
 use glam::{Mat4, Quat, Vec3};
 
 use super::window::WindowUi;
@@ -30,6 +31,7 @@ const VIVID_TARGETING_BIT: u32 = 0x0000_8000;
 #[derive(Debug, Default)]
 pub struct Overlays {
     host: Option<OverlayHost>,
+    drawings: Option<WorldDrawingOverlay>,
     icons: Option<WorldIconOverlay>,
     labels: Option<WorldLabelOverlay>,
     vivid: Option<VividTargetIndicator>,
@@ -41,6 +43,11 @@ impl Overlays {
     /// The overlay band (none before it is mounted).
     pub(super) fn host_mut(&mut self) -> Option<&mut OverlayHost> {
         self.host.as_mut()
+    }
+
+    /// The plugins' world drawings (none before they are mounted).
+    pub(super) fn drawings_mut(&mut self) -> Option<&mut WorldDrawingOverlay> {
+        self.drawings.as_mut()
     }
 
     /// The plugins' world icons (none before they are mounted).
@@ -55,11 +62,17 @@ impl Overlays {
 }
 
 impl WindowUi {
-    /// Mount the overlay band, the world icons and labels (the labels'
-    /// text over the icons) and the vivid target indicator.
+    /// Mount the overlay band, the plugins' world drawings, icons and
+    /// labels (each over the one before: the labels' text over the icons,
+    /// both over the drawings) and the vivid target indicator.
     pub(super) fn mount_overlays(&mut self) {
         let mut host = OverlayHost::mount(&mut self.host.root);
         let font = self.content.font(DEFAULT_FONT_ID);
+        self.status.overlays.drawings = Some(WorldDrawingOverlay::mount(
+            &mut self.host.root,
+            &mut host,
+            font.clone(),
+        ));
         let line_height = font.as_ref().map_or(0.0, |f| f.line_height);
         self.status.overlays.icons = Some(WorldIconOverlay::mount(
             &mut self.host.root,

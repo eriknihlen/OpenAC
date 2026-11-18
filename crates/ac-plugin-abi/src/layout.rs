@@ -213,8 +213,9 @@ mod tests {
     /// windows, resizing a canvas) again, API 1.13 published the same
     /// value as 1.12: it added WebP to the image formats the client
     /// decodes, not a shape, and API 1.14 (the screen and the registered
-    /// windows: two events and five imports) changed it again.
-    const PUBLISHED: u64 = 0xfd19_c60b_acd2_81be;
+    /// windows: two events and five imports; world drawings: one import)
+    /// changed it again.
+    const PUBLISHED: u64 = 0x8acd_8072_4077_387e;
 
     /// The fingerprint API 1.12 was published with.
     const PUBLISHED_1_12: u64 = 0x4ae5_d2f7_29f5_02b6;
@@ -238,17 +239,19 @@ mod tests {
     const API_1_13_CORE: u64 = 0xd1c7_b9f7_fff1_9a8d;
 
     /// The imports API 1.14 added: the screen, the registered windows,
-    /// placing one or several, and holding them out of sight.
-    const API_1_14_WINDOWS: [Import; 5] = [
+    /// placing one or several, holding them out of sight, and a marker
+    /// layer's drawings.
+    const API_1_14_IMPORTS: [Import; 6] = [
         Import::UiScreenSize,
         Import::UiWindows,
         Import::UiWindowApply,
         Import::UiWindowsApply,
         Import::UiWindowsHold,
+        Import::UiMarkersSetDrawings,
     ];
 
     /// API 1.14 added two events (the screen's new size, a window
-    /// registered or unregistered), which change the core shape, and five
+    /// registered or unregistered), which change the core shape, and six
     /// imports, each marked `since`; no existing call changed. A plugin
     /// built for API 1.13 keeps its core shape, lacks the imports, and has
     /// every other import as it is now.
@@ -260,7 +263,7 @@ mod tests {
         assert_ne!(CORE_SHAPE, API_1_13_CORE);
         let section = PluginLayout::parse(&section_at(v1_13)).unwrap();
         for import in Import::ALL {
-            let new = API_1_14_WINDOWS.contains(import);
+            let new = API_1_14_IMPORTS.contains(import);
             assert_eq!(import.since() == ApiVersion::new(1, 14), new, "{import:?}");
             assert_eq!(import.shape_at(v1_13), import.shape(), "{import:?}");
             let expected = (!new).then(|| import.shape());
@@ -840,7 +843,8 @@ mod tests {
         for import in Import::ALL {
             if API_1_4_FONTS.contains(import) {
                 assert_eq!(section.import_shape(import.name()), None, "{import:?}");
-            } else if !API_1_3_CHANGED.iter().any(|(changed, _)| changed == import)
+            } else if import.since().is_at_most(v1_3)
+                && !API_1_3_CHANGED.iter().any(|(changed, _)| changed == import)
                 && !API_1_4_CHANGED.iter().any(|(changed, _)| changed == import)
             {
                 assert_eq!(

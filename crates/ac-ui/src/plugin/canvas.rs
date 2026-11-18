@@ -68,15 +68,36 @@ impl CanvasFont {
         color: Color,
         outline: bool,
     ) {
-        if outline {
-            for (dx, dy) in OUTLINE_OFFSETS {
-                self.pass(rc, text, (at.0 + dx, at.1 + dy), DEFAULT_OUTLINE_COLOR);
-            }
-        }
-        self.pass(rc, text, at, color);
+        self.draw_scaled(rc, text, at, color, outline, 1.0);
     }
 
-    fn pass(&self, rc: &mut RenderContext<'_>, text: &str, at: (f32, f32), tint: Color) {
+    /// [`Self::draw`] with every glyph's place and size from `at` times
+    /// `scale`: text shrunk or grown with what it is drawn in. The outline
+    /// stays one unit wide.
+    pub fn draw_scaled(
+        &self,
+        rc: &mut RenderContext<'_>,
+        text: &str,
+        at: (f32, f32),
+        color: Color,
+        outline: bool,
+        scale: f32,
+    ) {
+        if outline {
+            for (dx, dy) in OUTLINE_OFFSETS {
+                self.pass(
+                    rc,
+                    text,
+                    (at.0 + dx, at.1 + dy),
+                    DEFAULT_OUTLINE_COLOR,
+                    scale,
+                );
+            }
+        }
+        self.pass(rc, text, at, color, scale);
+    }
+
+    fn pass(&self, rc: &mut RenderContext<'_>, text: &str, at: (f32, f32), tint: Color, size: f32) {
         let pixels = rc.pixels_per_unit();
         // At one framebuffer pixel a unit or less it would be no sharper.
         let sharp = self.sharp.as_ref().filter(|_| pixels > 1.0);
@@ -85,17 +106,19 @@ impl CanvasFont {
             Some((scale, _, texture)) => (*scale, *texture, scale.min(pixels)),
             None => (1.0, self.texture, 1.0),
         };
-        let baseline = at.1 + self.font.ascent;
+        // Added in this order so that at full size every place is the same
+        // number as without a size.
+        let baseline = at.1 + self.font.ascent * size;
         let mut placed = Vec::with_capacity(text.len());
         self.font.lay_out(text, |c, glyph, pen| {
             let glyph = sharp
                 .and_then(|(_, fine, _)| fine.glyph(c))
                 .unwrap_or(glyph);
             placed.push((
-                at.0 + pen + glyph.x / scale,
-                baseline + glyph.y / scale,
-                glyph.width / scale,
-                glyph.height / scale,
+                at.0 + pen * size + glyph.x / scale * size,
+                baseline + glyph.y / scale * size,
+                glyph.width / scale * size,
+                glyph.height / scale * size,
                 (glyph.u0, glyph.v0, glyph.u1, glyph.v1),
             ));
         });
@@ -302,106 +325,154 @@ impl Widget for CanvasWidget {
     fn draw(&mut self, ui: &mut UiRoot, me: ElementId, rc: &mut RenderContext<'_>) {
         let (w, h) = ui.element(me).map_or((0.0, 0.0), |e| (e.width, e.height));
         rc.push_clip(0.0, 0.0, w, h);
-        let mut depth = 0usize;
-        for command in self.canvas.paint.iter() {
-            match command {
-                PaintCmd::Clear(c) => rc.fill(0.0, 0.0, w, h, color(*c)),
-                PaintCmd::FillRect { rect, color: c } => {
-                    rc.fill(rect.x, rect.y, rect.w, rect.h, color(*c))
+        let with = PaintWith {
+            images: &self.images,
+            fonts: &self.fonts,
+            font: self.font.as_deref(),
+        };
+        paint(rc, &self.canvas.paint, (w, h), 1.0, &with);
+        rc.pop_clip();
+    }
+}
+
+/// What a paint list draws its images and text with: its plugin's images
+/// and fonts by handle, and the interface font for font 0.
+#[derive(Debug, Clone, Copy)]
+pub struct PaintWith<'a> {
+    /// The plugin's images by handle.
+    pub images: &'a HashMap<u32, Icon>,
+    /// The plugin's fonts by handle.
+    pub fonts: &'a HashMap<u32, CanvasFont>,
+    /// The interface font.
+    pub font: Option<&'a UiFont>,
+}
+
+/// Draws `commands` in a box of `size` units from the context's origin
+/// (what `Clear` fills), every place and size times `scale`: a canvas at 1,
+/// a world drawing shrunk with its distance. Text in a plugin's font
+/// shrinks with it; text in the interface font keeps its size at its
+/// scaled place. Clips the commands leave pushed are popped.
+pub fn paint(
+    rc: &mut RenderContext<'_>,
+    commands: &[PaintCmd],
+    size: (f32, f32),
+    scale: f32,
+    with: &PaintWith<'_>,
+) {
+    let s = scale;
+    let (w, h) = size;
+    let mut depth = 0usize;
+    for command in commands {
+        match command {
+            PaintCmd::Clear(c) => rc.fill(0.0, 0.0, w * s, h * s, color(*c)),
+            PaintCmd::FillRect { rect, color: c } => {
+                rc.fill(rect.x * s, rect.y * s, rect.w * s, rect.h * s, color(*c));
+            }
+            PaintCmd::StrokeRect {
+                rect,
+                color: c,
+                thickness,
+            } => rc.rect_outline(
+                rect.x * s,
+                rect.y * s,
+                rect.w * s,
+                rect.h * s,
+                color(*c),
+                thickness * s,
+            ),
+            PaintCmd::Line {
+                from,
+                to,
+                color: c,
+                thickness,
+            } => rc.line(
+                from.0 * s,
+                from.1 * s,
+                to.0 * s,
+                to.1 * s,
+                color(*c),
+                thickness * s,
+            ),
+            PaintCmd::Text {
+                text,
+                at,
+                color: c,
+                outline,
+                font: 0,
+            } => {
+                if let Some(font) = with.font {
+                    rc.string_dat(
+                        font,
+                        text,
+                        at.0 * s,
+                        at.1 * s,
+                        color(*c),
+                        *outline,
+                        DEFAULT_OUTLINE_COLOR,
+                    );
                 }
-                PaintCmd::StrokeRect {
-                    rect,
-                    color: c,
-                    thickness,
-                } => rc.rect_outline(rect.x, rect.y, rect.w, rect.h, color(*c), *thickness),
-                PaintCmd::Line {
-                    from,
-                    to,
-                    color: c,
-                    thickness,
-                } => rc.line(from.0, from.1, to.0, to.1, color(*c), *thickness),
-                PaintCmd::Text {
-                    text,
-                    at,
-                    color: c,
-                    outline,
-                    font: 0,
-                } => {
-                    if let Some(font) = self.font.as_ref() {
-                        rc.string_dat(
-                            font,
-                            text,
-                            at.0,
-                            at.1,
-                            color(*c),
-                            *outline,
-                            DEFAULT_OUTLINE_COLOR,
-                        );
-                    }
+            }
+            PaintCmd::Text {
+                text,
+                at,
+                color: c,
+                outline,
+                font,
+            } => {
+                if let Some(font) = with.fonts.get(font) {
+                    font.draw_scaled(rc, text, (at.0 * s, at.1 * s), color(*c), *outline, s);
                 }
-                PaintCmd::Text {
-                    text,
-                    at,
-                    color: c,
-                    outline,
-                    font,
-                } => {
-                    if let Some(font) = self.fonts.get(font) {
-                        font.draw(rc, text, *at, color(*c), *outline);
-                    }
+            }
+            PaintCmd::Image { image, rect, tint } => {
+                if let Some((texture, _, _)) = with.images.get(image) {
+                    rc.sprite(
+                        *texture,
+                        rect.x * s,
+                        rect.y * s,
+                        rect.w * s,
+                        rect.h * s,
+                        (0.0, 0.0, 1.0, 1.0),
+                        color(*tint),
+                    );
                 }
-                PaintCmd::Image { image, rect, tint } => {
-                    if let Some((texture, _, _)) = self.images.get(image) {
-                        rc.sprite(
-                            *texture,
-                            rect.x,
-                            rect.y,
-                            rect.w,
-                            rect.h,
-                            (0.0, 0.0, 1.0, 1.0),
-                            color(*tint),
-                        );
-                    }
+            }
+            PaintCmd::ImageTransformed {
+                image,
+                rect,
+                tint,
+                rotation,
+                pivot,
+                scale_x,
+                scale_y,
+            } => {
+                if let Some((texture, _, _)) = with.images.get(image) {
+                    rc.sprite_transformed(
+                        *texture,
+                        rect.x * s,
+                        rect.y * s,
+                        rect.w * s,
+                        rect.h * s,
+                        (0.0, 0.0, 1.0, 1.0),
+                        color(*tint),
+                        *rotation,
+                        (*scale_x, *scale_y),
+                        (pivot.0 * s, pivot.1 * s),
+                    );
                 }
-                PaintCmd::ImageTransformed {
-                    image,
-                    rect,
-                    tint,
-                    rotation,
-                    pivot,
-                    scale_x,
-                    scale_y,
-                } => {
-                    if let Some((texture, _, _)) = self.images.get(image) {
-                        rc.sprite_transformed(
-                            *texture,
-                            rect.x,
-                            rect.y,
-                            rect.w,
-                            rect.h,
-                            (0.0, 0.0, 1.0, 1.0),
-                            color(*tint),
-                            *rotation,
-                            (*scale_x, *scale_y),
-                            *pivot,
-                        );
-                    }
-                }
-                PaintCmd::PushClip(rect) => {
-                    rc.push_clip(rect.x, rect.y, rect.w, rect.h);
-                    depth += 1;
-                }
-                PaintCmd::PopClip => {
-                    if depth > 0 {
-                        rc.pop_clip();
-                        depth -= 1;
-                    }
+            }
+            PaintCmd::PushClip(rect) => {
+                rc.push_clip(rect.x * s, rect.y * s, rect.w * s, rect.h * s);
+                depth += 1;
+            }
+            PaintCmd::PopClip => {
+                if depth > 0 {
+                    rc.pop_clip();
+                    depth -= 1;
                 }
             }
         }
-        for _ in 0..depth {
-            rc.pop_clip();
-        }
+    }
+    for _ in 0..depth {
         rc.pop_clip();
     }
 }

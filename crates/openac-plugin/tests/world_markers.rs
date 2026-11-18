@@ -123,3 +123,73 @@ fn a_plugin_lays_shapes_on_the_ground_in_its_layers() {
     assert!(host.with_host(|h| layer.remove(h)));
     assert!(host.ui.merged_shapes().is_empty());
 }
+
+/// A plugin paints a name plate with its own font and hangs it over an
+/// object; the session keeps the paint, the box, the pivot and the scale
+/// as given, and refuses a paint it could not draw.
+#[test]
+fn a_plugin_hangs_drawings_painted_in_its_own_font() {
+    use openac_plugin::ui::{DrawingScale, FontWeight, rgba, world_drawing};
+    let mut host = FakeHost::new("example.markers");
+    let layer = host.with_host(|h| {
+        let font = h.font_bundled(18.0, FontWeight::SemiBold);
+        assert!(font.is_valid());
+        let mut plate = world_drawing(MarkerAnchor::Object(0x8000_0001), 120.0, 24.0, |p| {
+            p.fill_rect(0.0, 0.0, 120.0, 24.0, rgba(0, 0, 0, 160));
+            p.text_in(
+                font,
+                "Drudge Skulker",
+                (6.0, 3.0),
+                rgba(255, 255, 255, 255),
+                true,
+            );
+            p.image(ART, 100.0, 4.0, 16.0, 16.0, rgba(255, 255, 255, 255));
+        });
+        plate.height_offset = 0.3;
+        plate.scale = DrawingScale::WithDistance(10.0, 40.0, 0.5);
+        plate.hidden_by_world = true;
+        let layer = h.create_marker_layer();
+        assert!(layer.set_drawings(h, &[plate]));
+        layer
+    });
+    let shown = host.ui.merged_drawings();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].owner, "example.markers");
+    let drawing = &shown[0].drawing;
+    assert_eq!(
+        drawing.anchor,
+        ac_plugin_ui::MarkerAnchor::Object(0x8000_0001)
+    );
+    assert_eq!(drawing.size, (120.0, 24.0));
+    // Standing on its anchor by default.
+    assert_eq!(drawing.pivot, (60.0, 24.0));
+    assert_eq!(drawing.height_offset, 0.3);
+    assert_eq!(drawing.max_range, 60.0);
+    assert!(drawing.hidden_by_world);
+    assert_eq!(
+        drawing.scale,
+        ac_plugin_ui::DrawingScale::WithDistance {
+            near: 10.0,
+            far: 40.0,
+            smallest: 0.5,
+        }
+    );
+    assert_eq!(drawing.paint.len(), 3);
+    assert!(matches!(
+        &drawing.paint[1],
+        ac_plugin_ui::PaintCmd::Text { text, font, outline: true, .. }
+            if text == "Drudge Skulker" && *font != 0
+    ));
+
+    // A clip left pushed: refused, and the layer keeps its drawing.
+    let unbalanced = world_drawing(MarkerAnchor::Object(2), 10.0, 10.0, |p| {
+        p.push_clip(0.0, 0.0, 5.0, 5.0);
+    });
+    assert!(!host.with_host(|h| layer.set_drawings(h, &[unbalanced])));
+    assert_eq!(host.ui.merged_drawings().len(), 1);
+
+    // Leaving the world takes it down with its object; the layer stays.
+    host.ui.clear_object_markers();
+    assert!(host.ui.merged_drawings().is_empty());
+    assert!(host.with_host(|h| layer.remove(h)));
+}

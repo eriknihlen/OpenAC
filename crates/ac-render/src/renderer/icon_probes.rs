@@ -23,7 +23,8 @@ use super::pipelines::vertex_buffer;
 use super::shadows::PassPipelines;
 use crate::world_triangles::WorldTriangleVertex;
 
-/// The most anchors tested in one frame; those past it count as out of sight.
+/// The most anchors tested in one frame. With more, the nearest are tested
+/// and the rest count as out of sight.
 pub(crate) const MAXIMUM_PROBES: usize = 1024;
 
 /// How far above its anchor a probe sits, metres, so the ground or floor the
@@ -58,6 +59,29 @@ pub(crate) fn probe_point(anchor: Vec3, eye: Vec3) -> Vec3 {
         return raised;
     }
     raised + to_eye / distance * PULL_METRES.min(distance * 0.5)
+}
+
+/// Fill `out` with the anchors to test this frame: each key once, at the
+/// first anchor given for it, and no more than `limit`. Past the limit the
+/// nearest to `eye` are kept, so the ones that go untested (and so count as
+/// out of sight) are the farthest, whichever plugin or kind of marker asked,
+/// and not whichever came last in the list.
+pub(crate) fn choose_probes(
+    probes: &[IconProbe],
+    eye: Vec3,
+    limit: usize,
+    out: &mut Vec<IconProbe>,
+) {
+    out.clear();
+    let mut seen = HashSet::new();
+    out.extend(probes.iter().filter(|p| seen.insert(p.key)).copied());
+    if out.len() > limit {
+        let distance = |p: &IconProbe| p.anchor.distance_squared(eye);
+        if limit > 0 {
+            out.select_nth_unstable_by(limit - 1, |a, b| distance(a).total_cmp(&distance(b)));
+        }
+        out.truncate(limit);
+    }
 }
 
 /// The two triangles of a probe at `point`, facing `eye`.
@@ -149,6 +173,7 @@ pub(super) struct IconProbes {
     newest: u64,
     visible: HashMap<IconProbeKey, bool>,
     scratch: Vec<WorldTriangleVertex>,
+    chosen: Vec<IconProbe>,
 }
 
 impl IconProbes {
@@ -260,16 +285,11 @@ impl WorldRenderer {
         slot.frame = frame;
         slot.keys.clear();
         state.scratch.clear();
-        let mut seen = HashSet::new();
-        for probe in probes {
-            if slot.keys.len() == MAXIMUM_PROBES {
-                break;
-            }
-            if seen.insert(probe.key) {
-                slot.keys.push(probe.key);
-                let point = probe_point(probe.anchor, eye);
-                state.scratch.extend(probe_vertices(point, eye));
-            }
+        choose_probes(probes, eye, MAXIMUM_PROBES, &mut state.chosen);
+        for probe in &state.chosen {
+            slot.keys.push(probe.key);
+            let point = probe_point(probe.anchor, eye);
+            state.scratch.extend(probe_vertices(point, eye));
         }
         queue.write_buffer(&gpu.vertices, 0, bytemuck::cast_slice(&state.scratch));
         state.count = slot.keys.len() as u32;
@@ -352,6 +372,47 @@ mod tests {
         let (facing, far) = width(Vec3::new(100.0, 0.0, 0.0));
         assert!(facing);
         assert!((far / near - 10.0).abs() < 1e-3);
+    }
+
+    /// With more anchors than can be tested in a frame, the nearest are
+    /// the ones tested, wherever they stand in the list (the drawings come
+    /// after every icon, and one plugin's after another's); under the limit
+    /// all are, in the order given. A key asked for twice is tested once,
+    /// at the first anchor given.
+    #[test]
+    fn past_the_limit_the_nearest_anchors_are_the_ones_tested() {
+        let eye = Vec3::ZERO;
+        let probe = |id: u32, metres: f32| IconProbe {
+            key: IconProbeKey::Object(id),
+            anchor: Vec3::new(metres, 0.0, 0.0),
+        };
+        let probes = [
+            probe(1, 50.0),
+            probe(2, 40.0),
+            probe(3, 30.0),
+            probe(2, 1.0),
+            probe(4, 20.0),
+            probe(5, 10.0),
+        ];
+        let mut out = Vec::new();
+        choose_probes(&probes, eye, 8, &mut out);
+        assert_eq!(
+            out,
+            [probes[0], probes[1], probes[2], probes[4], probes[5]],
+            "all of them, each key once"
+        );
+        choose_probes(&probes, eye, 2, &mut out);
+        let mut kept: Vec<u32> = out
+            .iter()
+            .map(|p| match p.key {
+                IconProbeKey::Object(id) => id,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        kept.sort_unstable();
+        assert_eq!(kept, [4, 5], "the two nearest, though they came last");
+        choose_probes(&probes, eye, 0, &mut out);
+        assert!(out.is_empty());
     }
 
     const SIZE: (u32, u32) = (640, 360);
