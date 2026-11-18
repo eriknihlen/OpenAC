@@ -236,6 +236,9 @@ macro_rules! import_table {
             /// Replace a marker layer's ground shapes.
             UiMarkersSetShapes = ui_markers_set_shapes($crate::ui::ShapeSet) -> bool,
                 permission: None, window: false, since: (1, 3);
+            /// Replace a marker layer's drawings.
+            UiMarkersSetDrawings = ui_markers_set_drawings($crate::ui::DrawingSet) -> bool,
+                permission: None, window: false, since: (1, 14);
             /// Remove a marker layer and its markers.
             UiMarkersRemove = ui_markers_remove(u32) -> bool,
                 permission: None, window: false, since: (1, 3);

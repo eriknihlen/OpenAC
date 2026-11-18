@@ -22,6 +22,7 @@ mod repeat;
 pub mod style;
 pub mod title_bar;
 pub mod widgets;
+pub mod world_drawings;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

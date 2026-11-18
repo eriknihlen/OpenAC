@@ -19,8 +19,9 @@ use ac_dat::DatCollection;
 use ac_dat::objects::{BspNode, GfxObj, Setup};
 use ac_plugin_ui::control_state::{ControlStateFile, ControlStateStore};
 use ac_plugin_ui::{
-    ClientWindow, ClientWindowAction, ImageSource, MapPoint, MarkerAnchor, PanelView, ThemeKind,
-    UiInput, WindowLayout, WindowOwner, WindowParts, WindowReport, WorldIconEntry,
+    ClientWindow, ClientWindowAction, ImageSource, MapPoint, MarkerAnchor, PaintCmd, PanelView,
+    ThemeKind, UiInput, WindowLayout, WindowOwner, WindowParts, WindowReport, WorldDrawingEntry,
+    WorldIconEntry,
 };
 use ac_proto::Quaternion;
 use ac_runtime::session::SessionCommand;
@@ -35,6 +36,7 @@ use ac_ui::panels::projectile_debug::{ProjectileDebugOverlay, ProjectileDebugSam
 use ac_ui::plugin::canvas::{CanvasFont, CanvasHost, CanvasLayer};
 use ac_ui::plugin::dock::{self, DockArt, DockMode, DockOpens, DockSize, PluginDock};
 use ac_ui::plugin::fold::SharedControlState;
+use ac_ui::plugin::world_drawings::{DrawingResources, WorldDrawingItem};
 use ac_ui::plugin::{
     Icon, MarkupIcons, PluginOutbox, PluginPanelController, PluginTheme, build_panel,
     build_panel_with_state,
@@ -124,6 +126,14 @@ struct PlacedIcon {
     anchor: WorldIconAnchor,
 }
 
+/// A drawing placed in the drawing frame this frame: which of the merged
+/// drawings, and the point its pivot sits on.
+#[derive(Debug, Clone, Copy)]
+struct PlacedDrawing {
+    entry: usize,
+    at: Vec3,
+}
+
 /// The screen and registered windows as told to the session: the snapshot
 /// (attach) they were told in, the screen, whether the character's layout
 /// was restored, and the windows.
@@ -203,6 +213,9 @@ pub struct PluginWindowUi {
     /// The anchors of the icons hidden behind the world, to test this frame.
     icon_probes: Vec<IconProbe>,
     icon_entries: Arc<Vec<WorldIconEntry>>,
+    /// This frame's drawings: none while the portal view hides the world.
+    world_drawings: Vec<PlacedDrawing>,
+    drawing_entries: Arc<Vec<WorldDrawingEntry>>,
     samples: Vec<ProjectileDebugSample>,
     projectile_set: Option<(u64, Instant)>,
     setup_shapes: HashMap<u32, Option<SetupShape>>,
@@ -1640,6 +1653,56 @@ impl WindowUi {
                 camera.as_ref(),
             );
         }
+        if let Some(overlay) = status.overlays.drawings_mut() {
+            // Each plugin's images and fonts, gathered once for all its
+            // drawings: the fonts it holds, and the images its paint names.
+            let mut owners: HashMap<&str, usize> = HashMap::new();
+            let mut resources: Vec<DrawingResources> = Vec::new();
+            let mut items = Vec::with_capacity(plugins.world_drawings.len());
+            for placed in &plugins.world_drawings {
+                let Some(entry) = plugins.drawing_entries.get(placed.entry) else {
+                    continue;
+                };
+                let owner = entry.owner.as_str();
+                let index = *owners.entry(owner).or_insert_with(|| {
+                    let fonts = view
+                        .fonts
+                        .values()
+                        .filter(|f| f.owner == owner)
+                        .map(|f| (f.handle, font_of(f)))
+                        .collect();
+                    resources.push(DrawingResources {
+                        images: HashMap::new(),
+                        fonts,
+                    });
+                    resources.len() - 1
+                });
+                for command in entry.drawing.paint.iter() {
+                    let (PaintCmd::Image { image: handle, .. }
+                    | PaintCmd::ImageTransformed { image: handle, .. }) = command
+                    else {
+                        continue;
+                    };
+                    let images = &mut resources[index].images;
+                    if !images.contains_key(handle)
+                        && let Some(icon) = image(owner, *handle)
+                    {
+                        images.insert(*handle, icon);
+                    }
+                }
+                let drawing = &entry.drawing;
+                items.push(WorldDrawingItem {
+                    at: placed.at,
+                    size: drawing.size,
+                    pivot: drawing.pivot,
+                    paint: Arc::clone(&drawing.paint),
+                    scale: drawing.scale,
+                    max_range: drawing.max_range,
+                    resources: index,
+                });
+            }
+            overlay.tick(&mut host.root, items, resources, camera.as_ref());
+        }
         let (sets, _) = &view.projectile;
         if plugins.projectile_set.is_none_or(|(seen, _)| seen != *sets) {
             plugins.projectile_set = Some((*sets, now));
@@ -1711,6 +1774,7 @@ impl WindowUi {
         plugins.world_lines.clear();
         plugins.world_triangles.clear();
         plugins.world_icons.clear();
+        plugins.world_drawings.clear();
         plugins.icon_probes.clear();
         plugins.world_shapes.clear();
         plugins.samples.clear();
@@ -1791,6 +1855,46 @@ impl WindowUi {
                     }
                 }
                 plugins.world_icons.push(PlacedIcon { entry, anchor });
+            }
+        }
+        plugins.drawing_entries = Arc::clone(&view.drawings);
+        if world_shown {
+            for (entry, placed) in view.drawings.iter().enumerate() {
+                let drawing = &placed.drawing;
+                let raise = drawing.height_offset;
+                let Some(key) = drawing_probe_key(drawing.anchor, raise) else {
+                    continue;
+                };
+                // The point the drawing hangs from, which is the one tested
+                // against the world: an object's top, as for its icons, or
+                // the position, raised.
+                let at = match drawing.anchor {
+                    MarkerAnchor::None => continue,
+                    MarkerAnchor::Object(id) => {
+                        plugins.keep_anchor(world, scene, &dats, id);
+                        let Some(head) = plugins
+                            .anchors
+                            .get(&id)
+                            .map(|a| a.base + Vec3::Z * a.height)
+                        else {
+                            continue;
+                        };
+                        head + Vec3::Z * raise
+                    }
+                    MarkerAnchor::Position { point, .. } => {
+                        let Some(at) = map_point_in_frame(world, point) else {
+                            continue;
+                        };
+                        at + Vec3::Z * raise
+                    }
+                };
+                if drawing.hidden_by_world {
+                    plugins.icon_probes.push(IconProbe { key, anchor: at });
+                    if world.icon_probe_visible(key) != Some(true) {
+                        continue;
+                    }
+                }
+                plugins.world_drawings.push(PlacedDrawing { entry, at });
             }
         }
         for shape in view.shapes.iter() {
@@ -1984,6 +2088,21 @@ fn icon_probe_key(point: MapPoint) -> IconProbeKey {
         point.north_south.to_bits(),
         point.elevation.to_bits(),
     ])
+}
+
+/// What the occlusion answer of a drawing raised `raise` metres above its
+/// anchor is kept under: the raised point, which is what the probe tests.
+/// Not raised, it is the anchor's own key, shared with the icons there.
+fn drawing_probe_key(anchor: MarkerAnchor, raise: f32) -> Option<IconProbeKey> {
+    match anchor {
+        MarkerAnchor::None => None,
+        MarkerAnchor::Object(id) if raise == 0.0 => Some(IconProbeKey::Object(id)),
+        MarkerAnchor::Object(id) => Some(IconProbeKey::RaisedObject(id, raise.to_bits())),
+        MarkerAnchor::Position { point, .. } => Some(icon_probe_key(MapPoint {
+            elevation: point.elevation + f64::from(raise) / MapPoint::UNIT_METRES,
+            ..point
+        })),
+    }
 }
 
 /// `0xRRGGBBAA` as red, green, blue and alpha in 0..1.
@@ -2186,6 +2305,43 @@ mod tests {
         // The same position is the same anchor with the same answer,
         // wherever its icon sits in the list.
         assert_eq!(icon_probe_key(at(40.0)), old);
+    }
+
+    /// A drawing raised above its anchor is tested at the raised point, so
+    /// it does not share the answer of the point below it (hidden by a low
+    /// wall it stands over) or of another drawing raised higher; not
+    /// raised, it shares its anchor's.
+    #[test]
+    fn a_raised_drawing_keeps_its_own_probe_answer() {
+        let object = MarkerAnchor::Object(7);
+        assert_eq!(
+            drawing_probe_key(object, 0.0),
+            Some(IconProbeKey::Object(7))
+        );
+        let low = drawing_probe_key(object, 0.5);
+        let high = drawing_probe_key(object, 2.0);
+        assert_ne!(low, Some(IconProbeKey::Object(7)));
+        assert_ne!(low, high);
+        assert_eq!(drawing_probe_key(object, 0.5), low);
+
+        let place = MarkerAnchor::Position {
+            point: at(40.0),
+            is_outdoor: true,
+        };
+        assert_eq!(
+            drawing_probe_key(place, 0.0),
+            Some(icon_probe_key(at(40.0)))
+        );
+        // Raised a full map unit, it is the point a unit up.
+        let up = MapPoint {
+            elevation: at(40.0).elevation + 1.0,
+            ..at(40.0)
+        };
+        assert_eq!(
+            drawing_probe_key(place, MapPoint::UNIT_METRES as f32),
+            Some(icon_probe_key(up))
+        );
+        assert_eq!(drawing_probe_key(MarkerAnchor::None, 1.0), None);
     }
 
     #[test]

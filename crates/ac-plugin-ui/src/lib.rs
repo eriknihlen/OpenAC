@@ -40,16 +40,18 @@ pub use images::{DecodedImage, ImageBudget};
 pub use markup::{MarkupDocument, MarkupError, parse};
 pub use model::{
     ActionValue, CanvasAnchor, CanvasDescriptor, CanvasPlace, CanvasView, ClientWindow,
-    ClientWindowAction, Color8, DialogView, GroundShape, GroundShapeKind, ImageSource, ImageView,
-    MapPoint, MarkerAnchor, PaintCmd, PaintRect, PanelDescriptor, PanelView, PluginIcon,
-    PointerEvent, PointerKind, ProjectileSample, UiChange, UiEvent, UiInput, UiOwner, WindowIcon,
-    WorldIcon, WorldIconEntry, WorldLabel, WorldLine, WorldTriangle, canvas_origin, window_name,
+    ClientWindowAction, Color8, DialogView, DrawingScale, GroundShape, GroundShapeKind,
+    ImageSource, ImageView, MapPoint, MarkerAnchor, PaintCmd, PaintRect, PanelDescriptor,
+    PanelView, PluginIcon, PointerEvent, PointerKind, ProjectileSample, UiChange, UiEvent, UiInput,
+    UiOwner, WindowIcon, WorldDrawing, WorldDrawingEntry, WorldIcon, WorldIconEntry, WorldLabel,
+    WorldLine, WorldTriangle, canvas_origin, window_name,
 };
 pub use state::{
-    DEFAULT_DIALOG_BUTTONS, MAXIMUM_CANVASES, MAXIMUM_DIALOG_BUTTONS, MAXIMUM_ICON_SIZE,
-    MAXIMUM_ICONS, MAXIMUM_LABEL_TEXT, MAXIMUM_LABELS, MAXIMUM_LINES_PER_LAYER,
-    MAXIMUM_PAINT_COMMANDS, MAXIMUM_PROJECTILE_SAMPLES, MAXIMUM_SHAPE_RADIUS, MAXIMUM_SHAPES,
-    MAXIMUM_STEP_MS, MAXIMUM_TRIANGLES, MINIMUM_ICON_SIZE, MINIMUM_SHAPE_RADIUS, PluginUi,
+    DEFAULT_DIALOG_BUTTONS, MAXIMUM_CANVASES, MAXIMUM_DIALOG_BUTTONS, MAXIMUM_DRAWING_COMMANDS,
+    MAXIMUM_DRAWING_SIDE, MAXIMUM_DRAWINGS, MAXIMUM_ICON_SIZE, MAXIMUM_ICONS, MAXIMUM_LABEL_TEXT,
+    MAXIMUM_LABELS, MAXIMUM_LINES_PER_LAYER, MAXIMUM_PAINT_COMMANDS, MAXIMUM_PROJECTILE_SAMPLES,
+    MAXIMUM_SHAPE_RADIUS, MAXIMUM_SHAPES, MAXIMUM_STEP_MS, MAXIMUM_TRIANGLES,
+    MINIMUM_DRAWING_SCALE, MINIMUM_DRAWING_SIDE, MINIMUM_ICON_SIZE, MINIMUM_SHAPE_RADIUS, PluginUi,
     RELEASE_AFTER_MS, RELEASE_CHECK_INTERVAL_MS, TextMetrics, UiResources,
 };
 pub use theme::{ThemeKind, ThemePalette};

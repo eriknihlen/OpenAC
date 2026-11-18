@@ -13,10 +13,11 @@ use std::sync::Arc;
 use crate::images::{ImageBudget, ImageTable};
 use crate::markup::{self, normalize_icon};
 use crate::model::{
-    CanvasDescriptor, CanvasView, ClientWindow, ClientWindowAction, GroundShape, GroundShapeKind,
-    ImageSource, MarkerAnchor, PaintCmd, PanelDescriptor, PanelView, PluginIcon, PointerKind,
-    ProjectileSample, UiChange, UiEvent, UiInput, UiOwner, WorldIcon, WorldIconEntry, WorldLabel,
-    WorldLine, WorldTriangle, canvas_origin,
+    CanvasDescriptor, CanvasView, ClientWindow, ClientWindowAction, DrawingScale, GroundShape,
+    GroundShapeKind, ImageSource, MarkerAnchor, PaintCmd, PanelDescriptor, PanelView, PluginIcon,
+    PointerKind, ProjectileSample, UiChange, UiEvent, UiInput, UiOwner, WorldDrawing,
+    WorldDrawingEntry, WorldIcon, WorldIconEntry, WorldLabel, WorldLine, WorldTriangle,
+    canvas_origin,
 };
 use crate::value::{BindingSchema, UiValue};
 
@@ -53,6 +54,18 @@ pub const MAXIMUM_SHAPES: usize = 256;
 pub const MINIMUM_SHAPE_RADIUS: f32 = 0.1;
 /// The largest radius a ground shape may have, metres.
 pub const MAXIMUM_SHAPE_RADIUS: f32 = 100.0;
+/// The most world drawings one plugin may have set at once, across its
+/// layers; counted apart from its icons and shapes.
+pub const MAXIMUM_DRAWINGS: usize = 256;
+/// The most paint commands one world drawing may hold.
+pub const MAXIMUM_DRAWING_COMMANDS: usize = 256;
+/// The smallest side a world drawing's box may have, points.
+pub const MINIMUM_DRAWING_SIDE: f32 = 1.0;
+/// The largest side a world drawing's box may have, points.
+pub const MAXIMUM_DRAWING_SIDE: f32 = 512.0;
+/// The smallest a drawing that shrinks with distance is drawn, a fraction
+/// of its full size.
+pub const MINIMUM_DRAWING_SCALE: f32 = 0.1;
 /// The most projectile markers kept.
 pub const MAXIMUM_PROJECTILE_SAMPLES: usize = 4096;
 /// The most commands one paint may hold (a host bound: a paint list is
@@ -140,6 +153,7 @@ struct MarkerLayer {
     owner: String,
     icons: Vec<WorldIcon>,
     shapes: Vec<GroundShape>,
+    drawings: Vec<WorldDrawing>,
 }
 
 /// The icon as the window draws it, its size in range, or `None` when it is
@@ -154,6 +168,91 @@ fn normalized_icon(icon: WorldIcon) -> Option<WorldIcon> {
         size: icon.size.clamp(MINIMUM_ICON_SIZE, MAXIMUM_ICON_SIZE),
         ..icon
     })
+}
+
+/// Why a paint list cannot be drawn: a clip popped that was not pushed, or
+/// clips left pushed.
+fn unbalanced_clips(commands: &[PaintCmd]) -> Option<String> {
+    let mut depth = 0usize;
+    for command in commands {
+        match command {
+            PaintCmd::PushClip(_) => depth += 1,
+            PaintCmd::PopClip => {
+                if depth == 0 {
+                    return Some("the paint pops a clip it did not push".to_owned());
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    (depth != 0).then(|| format!("the paint leaves {depth} clip(s) pushed"))
+}
+
+/// The drawing as the window draws it, its box and scale in range, or
+/// `None` when it is dropped.
+fn normalized_drawing(drawing: WorldDrawing) -> Option<WorldDrawing> {
+    let (width, height) = drawing.size;
+    let usable = drawing.anchor.is_valid()
+        && drawing.height_offset.is_finite()
+        && width.is_finite()
+        && height.is_finite()
+        && drawing.pivot.0.is_finite()
+        && drawing.pivot.1.is_finite()
+        && drawing.max_range.is_finite()
+        && drawing.max_range > 0.0;
+    if !usable {
+        return None;
+    }
+    let scale = match drawing.scale {
+        DrawingScale::Fixed => DrawingScale::Fixed,
+        DrawingScale::WithDistance {
+            near,
+            far,
+            smallest,
+        } => {
+            let usable = near.is_finite()
+                && far.is_finite()
+                && smallest.is_finite()
+                && near >= 0.0
+                && far > near;
+            if !usable {
+                return None;
+            }
+            DrawingScale::WithDistance {
+                near,
+                far,
+                smallest: smallest.clamp(MINIMUM_DRAWING_SCALE, 1.0),
+            }
+        }
+    };
+    let size = (
+        width.clamp(MINIMUM_DRAWING_SIDE, MAXIMUM_DRAWING_SIDE),
+        height.clamp(MINIMUM_DRAWING_SIDE, MAXIMUM_DRAWING_SIDE),
+    );
+    Some(WorldDrawing {
+        size,
+        pivot: (
+            refit_pivot(drawing.pivot.0, width, size.0),
+            refit_pivot(drawing.pivot.1, height, size.1),
+        ),
+        scale,
+        ..drawing
+    })
+}
+
+/// A pivot on a side of `given` points, moved to the same place on the
+/// side it was brought to: the middle of a box cut to 512 points stays its
+/// middle. A side of nothing or less had no places, so its pivot is only
+/// kept on the new side.
+fn refit_pivot(pivot: f32, given: f32, side: f32) -> f32 {
+    if given == side {
+        pivot
+    } else if given > 0.0 {
+        pivot * side / given
+    } else {
+        pivot.clamp(0.0, side)
+    }
 }
 
 /// The shape as the renderer draws it, or `None` when it is dropped. A ring
@@ -818,21 +917,8 @@ impl PluginUi {
                 commands.len()
             ));
         }
-        let mut depth = 0usize;
-        for command in &commands {
-            match command {
-                PaintCmd::PushClip(_) => depth += 1,
-                PaintCmd::PopClip => {
-                    if depth == 0 {
-                        return Err("the paint pops a clip it did not push".to_owned());
-                    }
-                    depth -= 1;
-                }
-                _ => {}
-            }
-        }
-        if depth != 0 {
-            return Err(format!("the paint leaves {depth} clip(s) pushed"));
+        if let Some(why) = unbalanced_clips(&commands) {
+            return Err(why);
         }
         let Some(c) = self.canvas_mut(owner, canvas) else {
             return Err(format!("the plugin has no canvas number {canvas}"));
@@ -1269,6 +1355,7 @@ impl PluginUi {
             owner: owner.to_owned(),
             icons: Vec::new(),
             shapes: Vec::new(),
+            drawings: Vec::new(),
         });
         id
     }
@@ -1331,6 +1418,46 @@ impl PluginUi {
         true
     }
 
+    /// Replaces a layer's drawings; unusable ones (pinned to nothing, a box,
+    /// pivot, scale or range that is not usable) are dropped quietly. False,
+    /// and nothing changed, when `owner` has no such layer, when the
+    /// drawings given and those on the plugin's other layers come to more
+    /// than [`MAXIMUM_DRAWINGS`], or when a drawing's paint has more than
+    /// [`MAXIMUM_DRAWING_COMMANDS`] commands or clips that do not balance.
+    pub fn set_drawings(&mut self, owner: &str, layer: u32, drawings: Vec<WorldDrawing>) -> bool {
+        if !self
+            .marker_layers
+            .iter()
+            .any(|l| l.id == layer && l.owner == owner)
+        {
+            return false;
+        }
+        let others: usize = self
+            .marker_layers
+            .iter()
+            .filter(|l| l.owner == owner && l.id != layer)
+            .map(|l| l.drawings.len())
+            .sum();
+        if drawings.len() + others > MAXIMUM_DRAWINGS {
+            return false;
+        }
+        if drawings.iter().any(|d| {
+            d.paint.len() > MAXIMUM_DRAWING_COMMANDS || unbalanced_clips(&d.paint).is_some()
+        }) {
+            return false;
+        }
+        let kept = drawings
+            .into_iter()
+            .filter_map(normalized_drawing)
+            .collect();
+        if let Some(l) = self.marker_layers.iter_mut().find(|l| l.id == layer) {
+            l.drawings = kept;
+        }
+        self.changes
+            .push(UiChange::Drawings(self.merged_drawings()));
+        true
+    }
+
     /// Removes a layer and its markers; false when `owner` has no such
     /// layer.
     pub fn remove_marker_layer(&mut self, owner: &str, layer: u32) -> bool {
@@ -1348,6 +1475,8 @@ impl PluginUi {
     fn push_markers(&mut self) {
         self.changes.push(UiChange::Icons(self.merged_icons()));
         self.changes.push(UiChange::Shapes(self.merged_shapes()));
+        self.changes
+            .push(UiChange::Drawings(self.merged_drawings()));
     }
 
     /// Takes every plugin's markers over objects down: the character left
@@ -1361,12 +1490,14 @@ impl PluginUi {
         if !self.marker_layers.iter().any(|l| {
             l.icons.iter().any(|i| on_object(&i.anchor))
                 || l.shapes.iter().any(|s| on_object(&s.anchor))
+                || l.drawings.iter().any(|d| on_object(&d.anchor))
         }) {
             return;
         }
         for layer in &mut self.marker_layers {
             layer.icons.retain(|i| !on_object(&i.anchor));
             layer.shapes.retain(|s| !on_object(&s.anchor));
+            layer.drawings.retain(|d| !on_object(&d.anchor));
         }
         self.push_markers();
     }
@@ -1400,6 +1531,25 @@ impl PluginUi {
             layers
                 .into_iter()
                 .flat_map(|l| l.shapes.iter().copied())
+                .collect(),
+        )
+    }
+
+    /// Every drawing of every plugin, in the same order as
+    /// [`Self::merged_icons`].
+    #[must_use]
+    pub fn merged_drawings(&self) -> Arc<Vec<WorldDrawingEntry>> {
+        let mut layers: Vec<&MarkerLayer> = self.marker_layers.iter().collect();
+        layers.sort_by(|a, b| a.owner.cmp(&b.owner));
+        Arc::new(
+            layers
+                .into_iter()
+                .flat_map(|l| {
+                    l.drawings.iter().map(|drawing| WorldDrawingEntry {
+                        owner: l.owner.clone(),
+                        drawing: drawing.clone(),
+                    })
+                })
                 .collect(),
         )
     }
@@ -1592,7 +1742,7 @@ impl PluginUi {
 
     /// Everything as it stands, for a window that attaches: [`UiChange::Clear`]
     /// then every panel, canvas and image, the labels, the lines, the
-    /// triangles, the icons, the ground shapes, and the windows plugins
+    /// triangles, the icons, the ground shapes, the drawings, and the windows plugins
     /// hold out of sight.
     #[must_use]
     pub fn snapshot(&self) -> Vec<UiChange> {
@@ -1621,6 +1771,7 @@ impl PluginUi {
         out.push(UiChange::Triangles(self.merged_triangles()));
         out.push(UiChange::Icons(self.merged_icons()));
         out.push(UiChange::Shapes(self.merged_shapes()));
+        out.push(UiChange::Drawings(self.merged_drawings()));
         out.push(UiChange::Hotkeys(Arc::new(self.hotkeys.bound())));
         out.extend(
             self.dialogs

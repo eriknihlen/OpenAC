@@ -356,6 +356,7 @@ pub(crate) fn handle_import(
         | Import::UiMarkersCreate
         | Import::UiMarkersSetIcons
         | Import::UiMarkersSetShapes
+        | Import::UiMarkersSetDrawings
         | Import::UiMarkersRemove
         | Import::UiProjectileDebug
         | Import::UiHotkeyRegister

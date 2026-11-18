@@ -8,9 +8,10 @@
 use crate::ui::{
     self as abi, ActionValue, BindingKind, CanvasChange, CanvasPaint, CanvasRegistration,
     CanvasResize, CanvasSet, CanvasState, ClientWindowRequest, ControlLabel, ControlRef,
-    ControlVisible, EncodedImage, HotkeyRebind, HotkeyRegistration, HotkeyState, IconSet,
-    ImageInfo, KeyChord, LineSet, MarkerAnchor, PanelRegistration, PanelValues, PointerEvent,
-    RgbaImage, ShapeSet, TextSize, TriangleSet, UiAction, UiValue, ViewShow,
+    ControlVisible, DrawingScale, DrawingSet, EncodedImage, HotkeyRebind, HotkeyRegistration,
+    HotkeyState, IconSet, ImageInfo, KeyChord, LineSet, MarkerAnchor, PanelRegistration,
+    PanelValues, PointerEvent, RgbaImage, ShapeSet, TextSize, TriangleSet, UiAction, UiValue,
+    ViewShow,
 };
 use crate::{ApiVersion, DecodeError, Event, Import, Wire};
 use ac_plugin_ui::{
@@ -761,6 +762,33 @@ pub fn handle(
                 })
                 .collect();
             state.set_shapes(id, r.layer, shapes).to_bytes()
+        }
+        Import::UiMarkersSetDrawings => {
+            let r = DrawingSet::from_bytes(request).map_err(bad)?;
+            let drawings = r
+                .drawings
+                .into_iter()
+                .map(|d| ui::WorldDrawing {
+                    anchor: anchor(d.anchor),
+                    height_offset: d.height_offset,
+                    size: (d.width, d.height),
+                    pivot: (d.pivot_x, d.pivot_y),
+                    paint: std::sync::Arc::new(d.commands.into_iter().map(paint).collect()),
+                    scale: match d.scale {
+                        DrawingScale::Fixed => ui::DrawingScale::Fixed,
+                        DrawingScale::WithDistance(near, far, smallest) => {
+                            ui::DrawingScale::WithDistance {
+                                near,
+                                far,
+                                smallest,
+                            }
+                        }
+                    },
+                    max_range: d.max_range,
+                    hidden_by_world: d.hidden_by_world,
+                })
+                .collect();
+            state.set_drawings(id, r.layer, drawings).to_bytes()
         }
         Import::UiMarkersRemove => {
             let layer = u32::from_bytes(request).map_err(bad)?;

@@ -1201,6 +1201,257 @@ fn the_shape_cap_counts_a_plugins_other_layers_apart_from_its_icons() {
     assert!(ui.merged_shapes().is_empty());
 }
 
+fn drawing(anchor: crate::model::MarkerAnchor) -> crate::model::WorldDrawing {
+    use crate::model::{Color8, PaintCmd, PaintRect};
+    crate::model::WorldDrawing {
+        anchor,
+        height_offset: 0.2,
+        size: (100.0, 20.0),
+        pivot: (50.0, 20.0),
+        paint: Arc::new(vec![
+            PaintCmd::FillRect {
+                rect: PaintRect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 100.0,
+                    h: 20.0,
+                },
+                color: Color8::new(0, 0, 0, 128),
+            },
+            PaintCmd::Text {
+                text: "Drudge Skulker".to_owned(),
+                at: (4.0, 2.0),
+                color: Color8::WHITE,
+                outline: true,
+                font: 1,
+            },
+        ]),
+        scale: crate::model::DrawingScale::Fixed,
+        max_range: 60.0,
+        hidden_by_world: false,
+    }
+}
+
+#[test]
+fn drawing_layers_merge_by_plugin_and_go_with_it() {
+    use crate::model::MarkerAnchor;
+    let mut ui = PluginUi::new();
+    let later = ui.create_marker_layer("z.plugin");
+    let first = ui.create_marker_layer("a.plugin");
+    assert!(ui.set_drawings("z.plugin", later, vec![drawing(MarkerAnchor::Object(3))]));
+    assert!(ui.set_drawings("a.plugin", first, vec![drawing(MarkerAnchor::Object(1))]));
+    // Not its layer.
+    assert!(!ui.set_drawings("z.plugin", first, vec![]));
+    let merged = ui.merged_drawings();
+    let order: Vec<_> = merged
+        .iter()
+        .map(|e| (&*e.owner, e.drawing.anchor))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ("a.plugin", MarkerAnchor::Object(1)),
+            ("z.plugin", MarkerAnchor::Object(3)),
+        ]
+    );
+    assert!(matches!(
+        ui.take_changes().last(),
+        Some(UiChange::Drawings(d)) if d.len() == 2
+    ));
+    assert!(
+        ui.snapshot()
+            .iter()
+            .any(|c| matches!(c, UiChange::Drawings(d) if d.len() == 2))
+    );
+    // Drawings and icons on one layer are set apart.
+    assert!(ui.set_icons("a.plugin", first, vec![icon(MarkerAnchor::Object(1))]));
+    assert_eq!(ui.merged_drawings().len(), 2);
+    ui.release("a.plugin");
+    assert_eq!(ui.merged_drawings().len(), 1);
+    assert!(ui.remove_marker_layer("z.plugin", later));
+    assert!(ui.merged_drawings().is_empty());
+}
+
+#[test]
+fn unusable_drawings_are_dropped_and_boxes_and_scales_are_clamped() {
+    use crate::model::{DrawingScale, MarkerAnchor, WorldDrawing};
+    let mut ui = PluginUi::new();
+    let layer = ui.create_marker_layer("edwards.tank");
+    let good = drawing(MarkerAnchor::Object(5));
+    let given = vec![
+        good.clone(),
+        drawing(MarkerAnchor::None),
+        drawing(MarkerAnchor::Object(0)),
+        WorldDrawing {
+            size: (f32::NAN, 20.0),
+            ..good.clone()
+        },
+        WorldDrawing {
+            pivot: (f32::INFINITY, 0.0),
+            ..good.clone()
+        },
+        WorldDrawing {
+            height_offset: f32::NAN,
+            ..good.clone()
+        },
+        WorldDrawing {
+            max_range: 0.0,
+            ..good.clone()
+        },
+        WorldDrawing {
+            scale: DrawingScale::WithDistance {
+                near: 30.0,
+                far: 30.0,
+                smallest: 0.5,
+            },
+            ..good.clone()
+        },
+        WorldDrawing {
+            scale: DrawingScale::WithDistance {
+                near: -1.0,
+                far: 30.0,
+                smallest: 0.5,
+            },
+            ..good.clone()
+        },
+        WorldDrawing {
+            size: (0.0, 2000.0),
+            scale: DrawingScale::WithDistance {
+                near: 10.0,
+                far: 40.0,
+                smallest: 0.0,
+            },
+            ..good.clone()
+        },
+    ];
+    assert!(ui.set_drawings("edwards.tank", layer, given));
+    let kept = ui.merged_drawings();
+    assert_eq!(kept.len(), 2);
+    assert_eq!(kept[0].drawing, good);
+    assert_eq!(
+        kept[1].drawing.size,
+        (MINIMUM_DRAWING_SIDE, MAXIMUM_DRAWING_SIDE)
+    );
+    assert_eq!(
+        kept[1].drawing.scale,
+        DrawingScale::WithDistance {
+            near: 10.0,
+            far: 40.0,
+            smallest: MINIMUM_DRAWING_SCALE,
+        }
+    );
+}
+
+/// A box brought into 1 to 512 points keeps its pivot at the same place on
+/// it: one standing on its anchor still stands on it.
+#[test]
+fn a_clamped_box_keeps_its_pivot_in_place() {
+    use crate::model::{MarkerAnchor, WorldDrawing};
+    let mut ui = PluginUi::new();
+    let layer = ui.create_marker_layer("edwards.tank");
+    let good = drawing(MarkerAnchor::Object(5));
+    let given = vec![
+        WorldDrawing {
+            size: (1000.0, 1000.0),
+            pivot: (500.0, 1000.0),
+            ..good.clone()
+        },
+        WorldDrawing {
+            size: (0.5, 0.25),
+            pivot: (0.25, 0.25),
+            ..good.clone()
+        },
+        WorldDrawing {
+            size: (-4.0, 20.0),
+            pivot: (9.0, 20.0),
+            ..good.clone()
+        },
+        good.clone(),
+    ];
+    assert!(ui.set_drawings("edwards.tank", layer, given));
+    let kept: Vec<_> = ui
+        .merged_drawings()
+        .iter()
+        .map(|e| (e.drawing.size, e.drawing.pivot))
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            ((512.0, 512.0), (256.0, 512.0)),
+            ((1.0, 1.0), (0.5, 1.0)),
+            ((1.0, 20.0), (1.0, 20.0)),
+            (good.size, good.pivot),
+        ]
+    );
+}
+
+/// A paint the window cannot draw refuses the whole set, as a canvas's
+/// paint is refused: the plugin hears of it, and the layer keeps what it
+/// had.
+#[test]
+fn a_drawing_with_too_many_commands_or_unbalanced_clips_refuses_the_set() {
+    use crate::model::{MarkerAnchor, PaintCmd, PaintRect, WorldDrawing};
+    let mut ui = PluginUi::new();
+    let layer = ui.create_marker_layer("edwards.tank");
+    let good = drawing(MarkerAnchor::Object(5));
+    assert!(ui.set_drawings("edwards.tank", layer, vec![good.clone()]));
+    drop(ui.take_changes());
+    let clip = PaintCmd::PushClip(PaintRect {
+        x: 0.0,
+        y: 0.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    let unbalanced = WorldDrawing {
+        paint: Arc::new(vec![clip.clone()]),
+        ..good.clone()
+    };
+    let popped = WorldDrawing {
+        paint: Arc::new(vec![PaintCmd::PopClip]),
+        ..good.clone()
+    };
+    let crowded = WorldDrawing {
+        paint: Arc::new(vec![PaintCmd::PopClip; MAXIMUM_DRAWING_COMMANDS + 1]),
+        ..good.clone()
+    };
+    for bad in [unbalanced, popped, crowded] {
+        assert!(!ui.set_drawings("edwards.tank", layer, vec![good.clone(), bad]));
+    }
+    assert!(ui.take_changes().is_empty());
+    assert_eq!(ui.merged_drawings().len(), 1);
+    let full = WorldDrawing {
+        paint: Arc::new(
+            std::iter::repeat_n([clip, PaintCmd::PopClip], MAXIMUM_DRAWING_COMMANDS / 2)
+                .flatten()
+                .collect(),
+        ),
+        ..good
+    };
+    assert!(ui.set_drawings("edwards.tank", layer, vec![full]));
+}
+
+#[test]
+fn the_drawing_cap_counts_a_plugins_other_layers_apart_from_its_icons() {
+    use crate::model::MarkerAnchor;
+    let mut ui = PluginUi::new();
+    let one = drawing(MarkerAnchor::Object(1));
+    let a = ui.create_marker_layer("edwards.tank");
+    let b = ui.create_marker_layer("edwards.tank");
+    let other = ui.create_marker_layer("another.plugin");
+    assert!(ui.set_icons(
+        "edwards.tank",
+        a,
+        vec![icon(MarkerAnchor::Object(1)); MAXIMUM_ICONS]
+    ));
+    assert!(ui.set_drawings("edwards.tank", a, vec![one.clone(); MAXIMUM_DRAWINGS - 1]));
+    assert!(ui.set_drawings("edwards.tank", b, vec![one.clone()]));
+    assert!(!ui.set_drawings("edwards.tank", b, vec![one.clone(); 2]));
+    assert_eq!(ui.merged_drawings().len(), MAXIMUM_DRAWINGS);
+    assert!(ui.set_drawings("another.plugin", other, vec![one.clone(); MAXIMUM_DRAWINGS]));
+    // Replacing a layer counts its new set, not its old one.
+    assert!(ui.set_drawings("edwards.tank", a, vec![one; MAXIMUM_DRAWINGS - 1]));
+}
+
 #[test]
 fn clearing_markers_empties_the_layers_and_they_stay_usable() {
     use crate::model::MarkerAnchor;
@@ -1212,7 +1463,8 @@ fn clearing_markers_empties_the_layers_and_they_stay_usable() {
     assert!(ui.merged_icons().is_empty());
     assert!(matches!(
         ui.take_changes().as_slice(),
-        [UiChange::Icons(i), UiChange::Shapes(s)] if i.is_empty() && s.is_empty()
+        [UiChange::Icons(i), UiChange::Shapes(s), UiChange::Drawings(d)]
+            if i.is_empty() && s.is_empty() && d.is_empty()
     ));
     ui.clear_object_markers();
     assert!(ui.take_changes().is_empty());
@@ -1248,6 +1500,11 @@ fn clearing_object_markers_keeps_markers_lines_and_triangles_at_positions() {
         ..on_object
     };
     assert!(ui.set_shapes("edwards.tank", layer, vec![on_object, at_position]));
+    assert!(ui.set_drawings(
+        "edwards.tank",
+        layer,
+        vec![drawing(MarkerAnchor::Object(5)), drawing(here)]
+    ));
     let lines = ui.create_line_layer("edwards.tank");
     let line = WorldLine {
         start: MapPoint::default(),
@@ -1272,11 +1529,15 @@ fn clearing_object_markers_keeps_markers_lines_and_triangles_at_positions() {
     let shapes = ui.merged_shapes();
     assert_eq!(shapes.len(), 1);
     assert_eq!(shapes[0].anchor, here);
+    let drawings = ui.merged_drawings();
+    assert_eq!(drawings.len(), 1);
+    assert_eq!(drawings[0].drawing.anchor, here);
     assert_eq!(ui.merged_lines().len(), 1);
     assert_eq!(ui.merged_triangles().len(), 1);
     assert!(matches!(
         ui.take_changes().as_slice(),
-        [UiChange::Icons(i), UiChange::Shapes(s)] if i.len() == 1 && s.len() == 1
+        [UiChange::Icons(i), UiChange::Shapes(s), UiChange::Drawings(d)]
+            if i.len() == 1 && s.len() == 1 && d.len() == 1
     ));
     // Nothing on an object is left, so a second clear changes nothing.
     ui.clear_object_markers();

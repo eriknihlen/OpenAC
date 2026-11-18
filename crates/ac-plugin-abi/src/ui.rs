@@ -1513,6 +1513,80 @@ wire_record! {
     }
 }
 
+wire_enum! {
+    /// How a world drawing's size follows its distance. API 1.14.
+    #[derive(Debug, Clone, PartialEq, Default)]
+    pub enum DrawingScale ("drawing scale") {
+        /// The same size on the screen at every distance, as labels and
+        /// icons are.
+        #[default]
+        Fixed = 0,
+        /// Full size at `near` metres or closer, shrinking evenly to
+        /// `smallest` (a fraction of full size, kept to 0.1..=1) at `far`
+        /// metres, and that size beyond. A drawing whose `near` is negative
+        /// or not below `far`, or whose numbers are not finite, is dropped.
+        WithDistance(near: f32, far: f32, smallest: f32) = 1,
+    }
+}
+
+wire_record! {
+    /// A picture the plugin paints, hung in the world over an object or at
+    /// a position: a name in the plugin's own font, a plate behind it, a
+    /// bar, an image, in any mix. It is drawn after the world, like a
+    /// label, so walls and hills do not hide it unless it asks with
+    /// `hidden_by_world`. API 1.14.
+    pub struct WorldDrawing {
+        /// Over an object, the drawing hangs from the top of it; at a
+        /// position, from the position itself.
+        pub anchor: MarkerAnchor,
+        /// Metres above the anchor the drawing hangs from.
+        pub height_offset: f32,
+        /// The drawing's width, interface points, brought into 1..=512 with
+        /// the pivot kept at the same place on the box. What the paint
+        /// draws outside its box is clipped.
+        pub width: f32,
+        /// Its height, the same way.
+        pub height: f32,
+        /// The point of the box that sits on the anchor, points from its
+        /// top-left: the middle of the bottom edge (`width / 2`, `height`)
+        /// stands the drawing on the anchor.
+        pub pivot_x: f32,
+        /// The same point, down from the top.
+        pub pivot_y: f32,
+        /// What it shows: a canvas's paint commands, in points from the
+        /// box's top-left, with this plugin's images and fonts. At most 256;
+        /// its clips must balance.
+        pub commands: Vec<PaintCmd>,
+        /// How its size follows its distance. Text in the interface font
+        /// (font 0) keeps its size when the drawing shrinks; text in the
+        /// plugin's own fonts shrinks with it.
+        pub scale: DrawingScale,
+        /// Shown up to this many metres away, fading over the last fifth;
+        /// a drawing whose range is not a positive finite number is
+        /// dropped.
+        pub max_range: f32,
+        /// The whole drawing goes while walls, doors, hills or anything else
+        /// in the world stands between the camera and the point it hangs
+        /// from (the top of an object, or the position, raised by
+        /// `height_offset`).
+        pub hidden_by_world: bool,
+    }
+}
+
+wire_record! {
+    /// A marker layer's drawings ([`crate::Import::UiMarkersSetDrawings`]);
+    /// reply `bool`: false, and the layer keeps what it had, when the plugin
+    /// has no such layer, this set and its other layers' drawings come to
+    /// more than 256, or a drawing's paint has more than 256 commands or
+    /// clips that do not balance. API 1.14.
+    pub struct DrawingSet {
+        /// The layer.
+        pub layer: u32,
+        /// Its drawings from now on.
+        pub drawings: Vec<WorldDrawing>,
+    }
+}
+
 wire_record! {
     /// A projectile marker (OpenAC `PluginProjectileDebugSample`).
     pub struct ProjectileSample {

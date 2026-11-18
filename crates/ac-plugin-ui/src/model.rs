@@ -674,6 +674,80 @@ pub struct WorldIconEntry {
     pub icon: WorldIcon,
 }
 
+/// How a world drawing's size follows its distance.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum DrawingScale {
+    /// The same size on the screen at every distance.
+    #[default]
+    Fixed,
+    /// Full size at `near` metres or closer, shrinking evenly to
+    /// `smallest` of it at `far` metres, and that size beyond.
+    WithDistance {
+        /// Where it starts shrinking, metres.
+        near: f32,
+        /// Where it stops, metres.
+        far: f32,
+        /// Its size from `far` on, a fraction of full size.
+        smallest: f32,
+    },
+}
+
+impl DrawingScale {
+    /// The fraction of full size it is drawn at `depth` metres from the
+    /// camera.
+    #[must_use]
+    pub fn at(self, depth: f32) -> f32 {
+        match self {
+            Self::Fixed => 1.0,
+            Self::WithDistance {
+                near,
+                far,
+                smallest,
+            } => {
+                let t = ((depth - near) / (far - near)).clamp(0.0, 1.0);
+                1.0 + (smallest - 1.0) * t
+            }
+        }
+    }
+}
+
+/// A picture a plugin paints, hung in the world over an object or at a
+/// position. It is drawn after the world, like a label, so walls and hills
+/// do not hide it unless it asks with `hidden_by_world`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldDrawing {
+    /// Over an object, it hangs from the top of it; at a position, from the
+    /// position.
+    pub anchor: MarkerAnchor,
+    /// Metres above the anchor it hangs from.
+    pub height_offset: f32,
+    /// Its box, interface points: what the paint draws outside it is
+    /// clipped.
+    pub size: (f32, f32),
+    /// The point of the box on the anchor, points from its top-left.
+    pub pivot: (f32, f32),
+    /// What it shows, in points from the box's top-left, with its plugin's
+    /// images and fonts.
+    pub paint: Arc<Vec<PaintCmd>>,
+    /// How its size follows its distance.
+    pub scale: DrawingScale,
+    /// Shown up to this many metres away, fading over the last fifth.
+    pub max_range: f32,
+    /// The whole drawing goes while anything in the world stands between
+    /// the camera and its anchor.
+    pub hidden_by_world: bool,
+}
+
+/// A drawing with the plugin it belongs to, whose images and fonts are the
+/// only ones its paint draws with.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldDrawingEntry {
+    /// The plugin.
+    pub owner: String,
+    /// The drawing, already checked, its numbers in range.
+    pub drawing: WorldDrawing,
+}
+
 /// What form a ground shape takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GroundShapeKind {
@@ -1000,6 +1074,8 @@ pub enum UiChange {
     Icons(Arc<Vec<WorldIconEntry>>),
     /// Every plugin's ground shapes, merged.
     Shapes(Arc<Vec<GroundShape>>),
+    /// Every plugin's world drawings, merged.
+    Drawings(Arc<Vec<WorldDrawingEntry>>),
     /// Projectile markers to show for a moment.
     ProjectileDebug(Arc<Vec<ProjectileSample>>),
     /// A plugin asks the window to show, hide or toggle a client window.

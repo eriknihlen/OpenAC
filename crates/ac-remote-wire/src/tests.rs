@@ -37,10 +37,11 @@ use ac_plugin_ui::markup::{
 };
 use ac_plugin_ui::{
     ActionValue, CanvasAnchor, CanvasDescriptor, CanvasPlace, CanvasView, ClientWindow,
-    ClientWindowAction, Color8, DialogView, GroundShape, GroundShapeKind, ImageSource, ImageView,
-    ItemRecord, MapPoint, MarkerAnchor, MarkupDocument, PaintCmd, PaintRect, PanelDescriptor,
-    PanelView, PluginIcon, PointerEvent, PointerKind, ProjectileSample, Rgba, ThemeKind, UiChange,
-    UiInput, UiOwner, UiValue, WorldIcon, WorldIconEntry, WorldLabel, WorldLine, WorldTriangle,
+    ClientWindowAction, Color8, DialogView, DrawingScale, GroundShape, GroundShapeKind,
+    ImageSource, ImageView, ItemRecord, MapPoint, MarkerAnchor, MarkupDocument, PaintCmd,
+    PaintRect, PanelDescriptor, PanelView, PluginIcon, PointerEvent, PointerKind, ProjectileSample,
+    Rgba, ThemeKind, UiChange, UiInput, UiOwner, UiValue, WorldDrawing, WorldDrawingEntry,
+    WorldIcon, WorldIconEntry, WorldLabel, WorldLine, WorldTriangle,
 };
 use ac_proto::allegiance::{AllegianceMember, AllegianceProfile};
 use ac_proto::appraise::{ArmorProfile, IdentifyObjectResponse};
@@ -1132,6 +1133,58 @@ fn plugin_ui_changes() -> Vec<UiChange> {
             },
         },
         UiChange::WindowsHeld(vec!["inventory".into(), "vitals".into()]),
+        UiChange::Drawings(Arc::new(vec![
+            WorldDrawingEntry {
+                owner: "example".into(),
+                drawing: WorldDrawing {
+                    anchor: MarkerAnchor::Object(0x8000_0002),
+                    height_offset: 0.25,
+                    size: (120.0, 24.0),
+                    pivot: (60.0, 24.0),
+                    paint: Arc::new(vec![
+                        PaintCmd::FillRect {
+                            rect: PaintRect {
+                                x: 0.0,
+                                y: 0.0,
+                                w: 120.0,
+                                h: 24.0,
+                            },
+                            color: Color8::new(0, 0, 0, 160),
+                        },
+                        PaintCmd::Text {
+                            text: "Drudge".into(),
+                            at: (4.0, 2.0),
+                            color: Color8::WHITE,
+                            outline: true,
+                            font: 3,
+                        },
+                    ]),
+                    scale: DrawingScale::WithDistance {
+                        near: 10.0,
+                        far: 60.0,
+                        smallest: 0.5,
+                    },
+                    max_range: 80.0,
+                    hidden_by_world: true,
+                },
+            },
+            WorldDrawingEntry {
+                owner: "other".into(),
+                drawing: WorldDrawing {
+                    anchor: MarkerAnchor::Position {
+                        point: map_point(6.0),
+                        is_outdoor: false,
+                    },
+                    height_offset: 0.0,
+                    size: (16.0, 16.0),
+                    pivot: (8.0, 8.0),
+                    paint: Arc::new(Vec::new()),
+                    scale: DrawingScale::Fixed,
+                    max_range: 40.0,
+                    hidden_by_world: false,
+                },
+            },
+        ])),
     ]
 }
 
@@ -2796,7 +2849,7 @@ fn the_subscription_filters_the_stateless_kinds() {
 /// a link must be built from the same layout).
 #[test]
 fn the_shape_is_pinned() {
-    assert_eq!(shape_hex(), "3f0d6f736e6d1818", "{:#x}", shape());
+    assert_eq!(shape_hex(), "cf48e832dcc7f203", "{:#x}", shape());
 }
 
 /// The size of a representative attach: a snapshot of a busy spot, a full
@@ -2904,6 +2957,7 @@ variants! {
         CanvasListening, CanvasReleasePointer, CanvasResized, ImageAdded, FileIcon,
         ImageRemoved, Labels, Lines, Triangles, Icons, Shapes, ProjectileDebug, ClientWindow,
         Hotkeys, FontAdded, FontRemoved, DialogAdded, DialogRemoved, Modal, WindowApply, WindowsHeld,
+        Drawings,
     }
     pregame_variant, PREGAME: PreGameEvent { Connection, Selection, Creation, Options, Refused }
     portal_variant, PORTAL: PortalSpaceEvent {

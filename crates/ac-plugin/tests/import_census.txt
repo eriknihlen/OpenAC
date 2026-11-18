@@ -57,6 +57,7 @@ ui_triangles_remove -
 ui_markers_create -
 ui_markers_set_icons -
 ui_markers_set_shapes -
+ui_markers_set_drawings -
 ui_markers_remove -
 ui_projectile_debug -
 ui_hotkey_register - window

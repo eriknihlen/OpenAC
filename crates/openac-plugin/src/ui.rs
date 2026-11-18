@@ -63,16 +63,16 @@ use std::collections::BTreeMap;
 
 pub use ac_plugin_abi::ui::theme_metrics;
 pub use ac_plugin_abi::ui::{
-    ActionValue, BindingDecl, BindingKind, CanvasState, CodepointRange, Color, FONT_MAXIMUM_BYTES,
-    FONT_MAXIMUM_COUNT, FONT_MAXIMUM_FILE_BYTES, FONT_MAXIMUM_GLYPHS, FONT_MAXIMUM_PIXEL_SIZE,
-    FONT_MINIMUM_PIXEL_SIZE, FontWeight, GroundShape, GroundShapeKind, ItemRows, MapPoint,
-    MarkerAnchor, PaintCmd, PointerEvent, ProjectileSample, Rect, RowAction, RowStep,
-    TypedBindingDecl, TypedBindingKind, TypedValue, UiAction, UiEvent, UiValue, WorldIcon,
-    WorldLabel, WorldLine, WorldTriangle,
+    ActionValue, BindingDecl, BindingKind, CanvasState, CodepointRange, Color, DrawingScale,
+    FONT_MAXIMUM_BYTES, FONT_MAXIMUM_COUNT, FONT_MAXIMUM_FILE_BYTES, FONT_MAXIMUM_GLYPHS,
+    FONT_MAXIMUM_PIXEL_SIZE, FONT_MINIMUM_PIXEL_SIZE, FontWeight, GroundShape, GroundShapeKind,
+    ItemRows, MapPoint, MarkerAnchor, PaintCmd, PointerEvent, ProjectileSample, Rect, RowAction,
+    RowStep, TypedBindingDecl, TypedBindingKind, TypedValue, UiAction, UiEvent, UiValue,
+    WorldDrawing, WorldIcon, WorldLabel, WorldLine, WorldTriangle,
 };
 use ac_plugin_abi::ui::{
     BundledFontRequest, CanvasChange, CanvasPaint, CanvasRegistration, ClientWindowRequest,
-    ControlLabel, ControlRef, ControlVisible, DialogRequest, EncodedImage, FontInfo,
+    ControlLabel, ControlRef, ControlVisible, DialogRequest, DrawingSet, EncodedImage, FontInfo,
     FontLoadRequest, FontMeasure, IconSet, ImageInfo, ItemRow, ItemTypeDecl, ItemValue, LineSet,
     ModalShow, NamedItemValue, NamedTypedValue, NamedValue, PanelRegistration, PanelValues,
     RgbaImage, ShapeSet, TextSize, TriangleSet, TypedPanelRegistration, TypedPanelValues, ViewShow,
@@ -598,6 +598,23 @@ fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
 }
 
 impl Painter {
+    /// An empty paint for a box of `width` by `height`: a world drawing's
+    /// ([`world_drawing`]), or any list of commands built ahead of time.
+    #[must_use]
+    pub fn new(width: i32, height: i32) -> Self {
+        Self {
+            commands: Vec::new(),
+            width,
+            height,
+        }
+    }
+
+    /// The commands, taken.
+    #[must_use]
+    pub fn into_commands(self) -> Vec<PaintCmd> {
+        self.commands
+    }
+
     /// The canvas's width.
     #[must_use]
     pub fn width(&self) -> i32 {
@@ -758,11 +775,7 @@ impl Canvas {
         } else {
             (self.width, self.height)
         };
-        let mut painter = Painter {
-            commands: Vec::new(),
-            width,
-            height,
-        };
+        let mut painter = Painter::new(width, height);
         paint(&mut painter);
         let request = CanvasPaint {
             canvas: self.id,
@@ -1038,6 +1051,23 @@ impl MarkerLayer {
         decode(Import::UiMarkersSetShapes, &reply)
     }
 
+    /// Replaces the layer's drawings (API 1.14). False, and the layer keeps
+    /// what it had, when this set and the plugin's other layers' drawings
+    /// come to more than 256, or a drawing's paint has more than 256
+    /// commands or clips that do not balance. Drawings pinned to nothing,
+    /// or with a box, pivot, height, scale or range that is not usable, are
+    /// dropped from the set; a box outside 1 to 512 points is brought into
+    /// it, its pivot kept at the same place on it.
+    pub fn set_drawings(self, host: &mut Host<'_>, drawings: &[WorldDrawing]) -> bool {
+        let set = DrawingSet {
+            layer: self.id,
+            drawings: drawings.to_vec(),
+        }
+        .to_bytes();
+        let reply = ui_call!(host, UiMarkersSetDrawings, ui_markers_set_drawings, &set);
+        decode(Import::UiMarkersSetDrawings, &reply)
+    }
+
     /// Removes the layer and its markers.
     pub fn remove(self, host: &mut Host<'_>) -> bool {
         let request = self.id.to_bytes();
@@ -1057,6 +1087,36 @@ pub fn world_icon(anchor: MarkerAnchor, image: Image) -> WorldIcon {
         size: 24.0,
         tint_rgba: 0xFFFF_FFFF,
         border_rgba: None,
+        max_range: 60.0,
+        hidden_by_world: false,
+    }
+}
+
+/// A drawing of `width` by `height` points at `anchor`, painted by `paint`
+/// in points from its top-left: standing on the anchor (the middle of its
+/// bottom edge on it), the same size at every distance, shown up to 60 m
+/// away and over the world. Set [`WorldDrawing::height_offset`] to raise
+/// it, [`WorldDrawing::scale`] for one that shrinks with distance, and
+/// [`WorldDrawing::hidden_by_world`] for one that hides behind the world.
+#[must_use]
+pub fn world_drawing(
+    anchor: MarkerAnchor,
+    width: f32,
+    height: f32,
+    paint: impl FnOnce(&mut Painter),
+) -> WorldDrawing {
+    #[allow(clippy::cast_possible_truncation)]
+    let mut painter = Painter::new(width.ceil() as i32, height.ceil() as i32);
+    paint(&mut painter);
+    WorldDrawing {
+        anchor,
+        height_offset: 0.0,
+        width,
+        height,
+        pivot_x: width * 0.5,
+        pivot_y: height,
+        commands: painter.commands,
+        scale: DrawingScale::Fixed,
         max_range: 60.0,
         hidden_by_world: false,
     }

@@ -180,7 +180,9 @@ API 1.14 added the screen and the registered windows: `Host::screen_size`,
 `Host::hold_windows`, and the events `Event::ScreenSizeChanged` and
 `Event::UiWindowsChanged`, which a plugin built for an older version never
 gets ([Window layouts](#window-layouts), [Holding windows out of
-sight](#holding-windows-out-of-sight)).
+sight](#holding-windows-out-of-sight)). It also added drawings to the marker
+layers: `MarkerLayer::set_drawings`, pictures a plugin paints itself and hangs
+over objects or at positions (see *Drawings* under World drawing).
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -418,8 +420,8 @@ permission.
 **World drawing.** A plugin can put labels over objects
 (`Host::show_labels`), lines (`Host::create_line_layer`) and filled triangles
 (`Host::create_triangle_layer`, API 1.3) in the world, at `MapPoint`
-positions, and icons and ground shapes (`Host::create_marker_layer`, API 1.3)
-over objects or at positions. Lines, triangles and markers live in layers the
+positions, and icons, ground shapes (`Host::create_marker_layer`, API 1.3)
+and drawings (API 1.14) over objects or at positions. Lines, triangles and markers live in layers the
 plugin owns: setting a layer replaces its contents, and removing it, or
 unloading the plugin, takes them down. Labels, and markers over objects, also
 go when the character leaves the world, since the objects they sat on go with
@@ -441,8 +443,9 @@ every frame.
 *Markers* are pinned by a `MarkerAnchor`: an object by its id, which they
 follow, or a `MapPoint` and whether it is on the landscape. A marker over an
 object the client does not hold is not drawn, and comes back when it does.
-A plugin holds at most 256 icons and 256 shapes across its layers; a set that
-goes over is refused, and the layer keeps what it had. Markers pinned to
+A plugin holds at most 256 icons, 256 shapes and 256 drawings across its
+layers, each counted apart; a set that goes over is refused, and the layer
+keeps what it had. Markers pinned to
 nothing, or with values that are not usable, are dropped from the set.
 
 *Icons* (`MarkerLayer::set_icons`, `ui::world_icon`) hang one of the plugin's
@@ -456,6 +459,46 @@ after the view changes. An object's icons sit in rows of eight above its head
 and its labels, in the order given; an icon at a position is centred on it.
 Each fades over the last fifth of its range. The portal view hides icons and
 labels alike.
+
+*Drawings* (`MarkerLayer::set_drawings`, `ui::world_drawing`, API 1.14) hang
+a picture the plugin paints itself in the world, in place of the client's
+label: a name in the plugin's own font, a plate behind it, a bar, its own
+images, in any mix. A drawing is a box of 1 to 512 interface points each way
+(a bigger or smaller one is brought into that, its pivot kept at the same
+place on it), painted with the same commands as a canvas (`Painter`: rectangles, lines,
+text in the interface font or one of the plugin's fonts, the plugin's images,
+clips), in points from the box's top-left; what falls outside the box is cut
+off. Its pivot is the point of the box that sits on the anchor: the top of an
+object (as labels hang from it), or the position, raised by `height_offset`
+metres. `ui::world_drawing` stands the box on the anchor (the middle of its
+bottom edge) and shows it up to 60 m away.
+
+```rust
+let font = host.font_bundled(16.0, FontWeight::SemiBold);
+let mut plate = ui::world_drawing(MarkerAnchor::Object(id), 140.0, 22.0, |p| {
+    p.fill_rect(0.0, 0.0, 140.0, 22.0, ui::rgba(0, 0, 0, 150));
+    p.text_in(font, "Drudge Skulker", (6.0, 2.0), ui::rgba(255, 220, 120, 255), true);
+});
+plate.height_offset = 0.2;
+plate.scale = DrawingScale::WithDistance(10.0, 50.0, 0.5);
+layer.set_drawings(host, &[plate]);
+```
+
+`DrawingScale::Fixed` keeps a drawing the same size on the screen at every
+distance, as labels and icons are. `DrawingScale::WithDistance(near, far,
+smallest)` draws it full size up to `near` metres and shrinks it evenly to
+`smallest` of that (0.1 to 1) at `far` and beyond, about its pivot. Text in
+the plugin's own fonts shrinks with the drawing; text in the interface font
+(font 0) keeps its size, so use a plugin font for text in a drawing that
+shrinks. A drawing holds at most 256 commands, and its clips must balance: a
+set with one that does not is refused whole, and the layer keeps what it had.
+Drawings are drawn after the world, under the icons and the labels' text, so
+walls and hills do not hide them unless `hidden_by_world` is set, as for icons;
+then the point tested is the one the drawing hangs from, raised by
+`height_offset`.
+Each fades over the last fifth of its range, the nearer drawn over the farther,
+and the portal view hides them. A drawing only changes when the plugin sets
+its layer again, so send a new set when what it shows changes, not every frame.
 
 *Ground shapes* (`MarkerLayer::set_shapes`, `ui::ground_ring`,
 `ui::ground_disc`, `ui::ground_arc`) lie on the ground around their anchor,
