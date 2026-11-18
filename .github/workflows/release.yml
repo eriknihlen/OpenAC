@@ -72,7 +72,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: version
         name: Read and compare the version
@@ -101,7 +101,7 @@ jobs:
     outputs:
       fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the pinned Rust toolchain
         shell: bash
@@ -217,7 +217,7 @@ jobs:
       # Read by the launcher's build, not when it runs.
       OPENAC_LAUNCHER_FINGERPRINT: ${{ needs.fingerprint.outputs.fingerprint }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -343,7 +343,7 @@ jobs:
           package "openac-$rid" openac openac-launcher
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.rid }}
           path: dist/*.zip
@@ -375,7 +375,7 @@ jobs:
       # Read by the launcher's build, not when it runs.
       OPENAC_LAUNCHER_FINGERPRINT: ${{ needs.fingerprint.outputs.fingerprint }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the pinned Rust toolchain
         shell: bash
@@ -476,7 +476,7 @@ jobs:
             echo "::warning::The $rid programs were not run: this image cannot run them."
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.rid }}
           path: dist/*.zip
@@ -489,7 +489,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist

@@ -36,7 +36,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The C compiler (wasmtime's two C files, openssl-sys's header step) is
       # already on the image; OpenSSL and ALSA headers and pkg-config are not.
