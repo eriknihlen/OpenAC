@@ -189,6 +189,49 @@ fn a_held_window_is_not_drawn_and_takes_no_input_but_stays_shown() {
     assert!(!host.root.hold_window("nowhere", true));
 }
 
+// The default text input goes only to a window in sight: not to one the
+// game shows underneath a hold (Enter would put the keyboard in a field
+// nobody sees), and not to one the game hid while it was held.
+#[test]
+fn a_window_out_of_sight_never_takes_the_default_text_input() {
+    use ac_ui::{Key, Modifiers};
+    let mut host = UiHost::new();
+    host.root.set_size(800.0, 600.0);
+    let r = host.root.root();
+    let frame = host
+        .root
+        .add(r, at(0.0, 0.0, 300.0, 150.0), Panel::default());
+    let input = host
+        .root
+        .add(frame, CharField::element(200.0, 20.0), CharField::default());
+    host.root.default_text_input = Some(input);
+    host.root.register_window("chat", frame, None, 0).unwrap();
+
+    // Held, then hidden and shown underneath the hold.
+    assert!(host.root.hold_window("chat", true));
+    assert!(host.root.hide_window("chat"));
+    assert!(host.root.show_window("chat"));
+    host.pump();
+    assert_eq!(host.root.default_text_input, None, "shown while held");
+    host.root.on_key_down(Key::Enter, Modifiers::default());
+    assert_eq!(host.root.keyboard_focus(), None);
+    // Let go while shown: it takes it back.
+    assert!(host.root.hold_window("chat", false));
+    assert_eq!(host.root.default_text_input, Some(input));
+
+    // Held, hidden underneath, and let go while hidden.
+    assert!(host.root.hold_window("chat", true));
+    assert!(host.root.hide_window("chat"));
+    assert!(host.root.hold_window("chat", false));
+    host.pump();
+    assert_eq!(host.root.default_text_input, None, "let go while hidden");
+    host.root.on_key_down(Key::Enter, Modifiers::default());
+    assert_eq!(host.root.keyboard_focus(), None);
+    // Shown again: it takes it back.
+    assert!(host.root.show_window("chat"));
+    assert_eq!(host.root.default_text_input, Some(input));
+}
+
 #[test]
 fn geometry_close_and_lock_lifecycle() {
     let mut ui = root(800.0, 600.0);

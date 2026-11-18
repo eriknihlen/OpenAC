@@ -1033,9 +1033,11 @@ pub enum UiChange {
         /// The window it blocks.
         owner: Option<u32>,
     },
-    /// A plugin asks for a registered window to be placed: `layout` whole
-    /// (the parts not asked for are where the window was), applied as the
-    /// saved layouts are, and saved as the player's own change.
+    /// A plugin asks for a registered window to be placed: the `parts` of
+    /// `layout`, applied as the saved layouts are, and saved as the
+    /// player's own change. The window keeps the other parts as it has
+    /// them now (what `layout` carries for them is where the session last
+    /// heard the window was).
     WindowApply {
         /// The window's registered name.
         name: String,

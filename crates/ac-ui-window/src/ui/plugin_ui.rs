@@ -1323,16 +1323,6 @@ impl WindowUi {
             .panels
             .panel_of(name)
             .filter(|_| !layouts.is_state_managed(name));
-        let wanted = ac_host::settings::UiWindowLayout {
-            x: layout.x,
-            y: layout.y,
-            width: layout.width,
-            height: layout.height,
-            visible: layout.visible,
-            collapsed: layout.collapsed,
-            maximized: layout.maximized,
-            authored_geometry_revision: 0,
-        };
         if let Some(panel) = panel
             && parts.shown
             && layout.visible
@@ -1340,6 +1330,35 @@ impl WindowUi {
             self.panels.set_visibility(&mut self.host.root, panel, true);
             self.host.pump();
         }
+        // Only the parts asked for come from the plugin. The rest is where
+        // the window is now, not where the session last heard it was: the
+        // player may have moved or sized it since that report.
+        let asked = match ac_ui::layout_persistence::capture(&self.host, name) {
+            Some(now) => ac_plugin_ui::windows::merged(
+                &WindowLayout {
+                    x: now.x,
+                    y: now.y,
+                    width: now.width,
+                    height: now.height,
+                    visible: now.visible,
+                    collapsed: now.collapsed,
+                    maximized: now.maximized,
+                },
+                layout,
+                parts,
+            ),
+            None => *layout,
+        };
+        let wanted = ac_host::settings::UiWindowLayout {
+            x: asked.x,
+            y: asked.y,
+            width: asked.width,
+            height: asked.height,
+            visible: asked.visible,
+            collapsed: asked.collapsed,
+            maximized: asked.maximized,
+            authored_geometry_revision: 0,
+        };
         let show = parts.shown && panel.is_none();
         if layouts
             .apply_as_player(&mut self.host, name, &wanted, show)

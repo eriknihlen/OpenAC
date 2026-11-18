@@ -466,13 +466,16 @@ impl UiRoot {
 
     /// Registered window frame `element` is back in sight: it takes back
     /// the default text input it had when it was hidden or held, unless
-    /// another window has one.
+    /// another window has one. A window still out of sight (shown
+    /// underneath a hold, or let go while hidden) waits until it is in
+    /// sight: the keyboard never goes to a field nobody sees.
     pub(crate) fn windows_restore_default_input(&mut self, element: ElementId) {
         let Some(i) = self.window_index_of_frame(element) else {
             return;
         };
         let frame = self.windows.windows[i].frame;
-        if self.default_text_input.is_none()
+        if self.element(frame).is_some_and(|e| e.drawn())
+            && self.default_text_input.is_none()
             && let Some(&input) = self
                 .windows
                 .default_inputs

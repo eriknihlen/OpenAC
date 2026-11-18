@@ -1524,3 +1524,49 @@ fn a_plugin_holds_windows_out_of_sight_without_saving_anything() {
     assert!(!ui.host().root.is_window_held(VITALS_WINDOW));
     let _ = std::fs::remove_file(&settings);
 }
+
+/// A placing changes only the parts asked for. The rest stays where the
+/// window is now, whatever the request carries for it: the session fills
+/// those in from the window's last report, and the player may have moved
+/// the window since.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_placing_leaves_the_parts_not_asked_for_where_the_window_is() {
+    use ac_plugin_ui::{UiChange, WindowParts};
+    use ac_render::ui::window::RADAR_WINDOW;
+    let settings =
+        std::env::temp_dir().join(format!("openac-plugin-partial-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&settings);
+    let size = (1280, 720);
+    let (state, mut ui, mut scene) = in_world_with_layouts(&settings, size);
+    let reported = state
+        .registered_windows()
+        .iter()
+        .find(|w| w.name == RADAR_WINDOW)
+        .unwrap()
+        .layout;
+    // The player moves the radar after that report.
+    let moved = (reported.x - 200.0, reported.y + 150.0);
+    assert!(
+        ui.host_mut()
+            .root
+            .move_window(RADAR_WINDOW, moved.0, moved.1)
+    );
+    // A placing of its shown state alone, carrying the reported place.
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        vec![UiChange::WindowApply {
+            name: RADAR_WINDOW.to_owned(),
+            layout: reported,
+            parts: WindowParts {
+                shown: true,
+                ..WindowParts::default()
+            },
+        }],
+    )));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+    let now = ac_ui::layout_persistence::capture(ui.host(), RADAR_WINDOW).unwrap();
+    assert_eq!((now.x, now.y), moved, "the radar stays where it was moved");
+    assert_eq!((now.width, now.height), (reported.width, reported.height));
+    let _ = std::fs::remove_file(&settings);
+}
