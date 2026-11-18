@@ -62,6 +62,13 @@ jobs:
           # target/plugin-fixtures, inside the cached target directory.
           cache-on-failure: true
 
+      # The launcher fingerprint tests read `cargo metadata --offline`, which
+      # needs every platform's crates. The cache keeps only those this
+      # runner's build used, so a changed lock file leaves the others out.
+      - name: Fetch every crate the lock file names
+        shell: bash
+        run: cargo fetch --locked
+
       - name: Check (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

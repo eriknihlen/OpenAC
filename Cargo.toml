@@ -99,7 +99,7 @@ miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-a
 # The plugin releases Atom feed; pure Rust, refuses DTDs by default.
 roxmltree = { version = "0.21.1", default-features = false, features = ["std"] }
 # SIGINT to a supervised child on Unix (already in the graph through ctrlc).
-nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
+nix = { version = "0.32.0", default-features = false, features = ["signal", "process"] }
 # Console control events to a supervised child on Windows (already in the graph); bindings
 # only, linked through windows-link.
 windows-sys = { version = "0.61.2", default-features = false }
@@ -116,13 +116,13 @@ native-tls = { version = "0.2.18", default-features = false }
 # on macOS. `image-data` stays off (it pulls the `image` crate).
 arboard = { version = "3.6.1", default-features = false }
 # The launcher window (openac-launcher): egui drawn with wgpu in a winit window, the simplest
-# fit for the stack ac-render already uses. 0.36.2 is the release built on wgpu 30 and winit 0.30.13,
+# fit for the stack ac-render already uses. 0.37.0 is a release built on wgpu 30 and winit 0.30.13,
 # the versions ac-render uses. Pure Rust. Default features stay off: no accessibility bridge, no
 # web-browser opener, and no egui-winit clipboard (its arboard asks for `image-data`, which pulls
 # the `image` crate); the launcher wires text copy and paste to the workspace's arboard itself.
-egui = { version = "0.36.2", default-features = false, features = ["default_fonts"] }
-egui-wgpu = { version = "0.36.2", default-features = false }
-egui-winit = { version = "0.36.2", default-features = false, features = ["x11", "wayland"] }
+egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
+egui-wgpu = { version = "0.37.0", default-features = false }
+egui-winit = { version = "0.37.0", default-features = false, features = ["x11", "wayland"] }
 # JSON for typed plugin service requests and replies (openac-plugin's `json` feature, off by
 # default, so a plugin that does not use it builds neither). Pure Rust; their build scripts only
 # read the compiler's version. serde is already in the graph through wasmtime.
@@ -135,7 +135,7 @@ serde_json = { version = "1.0.154", default-features = false, features = ["std"]
 # the plugin is parked). `parallel-compilation` compiles a module on all cores (rayon);
 # `reexport-wasmparser` reads the plugin's custom sections. No `cache` (zstd), `profiling`
 # (ittapi), `debug-builtins`, component model, GC or `wat`. wasmtime 49 and up need Rust 1.96.
-wasmtime = { version = "=48.0.7", default-features = false, features = ["runtime", "cranelift", "std", "async", "parallel-compilation", "reexport-wasmparser"] }
+wasmtime = { version = "=48.0.9", default-features = false, features = ["runtime", "cranelift", "std", "async", "parallel-compilation", "reexport-wasmparser"] }
 # Regular expressions with look-around and back-references for the plugin compatibility kit
 # (openac-plugin-compat), which translates .NET patterns to its syntax. Pure Rust (regex-automata,
 # regex-syntax, bit-set, and memchr/aho-corasick through `perf`), no build scripts, builds for
@@ -189,7 +189,7 @@ opt-level = 2
 # moved its closure out of the box but freed the box only at its end, which a
 # fiber start function never reaches. Every call into a plugin runs on a new
 # fiber, so each call leaked 24 to 40 bytes: about 40 MB an hour for a bot with
-# two plugins. The copy is 48.0.7 with that one change in `src/windows.rs`
+# two plugins. The copy is 48.0.9 with that one change in `src/windows.rs`
 # (the box is freed as the closure is moved out); drop the patch once a
 # wasmtime release carries the fix. `plugin_call_heap` in ac-plugin guards it.
 [patch.crates-io]

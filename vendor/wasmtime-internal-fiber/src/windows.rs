@@ -1,4 +1,4 @@
-// Modified from wasmtime-internal-fiber 48.0.7: `fiber_start` frees the box of
+// Modified from wasmtime-internal-fiber 48.0.9: `fiber_start` frees the box of
 // the fiber's closure as it moves the closure out (it never returns, so a box
 // kept to its end leaked on every fiber).
 
