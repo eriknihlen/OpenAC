@@ -24,8 +24,8 @@ use super::Recall;
 use super::SessionCommand;
 use super::portal_failure::{PortalWait, PortalWorldState};
 use super::position_trail::{
-    Acceptance, PlayerNotFound, PositionTrail, SelfCastWatch, TrailEvent, TrailMessage,
-    TrailPosition, TrailStamps,
+    Acceptance, AnswerWatch, NotFoundCause, PlayerNotFound, PositionTrail, SelfCastWatch,
+    TrailEvent, TrailMessage, TrailPosition, TrailStamps,
 };
 use super::runner::{HostEvent, ObjectSummary};
 use crate::character::{CharacterOptions, OPTIONS, option_id};
@@ -181,6 +181,8 @@ pub struct SessionState {
     position_trail: PositionTrail,
     /// When a refused self cast reports the trail.
     self_cast_watch: SelfCastWatch,
+    /// When positions the server does not answer report the trail.
+    answer_watch: AnswerWatch,
 }
 
 impl SessionState {
@@ -227,6 +229,7 @@ impl SessionState {
             session_now: Duration::ZERO,
             position_trail: PositionTrail::default(),
             self_cast_watch: SelfCastWatch::default(),
+            answer_watch: AnswerWatch::default(),
         }
     }
 
@@ -413,9 +416,11 @@ impl SessionState {
             self.host_events
                 .push(HostEvent::PlayerNotFound(Box::new(PlayerNotFound {
                     at: self.session_now,
-                    spell_id: completion.spell_id,
-                    target: completion.target_id,
-                    weenie_error: completion.weenie_error,
+                    cause: NotFoundCause::SelfCastRefused {
+                        spell_id: completion.spell_id,
+                        target: completion.target_id,
+                        weenie_error: completion.weenie_error,
+                    },
                     trail: self.position_trail.snapshot(self.session_now),
                 })));
         }
@@ -440,6 +445,7 @@ impl SessionState {
         };
         let (message, position, stamps) = match message {
             Inbound::PlayerTeleport(teleport) => {
+                self.answer_watch.answered();
                 self.position_trail.push(
                     self.session_now,
                     TrailEvent::TeleportStarted {
@@ -485,6 +491,9 @@ impl SessionState {
             }
             _ => return,
         };
+        // Whatever the world makes of it, the server still places the
+        // player.
+        self.answer_watch.answered();
         let after = self.player_stamps();
         let acceptance = match (before, after) {
             (_, None) => Acceptance::NoObject,
@@ -521,7 +530,11 @@ impl SessionState {
     /// trail, stamped with the time of the call being handled.
     fn follow_sent_positions(&mut self) {
         let at = self.session_now;
+        let mut unanswered_since = None;
         for record in self.movement.drain_sent_positions() {
+            if let Some(since) = self.answer_watch.sent(at) {
+                unanswered_since = Some(since);
+            }
             let message = match record.kind {
                 crate::movement::OutboundKind::MoveToState => TrailMessage::MoveToState,
                 crate::movement::OutboundKind::AutonomousPosition => {
@@ -546,6 +559,14 @@ impl SessionState {
                     contact: record.contact,
                 },
             );
+        }
+        if let Some(since) = unanswered_since {
+            self.host_events
+                .push(HostEvent::PlayerNotFound(Box::new(PlayerNotFound {
+                    at,
+                    cause: NotFoundCause::PositionsUnanswered { since },
+                    trail: self.position_trail.snapshot(at),
+                })));
         }
     }
 
@@ -707,6 +728,8 @@ impl SessionState {
                 teleport_sequence,
                 destination_cell,
             });
+            // The server takes positions again from the arrival on.
+            self.answer_watch.answered();
             self.position_trail.push(
                 self.session_now,
                 TrailEvent::TeleportArrived {
@@ -1049,6 +1072,7 @@ impl SessionState {
         self.position_trail
             .push(self.session_now, TrailEvent::GenerationEnded);
         self.self_cast_watch.rearm();
+        self.answer_watch.answered();
     }
 
     /// The inventory's auto-wield follows the combat owner: a stance the
@@ -5795,8 +5819,15 @@ mod player_not_found_tests {
         let lost = cast_answered(&mut state, &mut outbox, TARGET_NOT_ACQUIRED, 23)
             .expect("the first refusal reports");
         assert_eq!(
-            (lost.at, lost.spell_id, lost.target, lost.weenie_error),
-            (Duration::from_secs(23), 2, PLAYER, TARGET_NOT_ACQUIRED)
+            (lost.at, lost.cause),
+            (
+                Duration::from_secs(23),
+                NotFoundCause::SelfCastRefused {
+                    spell_id: 2,
+                    target: PLAYER,
+                    weenie_error: TARGET_NOT_ACQUIRED
+                }
+            )
         );
         let received: Vec<_> = lost
             .trail
@@ -5869,6 +5900,130 @@ mod player_not_found_tests {
                 .iter()
                 .any(|entry| entry.event == TrailEvent::GenerationEnded),
             "the trail marks where the generation ended"
+        );
+    }
+
+    /// Positions sent once a second from `from` to `to` seconds (both
+    /// included): the position reports they brought.
+    fn sending(state: &mut SessionState, from: u64, to: u64) -> Vec<PlayerNotFound> {
+        let mut reports = Vec::new();
+        for at in from..=to {
+            state.session_now = Duration::from_secs(at);
+            state
+                .movement
+                .note_sent_position_for_tests(position(CELL, at as f32));
+            state.forward();
+            reports.extend(
+                state
+                    .drain_host_events()
+                    .into_iter()
+                    .filter_map(|event| match event {
+                        HostEvent::PlayerNotFound(lost) => Some(*lost),
+                        _ => None,
+                    }),
+            );
+        }
+        reports
+    }
+
+    fn unanswered_since(lost: &PlayerNotFound) -> Option<u64> {
+        match lost.cause {
+            NotFoundCause::PositionsUnanswered { since } => Some(since.as_secs()),
+            NotFoundCause::SelfCastRefused { .. } => None,
+        }
+    }
+
+    #[test]
+    fn positions_the_server_does_not_answer_for_thirty_seconds_report_the_trail() {
+        let (mut state, _outbox) = caster();
+        assert!(sending(&mut state, 20, 49).is_empty());
+        let lost = sending(&mut state, 50, 50);
+        assert_eq!(lost.len(), 1, "the first position 30 s on reports");
+        assert_eq!(
+            (lost[0].at, lost[0].cause),
+            (
+                Duration::from_secs(50),
+                NotFoundCause::PositionsUnanswered {
+                    since: Duration::from_secs(20)
+                }
+            )
+        );
+        let sent: Vec<_> = lost[0]
+            .trail
+            .iter()
+            .filter(|entry| matches!(entry.event, TrailEvent::Sent { .. }))
+            .map(|entry| entry.at.as_secs())
+            .collect();
+        assert_eq!(
+            sent,
+            (20..=50).collect::<Vec<_>>(),
+            "the trail holds the unanswered positions"
+        );
+        assert!(sending(&mut state, 51, 120).is_empty(), "once per episode");
+    }
+
+    #[test]
+    fn a_position_from_the_server_starts_the_wait_over() {
+        let (mut state, mut outbox) = caster();
+        assert!(sending(&mut state, 20, 40).is_empty());
+        state.apply(&moved(2, 3.0), &mut outbox, true, clocks(40));
+        assert!(
+            sending(&mut state, 41, 70).is_empty(),
+            "the wait starts over at the first position after the answer"
+        );
+        let lost = sending(&mut state, 71, 71);
+        assert_eq!(
+            lost.iter().map(unanswered_since).collect::<Vec<_>>(),
+            [Some(41)]
+        );
+    }
+
+    #[test]
+    fn another_objects_position_does_not_answer_the_players() {
+        let (mut state, mut outbox) = caster();
+        assert!(sending(&mut state, 20, 40).is_empty());
+        let other = Inbound::UpdatePosition(ac_proto::UpdatePosition {
+            guid: 0x8000_0123,
+            flags: 0,
+            position: position(CELL, 5.0),
+            velocity: None,
+            placement_id: None,
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 0,
+            force_position_sequence: 0,
+        });
+        state.apply(&other, &mut outbox, true, clocks(40));
+        let lost = sending(&mut state, 41, 50);
+        assert_eq!(
+            lost.iter().map(unanswered_since).collect::<Vec<_>>(),
+            [Some(20)]
+        );
+    }
+
+    #[test]
+    fn a_teleport_or_a_new_generation_starts_the_wait_over() {
+        let (mut state, mut outbox) = caster();
+        assert!(sending(&mut state, 20, 40).is_empty());
+        let teleport = Inbound::PlayerTeleport(ac_proto::PlayerTeleport {
+            teleport_sequence: 1,
+        });
+        state.apply(&teleport, &mut outbox, true, clocks(40));
+        assert!(
+            sending(&mut state, 41, 60).is_empty(),
+            "the teleport answered"
+        );
+        state.end_generation(0);
+        assert!(
+            sending(&mut state, 61, 90).is_empty(),
+            "the new generation started the wait over"
+        );
+        assert_eq!(
+            sending(&mut state, 91, 91)
+                .iter()
+                .map(unanswered_since)
+                .collect::<Vec<_>>(),
+            [Some(61)]
         );
     }
 }

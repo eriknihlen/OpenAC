@@ -36,7 +36,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The C compiler (wasmtime's two C files, openssl-sys's header step) is
       # already on the image; OpenSSL and ALSA headers and pkg-config are not.
@@ -61,6 +61,13 @@ jobs:
           # The test plugins (their own workspace) build into
           # target/plugin-fixtures, inside the cached target directory.
           cache-on-failure: true
+
+      # The launcher fingerprint tests read `cargo metadata --offline`, which
+      # needs every platform's crates. The cache keeps only those this
+      # runner's build used, so a changed lock file leaves the others out.
+      - name: Fetch every crate the lock file names
+        shell: bash
+        run: cargo fetch --locked
 
       - name: Check (Windows)
         if: runner.os == 'Windows'

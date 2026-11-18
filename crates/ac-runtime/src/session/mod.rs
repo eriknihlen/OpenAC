@@ -56,8 +56,9 @@ pub use portal_failure::{
     InboundNote, PORTAL_SPACE_LIMIT, PortalFailure, PortalWait, PortalWorldState, RECENT_INBOUND,
 };
 pub use position_trail::{
-    Acceptance, POSITION_TRAIL_CAP, POSITION_TRAIL_WINDOW, PlayerNotFound, TARGET_NOT_ACQUIRED,
-    TrailEntry, TrailEvent, TrailMessage, TrailPosition, TrailStamps,
+    Acceptance, NotFoundCause, POSITION_TRAIL_CAP, POSITION_TRAIL_WINDOW, PlayerNotFound,
+    TARGET_NOT_ACQUIRED, TrailEntry, TrailEvent, TrailMessage, TrailPosition, TrailStamps,
+    UNANSWERED_POSITIONS_LIMIT,
 };
 pub use relogin::{LOST_CONNECTION_RETRY_INTERVAL, Relogin};
 #[cfg(feature = "host")]

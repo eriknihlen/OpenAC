@@ -8,6 +8,12 @@
 //! position the server sent back, and the first such refusal after a self
 //! cast that went through hands the host that trail ([`PlayerNotFound`]),
 //! once, so the episode explains itself in the log.
+//!
+//! A character that casts nothing at itself never gets that refusal, so the
+//! trail is also handed over when the client has been sending the player's
+//! position for [`UNANSWERED_POSITIONS_LIMIT`] and the server has sent none
+//! back: the server answers every position it takes with the player's
+//! position, so a long silence means it is no longer moving the player.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -193,16 +199,32 @@ impl PositionTrail {
 /// What the session knew when the server first could not find the player.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerNotFound {
-    /// Session time of the answer.
+    /// Session time of the report.
     pub at: Duration,
-    /// The spell cast.
-    pub spell_id: u32,
-    /// Its target (the player).
-    pub target: u32,
-    /// The server's answer.
-    pub weenie_error: u32,
+    /// What showed it.
+    pub cause: NotFoundCause,
     /// The positions sent and received, oldest first.
     pub trail: Vec<TrailEntry>,
+}
+
+/// What showed that the server lost track of the player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotFoundCause {
+    /// A spell cast at the player came back [`TARGET_NOT_ACQUIRED`].
+    SelfCastRefused {
+        /// The spell cast.
+        spell_id: u32,
+        /// Its target (the player).
+        target: u32,
+        /// The server's answer.
+        weenie_error: u32,
+    },
+    /// The server answered none of the positions sent since `since`
+    /// (session time), at least [`UNANSWERED_POSITIONS_LIMIT`] ago.
+    PositionsUnanswered {
+        /// When the first unanswered position was sent.
+        since: Duration,
+    },
 }
 
 /// The shortest time between two reports, so a character whose self casts
@@ -266,6 +288,73 @@ impl SelfCastWatch {
     /// A new generation began.
     pub(crate) fn rearm(&mut self) {
         self.armed = true;
+    }
+}
+
+/// How long the client sends the player's position with no answer before
+/// the trail is reported.
+pub const UNANSWERED_POSITIONS_LIMIT: Duration = Duration::from_secs(30);
+
+/// A pause in sending longer than this starts the wait over: the client
+/// sends nothing while the player stands still, so one position the server
+/// let pass before a long pause says nothing about the moves after it.
+pub const UNANSWERED_SEND_GAP: Duration = Duration::from_secs(10);
+
+/// Decides when unanswered positions open an episode: a position sent at
+/// least [`UNANSWERED_POSITIONS_LIMIT`] after the first one the server has
+/// not answered, with no pause of more than [`UNANSWERED_SEND_GAP`] between
+/// them. Any position the server sends for the player, or a teleport, ends
+/// it. An episode is reported once, and not before
+/// [`PLAYER_NOT_FOUND_REPORT_INTERVAL`] has passed since the last report.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AnswerWatch {
+    first_unanswered: Option<Duration>,
+    last_sent: Option<Duration>,
+    reported: bool,
+    last_report: Option<Duration>,
+}
+
+impl AnswerWatch {
+    /// A position was sent at session time `now`: when it opens an
+    /// episode to report, the time of the first unanswered one.
+    pub(crate) fn sent(&mut self, now: Duration) -> Option<Duration> {
+        // A session clock that started again (a new connection) counts as
+        // a long pause.
+        let paused = self.last_sent.is_some_and(|last| {
+            now.checked_sub(last)
+                .is_none_or(|gap| gap > UNANSWERED_SEND_GAP)
+        });
+        self.last_sent = Some(now);
+        if paused {
+            self.answered();
+        }
+        let since = *self.first_unanswered.get_or_insert(now);
+        if self.reported
+            || now
+                .checked_sub(since)
+                .is_none_or(|waited| waited < UNANSWERED_POSITIONS_LIMIT)
+        {
+            return None;
+        }
+        // Too soon after the last report: the episode is told once the
+        // interval has passed, if it still lasts.
+        let due = self.last_report.is_none_or(|last| {
+            now.checked_sub(last)
+                .is_none_or(|elapsed| elapsed >= PLAYER_NOT_FOUND_REPORT_INTERVAL)
+        });
+        if !due {
+            return None;
+        }
+        self.reported = true;
+        self.last_report = Some(now);
+        Some(since)
+    }
+
+    /// The server sent the player's position (or moved the player itself),
+    /// or a new generation began: the wait starts over.
+    pub(crate) fn answered(&mut self) {
+        self.first_unanswered = None;
+        self.reported = false;
     }
 }
 
@@ -370,6 +459,72 @@ mod tests {
         assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(0)));
         watch.rearm();
         assert!(watch.observe(&answer(PLAYER, TARGET_NOT_ACQUIRED), PLAYER, at(600_000)));
+    }
+
+    #[test]
+    fn positions_unanswered_for_the_limit_open_an_episode_once() {
+        let mut watch = AnswerWatch::default();
+        // A position a second, none answered.
+        assert_eq!(sending(&mut watch, 1_000, 30_000), []);
+        assert_eq!(
+            watch.sent(at(30_999)),
+            None,
+            "29.999 s is not yet long enough"
+        );
+        assert_eq!(watch.sent(at(31_000)), Some(at(1_000)));
+        assert_eq!(
+            sending(&mut watch, 32_000, 90_000),
+            [],
+            "the episode is reported once"
+        );
+    }
+
+    /// Positions sent once a second from `from` to `to` milliseconds
+    /// (both included): the reports they opened, as (sent, since) in ms.
+    fn sending(watch: &mut AnswerWatch, from: u64, to: u64) -> Vec<(u64, u64)> {
+        (from..=to)
+            .step_by(1_000)
+            .filter_map(|millis| {
+                watch
+                    .sent(at(millis))
+                    .map(|since| (millis, since.as_millis() as u64))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_answer_starts_the_wait_over() {
+        let mut watch = AnswerWatch::default();
+        assert_eq!(sending(&mut watch, 0, 20_000), []);
+        watch.answered();
+        assert_eq!(sending(&mut watch, 21_000, 50_000), [], "counted from 21 s");
+        assert_eq!(watch.sent(at(51_000)), Some(at(21_000)));
+    }
+
+    #[test]
+    fn a_pause_in_sending_starts_the_wait_over() {
+        let mut watch = AnswerWatch::default();
+        assert_eq!(watch.sent(at(0)), None);
+        // Standing still sends nothing; the moves minutes later are timed
+        // from their own start.
+        assert_eq!(watch.sent(at(10_000)), None, "10 s is no pause yet");
+        assert_eq!(sending(&mut watch, 200_000, 229_000), []);
+        assert_eq!(watch.sent(at(230_000)), Some(at(200_000)));
+    }
+
+    #[test]
+    fn an_episode_inside_the_interval_is_reported_once_it_has_passed() {
+        let mut watch = AnswerWatch::default();
+        assert_eq!(sending(&mut watch, 0, 30_000), [(30_000, 0)]);
+        watch.answered();
+        // A second episode inside the interval is held back...
+        assert_eq!(sending(&mut watch, 100_000, 629_000), []);
+        // ...and told when the interval since the report at 30 s has passed,
+        // if it still lasts.
+        assert_eq!(sending(&mut watch, 630_000, 700_000), [(630_000, 100_000)]);
+        // A session clock that started again counts as long enough.
+        watch.answered();
+        assert_eq!(sending(&mut watch, 1_000, 31_000), [(31_000, 1_000)]);
     }
 
     #[test]

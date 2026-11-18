@@ -139,6 +139,24 @@ impl LocalPlayerOutbound {
         self.sent.drain(..)
     }
 
+    /// As if an autonomous position at `position` had been sent.
+    #[cfg(test)]
+    pub(crate) fn note_sent_for_tests(&mut self, position: Position) {
+        self.record(OutboundRecord {
+            kind: OutboundKind::AutonomousPosition,
+            sequence: 0,
+            position,
+            contact: true,
+            forward_command: 0,
+            timestamps: MotionTimestamps {
+                instance: 0,
+                server_control: 0,
+                teleport: 0,
+                force_position: 0,
+            },
+        });
+    }
+
     fn record(&mut self, record: OutboundRecord) {
         if self.sent.len() < SENT_LIMIT {
             self.sent.push(record);

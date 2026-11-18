@@ -1446,6 +1446,12 @@ fn a_plugin_holds_windows_out_of_sight_without_saving_anything() {
     let vitals = root.window(VITALS_WINDOW).unwrap().frame;
     assert!(!root.element(vitals).unwrap().drawn());
     assert!(drawn(&mut ui) < shown, "the vitals are not drawn");
+    assert!(
+        !ui.probe()
+            .iter()
+            .any(|l| l.starts_with(&format!("ui-probe: window {VITALS_WINDOW} "))),
+        "a held window is not there to click on"
+    );
     assert!(reported(&state, VITALS_WINDOW).layout.visible);
     assert!(state.is_window_held(VITALS_WINDOW));
 

@@ -29,8 +29,9 @@ use ac_runtime::session::creation::{
 };
 use ac_runtime::session::selection::{SelectionOperation, SelectionSnapshot};
 use ac_runtime::session::{
-    Acceptance, CharacterSelector, HostEvent, LifecycleCommand, POSITION_TRAIL_WINDOW,
-    PlayerNotFound, Relogin, SessionCommand, TrailEntry, TrailEvent, TrailPosition, TrailStamps,
+    Acceptance, CharacterSelector, HostEvent, LifecycleCommand, NotFoundCause,
+    POSITION_TRAIL_WINDOW, PlayerNotFound, Relogin, SessionCommand, TrailEntry, TrailEvent,
+    TrailPosition, TrailStamps,
 };
 
 /// What a typed line asks for. `session` is the session a line was
@@ -1631,13 +1632,21 @@ fn cast_line(line: &str) -> Option<bool> {
 /// one line per position sent or received, oldest first.
 #[must_use]
 pub fn player_not_found_lines(lost: &PlayerNotFound, session: Option<&str>) -> Vec<String> {
+    let why = match lost.cause {
+        NotFoundCause::SelfCastRefused {
+            spell_id,
+            target,
+            weenie_error,
+        } => format!("spell {spell_id} at 0x{target:08X} came back 0x{weenie_error:04X}"),
+        NotFoundCause::PositionsUnanswered { since } => format!(
+            "no position sent since s={:.3} was answered",
+            since.as_secs_f64()
+        ),
+    };
     let mut lines = vec![notice(
         &format!(
-            "the server could not find the player: spell {} at 0x{:08X} came back 0x{:04X}; \
-             positions of the last {} s, oldest first:",
-            lost.spell_id,
-            lost.target,
-            lost.weenie_error,
+            "the server could not find the player: {why}; positions of the last {} s, \
+             oldest first:",
             POSITION_TRAIL_WINDOW.as_secs()
         ),
         session,
@@ -2871,9 +2880,11 @@ mod tests {
         };
         let lost = PlayerNotFound {
             at: at(5_741_900),
-            spell_id: 48,
-            target: 0x5004_492A,
-            weenie_error: 0x042C,
+            cause: NotFoundCause::SelfCastRefused {
+                spell_id: 48,
+                target: 0x5004_492A,
+                weenie_error: 0x042C,
+            },
             trail: vec![
                 TrailEntry {
                     at: at(5_740_000),
@@ -2943,14 +2954,34 @@ mod tests {
     fn the_server_losing_the_player_with_nothing_recorded_says_so() {
         let lost = PlayerNotFound {
             at: std::time::Duration::from_secs(9),
-            spell_id: 48,
-            target: 0x5004_492A,
-            weenie_error: 0x042C,
+            cause: NotFoundCause::SelfCastRefused {
+                spell_id: 48,
+                target: 0x5004_492A,
+                weenie_error: 0x042C,
+            },
             trail: Vec::new(),
         };
         let lines = event_lines(&HostEvent::PlayerNotFound(Box::new(lost)), None);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1], "--   none");
+        assert!(cast_line(&lines[0]).is_none(), "the report is never folded");
+    }
+
+    #[test]
+    fn unanswered_positions_print_when_the_wait_began() {
+        let lost = PlayerNotFound {
+            at: std::time::Duration::from_millis(995_951_913),
+            cause: NotFoundCause::PositionsUnanswered {
+                since: std::time::Duration::from_millis(995_921_500),
+            },
+            trail: Vec::new(),
+        };
+        let lines = event_lines(&HostEvent::PlayerNotFound(Box::new(lost)), Some("bot"));
+        assert_eq!(
+            lines[0],
+            "-- [bot] the server could not find the player: no position sent since \
+             s=995921.500 was answered; positions of the last 120 s, oldest first:"
+        );
         assert!(cast_line(&lines[0]).is_none(), "the report is never folded");
     }
 }

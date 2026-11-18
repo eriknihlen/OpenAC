@@ -40,7 +40,7 @@ pub struct ProbeElement {
     pub dat_element_id: u32,
     /// Its rectangle on the canvas: left, top, width, height.
     pub rect: (f32, f32, f32, f32),
-    /// It and every parent are visible.
+    /// It and every parent are visible, and none is held out of sight.
     pub visible: bool,
     /// It takes input.
     pub enabled: bool,
@@ -93,7 +93,7 @@ fn walk(
     let Some(e) = ui.element(id) else {
         return;
     };
-    let visible = ancestors_visible && e.visible();
+    let visible = ancestors_visible && e.drawn();
     if visible_only && !visible {
         return;
     }

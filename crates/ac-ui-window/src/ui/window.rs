@@ -2028,7 +2028,7 @@ impl WindowUi {
         outputs
     }
 
-    /// Where the shown windows, their item cells, spell cells, stat rows,
+    /// Where the windows in sight (shown and not held), their item cells, spell cells, stat rows,
     /// buttons (with their captions) and sliders are on the screen (whole
     /// pixels), one line each: what an unattended check clicks on.
     #[must_use]
@@ -2044,7 +2044,7 @@ impl WindowUi {
         fn shown(root: &UiRoot, id: ac_ui::tree::ElementId) -> bool {
             let mut at = Some(id);
             while let Some(e) = at {
-                if !root.element(e).is_some_and(|e| e.visible) {
+                if !root.element(e).is_some_and(|e| e.drawn()) {
                     return false;
                 }
                 at = root.parent(e);
@@ -2053,7 +2053,7 @@ impl WindowUi {
         }
         let mut lines = Vec::new();
         for window in root.windows() {
-            if !root.is_window_visible(&window.name) {
+            if !root.is_window_visible(&window.name) || root.is_window_held(&window.name) {
                 continue;
             }
             lines.push(format!(
