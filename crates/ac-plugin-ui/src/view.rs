@@ -52,6 +52,15 @@ pub struct PluginUiView {
     pub hotkeys: Arc<Vec<crate::hotkeys::BoundHotkey>>,
     /// Client-window requests not yet carried out, oldest first.
     pub client_requests: Vec<(ClientWindow, ClientWindowAction)>,
+    /// The window placings plugins asked for, not yet carried out: name,
+    /// whole layout, the parts asked for.
+    pub window_applies: Vec<(
+        String,
+        crate::windows::WindowLayout,
+        crate::windows::WindowParts,
+    )>,
+    /// The registered windows plugins hold out of sight, sorted.
+    pub held_windows: Vec<String>,
     /// The dialogs waiting for an answer, in the order asked.
     pub dialogs: Vec<crate::model::DialogView>,
     /// The windows shown modal and the windows they block.
@@ -115,6 +124,17 @@ impl PluginUiView {
         std::mem::take(&mut self.client_requests)
     }
 
+    /// The window placings not yet carried out, in the order asked.
+    pub fn take_window_applies(
+        &mut self,
+    ) -> Vec<(
+        String,
+        crate::windows::WindowLayout,
+        crate::windows::WindowParts,
+    )> {
+        std::mem::take(&mut self.window_applies)
+    }
+
     /// Applies one change.
     pub fn apply(&mut self, change: UiChange) {
         self.revision += 1;
@@ -133,6 +153,8 @@ impl PluginUiView {
                 self.shapes = Arc::default();
                 self.hotkeys = Arc::default();
                 self.client_requests.clear();
+                self.window_applies.clear();
+                self.held_windows.clear();
                 self.dialogs.clear();
                 self.modals.clear();
                 self.dirty = ViewDirty {
@@ -253,6 +275,12 @@ impl PluginUiView {
             UiChange::ClientWindow { window, action } => {
                 self.client_requests.push((window, action));
             }
+            UiChange::WindowApply {
+                name,
+                layout,
+                parts,
+            } => self.window_applies.push((name, layout, parts)),
+            UiChange::WindowsHeld(names) => self.held_windows = names,
             UiChange::Hotkeys(table) => self.hotkeys = table,
             UiChange::DialogAdded(dialog) => self.dialogs.push(*dialog),
             UiChange::DialogRemoved(handle) => self.dialogs.retain(|d| d.handle != handle),

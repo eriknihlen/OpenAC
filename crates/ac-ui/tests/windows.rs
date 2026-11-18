@@ -111,6 +111,127 @@ fn hiding_releases_ownership_and_showing_restores_the_default_input() {
     assert!(events_of(&host.take_outputs(), "chat").contains(&WindowEvent::Shown));
 }
 
+// A window held out of sight is not drawn and takes no input, but stays
+// shown: no visibility change is reported and its controller hears no
+// hide. Letting it go draws it again and gives back its default input.
+#[test]
+fn a_held_window_is_not_drawn_and_takes_no_input_but_stays_shown() {
+    let mut host = UiHost::new();
+    host.root.set_size(800.0, 600.0);
+    let r = host.root.root();
+    let frame = host.root.add(
+        r,
+        at(0.0, 0.0, 300.0, 150.0),
+        Panel {
+            background_color: ac_ui::Color::WHITE,
+            ..Panel::default()
+        },
+    );
+    let input = host
+        .root
+        .add(frame, CharField::element(200.0, 20.0), CharField::default());
+    host.root.default_text_input = Some(input);
+    host.root.set_keyboard_focus(Some(input));
+    host.root.register_window("chat", frame, None, 0).unwrap();
+    let counts = Recording::default();
+    host.attach_controller("chat", Box::new(counts.clone()))
+        .unwrap();
+    host.take_outputs();
+    let drawn = |host: &mut UiHost| {
+        host.draw((800.0, 600.0), &ac_ui::draw::NoSprites)
+            .commands()
+            .count()
+    };
+    let shown = drawn(&mut host);
+    assert!(shown > 0);
+    assert!(host.root.hit_test(r, 10.0, 10.0).is_some());
+
+    assert!(host.root.hold_window("chat", true));
+    host.pump();
+    assert!(host.root.is_window_held("chat"));
+    assert!(host.root.is_window_visible("chat"), "still shown");
+    assert!(!host.root.element(frame).unwrap().drawn());
+    assert_eq!(drawn(&mut host), 0);
+    assert_eq!(
+        host.root.hit_test(r, 10.0, 10.0),
+        Some(r),
+        "the pointer goes through"
+    );
+    assert_eq!(host.root.keyboard_focus(), None);
+    assert_eq!(host.root.default_text_input, None);
+    assert_eq!(counts.0.borrow().hidden, 0);
+    let no_visibility = |events: Vec<WindowEvent>| {
+        !events.iter().any(|e| {
+            matches!(
+                e,
+                WindowEvent::Shown | WindowEvent::Hidden | WindowEvent::VisibilityChanged(_)
+            )
+        })
+    };
+    assert!(no_visibility(events_of(&host.take_outputs(), "chat")));
+    // The game shows and hides it underneath as usual.
+    assert!(host.root.hide_window("chat"));
+    assert!(host.root.show_window("chat"));
+    host.pump();
+    assert_eq!(drawn(&mut host), 0, "still held");
+    host.take_outputs();
+
+    assert!(host.root.hold_window("chat", false));
+    host.pump();
+    assert!(!host.root.is_window_held("chat"));
+    assert_eq!(drawn(&mut host), shown);
+    assert_eq!(
+        host.root.hit_test(r, 10.0, 10.0).map(|e| e != r),
+        Some(true)
+    );
+    assert_eq!(host.root.default_text_input, Some(input));
+    assert!(no_visibility(events_of(&host.take_outputs(), "chat")));
+    assert!(!host.root.hold_window("nowhere", true));
+}
+
+// The default text input goes only to a window in sight: not to one the
+// game shows underneath a hold (Enter would put the keyboard in a field
+// nobody sees), and not to one the game hid while it was held.
+#[test]
+fn a_window_out_of_sight_never_takes_the_default_text_input() {
+    use ac_ui::{Key, Modifiers};
+    let mut host = UiHost::new();
+    host.root.set_size(800.0, 600.0);
+    let r = host.root.root();
+    let frame = host
+        .root
+        .add(r, at(0.0, 0.0, 300.0, 150.0), Panel::default());
+    let input = host
+        .root
+        .add(frame, CharField::element(200.0, 20.0), CharField::default());
+    host.root.default_text_input = Some(input);
+    host.root.register_window("chat", frame, None, 0).unwrap();
+
+    // Held, then hidden and shown underneath the hold.
+    assert!(host.root.hold_window("chat", true));
+    assert!(host.root.hide_window("chat"));
+    assert!(host.root.show_window("chat"));
+    host.pump();
+    assert_eq!(host.root.default_text_input, None, "shown while held");
+    host.root.on_key_down(Key::Enter, Modifiers::default());
+    assert_eq!(host.root.keyboard_focus(), None);
+    // Let go while shown: it takes it back.
+    assert!(host.root.hold_window("chat", false));
+    assert_eq!(host.root.default_text_input, Some(input));
+
+    // Held, hidden underneath, and let go while hidden.
+    assert!(host.root.hold_window("chat", true));
+    assert!(host.root.hide_window("chat"));
+    assert!(host.root.hold_window("chat", false));
+    host.pump();
+    assert_eq!(host.root.default_text_input, None, "let go while hidden");
+    host.root.on_key_down(Key::Enter, Modifiers::default());
+    assert_eq!(host.root.keyboard_focus(), None);
+    // Shown again: it takes it back.
+    assert!(host.root.show_window("chat"));
+    assert_eq!(host.root.default_text_input, Some(input));
+}
+
 #[test]
 fn geometry_close_and_lock_lifecycle() {
     let mut ui = root(800.0, 600.0);

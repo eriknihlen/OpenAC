@@ -21,8 +21,8 @@ use ac_plugin_ui::{
     ClientWindowAction, Color8, DecodedImage, DialogView, FileImage, GroundShape, GroundShapeKind,
     ImageSource, ImageView, ItemRecord, MapPoint, MarkerAnchor, MarkupDocument, PaintCmd,
     PaintRect, PanelDescriptor, PanelView, PluginIcon, PointerEvent, PointerKind, ProjectileSample,
-    Rgba, ThemeKind, UiChange, UiInput, UiOwner, UiValue, WindowIcon, WorldIcon, WorldIconEntry,
-    WorldLabel, WorldLine, WorldTriangle,
+    Rgba, ThemeKind, UiChange, UiInput, UiOwner, UiValue, WindowIcon, WindowLayout, WindowOwner,
+    WindowParts, WindowReport, WorldIcon, WorldIconEntry, WorldLabel, WorldLine, WorldTriangle,
 };
 
 use crate::codec::{
@@ -36,6 +36,27 @@ tuple_record! {
 
 record! {
     UiOwner { id: String, display_name: String }
+    WindowLayout {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        visible: bool,
+        collapsed: bool,
+        maximized: bool,
+    }
+    WindowParts { place: bool, size: bool, shown: bool, state: bool }
+    WindowReport {
+        name: String,
+        owner: WindowOwner,
+        title: Option<String>,
+        layout: WindowLayout,
+        state_managed: bool,
+        min_size: (f32, f32),
+        max_size: (f32, f32),
+        resizable: (bool, bool),
+        shares_place: Option<String>,
+    }
     PluginIcon { width: u32, height: u32, rgba: Arc<Vec<u8>> }
     WindowIcon { named: Option<PluginIcon>, light: Option<PluginIcon>, dark: Option<PluginIcon> }
     PanelDescriptor {
@@ -567,6 +588,13 @@ union! {
         27 => DialogAdded(dialog: Box<DialogView>),
         28 => DialogRemoved(dialog: u32),
         29 => Modal { panel: u32, owner: Option<u32> },
+        30 => WindowApply { name: String, layout: WindowLayout, parts: WindowParts },
+        31 => WindowsHeld(names: Vec<String>),
+    }
+    WindowOwner: "window owner" {
+        0 => Client,
+        1 => Dock,
+        2 => Plugin(id: String),
     }
     PointerKind: "pointer kind" {
         0 => Down,
@@ -612,6 +640,8 @@ union! {
         9 => DisplayDensity(density: f32),
         10 => CanvasHosted { canvas: u32, size: Option<(i32, i32)> },
         11 => DialogAnswered { handle: u32, button: i32 },
+        12 => Windows { screen: (i32, i32), ready: bool, windows: Vec<WindowReport> },
+        13 => WindowsChanged(windows: Vec<WindowReport>),
     }
 }
 

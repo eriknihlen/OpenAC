@@ -269,6 +269,8 @@ impl Entry {
             Event::NavigationReach(_) => "navigation reach",
             Event::ServiceChanged(_) => "service changed",
             Event::StatusTextReceived(_) => "status text",
+            Event::ScreenSizeChanged(_) => "screen size changed",
+            Event::UiWindowsChanged => "windows changed",
             Event::Ui(UiEvent::Action(_)) => "ui action",
             Event::Ui(UiEvent::Pointer(_)) => "ui pointer",
             Event::Ui(UiEvent::Hotkey(_)) => "ui hotkey",

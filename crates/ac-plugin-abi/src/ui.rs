@@ -884,6 +884,168 @@ wire_record! {
 }
 
 wire_record! {
+    /// The screen the client's interface lays out in, pixels
+    /// ([`crate::Import::UiScreenSize`], [`crate::Event::ScreenSizeChanged`];
+    /// API 1.14). It is the game window's size: it changes when the window
+    /// is resized or moves to a display of another size.
+    pub struct ScreenSize {
+        /// Width.
+        pub width: i32,
+        /// Height.
+        pub height: i32,
+    }
+}
+
+wire_enum! {
+    /// Whose a registered window is ([`UiWindowInfo::owner`]; API 1.14).
+    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    pub enum UiWindowOwner ("window owner") {
+        /// One of the client's own windows.
+        #[default]
+        Client = 0,
+        /// The plugin dock.
+        Dock = 1,
+        /// A plugin's window: the plugin's id.
+        Plugin(id: String) = 2,
+    }
+}
+
+wire_record! {
+    /// A window's place, size and state, in interface pixels from the
+    /// screen's top-left corner, as the client saves window layouts
+    /// (API 1.14).
+    pub struct UiWindowLayout {
+        /// The left edge.
+        pub x: f32,
+        /// The top edge.
+        pub y: f32,
+        /// Width.
+        pub width: f32,
+        /// Height.
+        pub height: f32,
+        /// Shown.
+        pub visible: bool,
+        /// Collapsed to its short stop (the toolbar).
+        pub collapsed: bool,
+        /// Maximized (the chat window).
+        pub maximized: bool,
+    }
+}
+
+wire_record! {
+    /// A registered window ([`crate::Import::UiWindows`]; API 1.14): one of
+    /// the client's, the plugin dock, or a plugin's.
+    pub struct UiWindowInfo {
+        /// Its registered name: what the client saves its layout under, and
+        /// what [`crate::Import::UiWindowApply`] takes. A plugin's window is
+        /// `plugin:<plugin id>:<window id>`.
+        pub name: String,
+        /// Whose it is.
+        pub owner: UiWindowOwner,
+        /// What its title bar says, for a plugin's window.
+        pub title: Option<String>,
+        /// Where it is now, as the client saves it.
+        pub layout: UiWindowLayout,
+        /// The game shows and hides it by itself (a vendor, a trade, the
+        /// combat bar): its shown state is never restored, saved or applied.
+        pub state_managed: bool,
+        /// Its smallest width.
+        pub min_width: f32,
+        /// Its smallest height.
+        pub min_height: f32,
+        /// Its largest width (the screen limits it too).
+        pub max_width: f32,
+        /// Its largest height (the screen limits it too).
+        pub max_height: f32,
+        /// Its width can change: a window fixed in width keeps it whatever
+        /// a placing asks.
+        pub resizable_width: bool,
+        /// Its height can change.
+        pub resizable_height: bool,
+        /// The windows that share one place and size carry the same key
+        /// here ([`UI_WINDOWS_MAIN_PANELS`] for the main panels: inventory,
+        /// character, spellbook and the rest); none for a window on its
+        /// own. A placing of one of them places them all, so keep one place
+        /// for the group. The one shown now has `layout.visible` set.
+        pub shares_place: Option<String>,
+        /// A plugin holds it out of sight ([`crate::Import::UiWindowsHold`]):
+        /// it is not drawn and takes no input, while `layout` says what the
+        /// game has, shown or not.
+        pub held: bool,
+    }
+}
+
+/// [`UiWindowInfo::shares_place`] of the main panels (API 1.14).
+pub const UI_WINDOWS_MAIN_PANELS: &str = "main-panels";
+
+/// [`UiWindowApply::parts`]: the left and top edges.
+pub const WINDOW_PART_PLACE: u8 = 1;
+/// [`UiWindowApply::parts`]: width and height.
+pub const WINDOW_PART_SIZE: u8 = 2;
+/// [`UiWindowApply::parts`]: shown or hidden (never for a window whose
+/// [`UiWindowInfo::state_managed`] is set).
+pub const WINDOW_PART_SHOWN: u8 = 4;
+/// [`UiWindowApply::parts`]: collapsed and maximized.
+pub const WINDOW_PART_STATE: u8 = 8;
+/// [`UiWindowApply::parts`]: every part.
+pub const WINDOW_PARTS_ALL: u8 =
+    WINDOW_PART_PLACE | WINDOW_PART_SIZE | WINDOW_PART_SHOWN | WINDOW_PART_STATE;
+
+wire_record! {
+    /// Place a registered window ([`crate::Import::UiWindowApply`]; reply
+    /// `Result<UiWindowApplied, String>`; API 1.14).
+    pub struct UiWindowApply {
+        /// The window's registered name ([`UiWindowInfo::name`]).
+        pub name: String,
+        /// Where it goes.
+        pub layout: UiWindowLayout,
+        /// Which parts of `layout` to apply (`WINDOW_PART_*` bits); the
+        /// window keeps the others.
+        pub parts: u8,
+    }
+}
+
+wire_record! {
+    /// What placing a window answers (API 1.14).
+    pub struct UiWindowApplied {
+        /// Where the client's rules put the window: the parts asked for, its
+        /// size within its limits and the screen (unchanged on an axis it
+        /// cannot be resized on), its place on the screen. It is worked out
+        /// when asked; the window places it before its next frame. A
+        /// window whose own state changes its size (a collapsed toolbar, a
+        /// maximized chat window, a dock closed to its tile) can end up at
+        /// another size and place: [`crate::Import::UiWindows`] reads where
+        /// it went once the window placed it.
+        pub layout: UiWindowLayout,
+        /// The shown state was asked for and left alone: the game shows and
+        /// hides this window.
+        pub shown_ignored: bool,
+    }
+}
+
+wire_record! {
+    /// A window [`crate::Import::UiWindowsHold`] did not hold, and why
+    /// (API 1.14).
+    pub struct UiWindowHoldRefused {
+        /// The name asked for.
+        pub name: String,
+        /// Why it is not held (no registered window has the name, say).
+        pub reason: String,
+    }
+}
+
+wire_record! {
+    /// What holding windows out of sight answers
+    /// ([`crate::Import::UiWindowsHold`]; API 1.14).
+    pub struct UiWindowsHeld {
+        /// The windows the plugin now holds, in the order asked.
+        pub held: Vec<String>,
+        /// The names it asked for that are not held.
+        pub refused: Vec<UiWindowHoldRefused>,
+    }
+}
+
+wire_record! {
     /// One of the client's windows ([`crate::Import::UiClientWindow`]):
     /// `window` numbers Inventory, Character, CharacterInformation,
     /// Spellbook, Map, Options, Social, Journal, PositiveEffects,

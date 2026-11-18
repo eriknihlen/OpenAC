@@ -1033,6 +1033,23 @@ pub enum UiChange {
         /// The window it blocks.
         owner: Option<u32>,
     },
+    /// A plugin asks for a registered window to be placed: the `parts` of
+    /// `layout`, applied as the saved layouts are, and saved as the
+    /// player's own change. The window keeps the other parts as it has
+    /// them now (what `layout` carries for them is where the session last
+    /// heard the window was).
+    WindowApply {
+        /// The window's registered name.
+        name: String,
+        /// Where it goes.
+        layout: crate::windows::WindowLayout,
+        /// Which parts were asked for.
+        parts: crate::windows::WindowParts,
+    },
+    /// The registered windows plugins hold out of sight, by name, sorted:
+    /// they are not drawn and take no input, but stay shown or hidden as
+    /// the game has them and save as they are. Every other window is let go.
+    WindowsHeld(Vec<String>),
 }
 
 /// A plugin's question in a dialog box (OpenAC `PluginDialog`), as a window
@@ -1150,6 +1167,25 @@ pub enum UiInput {
         /// The button.
         button: i32,
     },
+    /// The screen the interface lays out in and every registered window,
+    /// sent at attach, and when the screen, the layout's readiness or which
+    /// windows there are changed (after the window's own reflow when the
+    /// screen changed); other changes go as [`Self::WindowsChanged`].
+    Windows {
+        /// Width and height, pixels.
+        screen: (i32, i32),
+        /// The character's layout is restored, so a placing is saved for
+        /// it (false before login and while a pre-game screen covers the
+        /// game: a placing then is refused).
+        ready: bool,
+        /// The registered windows, in registration order.
+        windows: Vec<crate::windows::WindowReport>,
+    },
+    /// Some registered windows changed (moved, resized, shown, hidden,
+    /// collapsed), or a plugin placed them: those windows as they are now,
+    /// sent instead of a whole [`Self::Windows`] when the screen, the
+    /// layout's readiness and which windows there are stayed the same.
+    WindowsChanged(Vec<crate::windows::WindowReport>),
 }
 
 /// Something a plugin hears from its UI.

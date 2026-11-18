@@ -97,7 +97,7 @@ use codec::{Shape, Writer, union};
 /// The stream format this build writes and reads: the first byte of every
 /// batch, command frame and recording. Bump it with every deliberate change
 /// of [`shape`].
-pub const STREAM_FORMAT: u8 = 1;
+pub const STREAM_FORMAT: u8 = 2;
 
 union! {
     PresentationEvent: "presentation event" {

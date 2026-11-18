@@ -92,6 +92,44 @@ macro_rules! import_table {
             /// (false without a window).
             UiClientWindow = ui_client_window($crate::ui::ClientWindowRequest) -> bool,
                 permission: None, window: true, since: (1, 0);
+            /// The screen the interface lays out in (none without a window).
+            /// `Event::ScreenSizeChanged` carries each change.
+            UiScreenSize = ui_screen_size(()) -> Option<$crate::ui::ScreenSize>,
+                permission: None, window: true, since: (1, 14);
+            /// Every registered window: the client's, the plugin dock and
+            /// the plugins', in registration order, as the window last
+            /// reported them (none without a window). `Event::UiWindowsChanged`
+            /// says when one was registered or unregistered.
+            UiWindows = ui_windows(()) -> Vec<$crate::ui::UiWindowInfo>,
+                permission: None, window: true, since: (1, 14);
+            /// Place a registered window as the client restores a saved
+            /// layout, saved for the character as the player's own change;
+            /// the answer is where the client's rules put it. Placings of one
+            /// window in a row build on each other. An error without a
+            /// window, for a name no window has, or before the character's
+            /// layout is restored (the screen and windows events follow the
+            /// restore).
+            UiWindowApply = ui_window_apply($crate::ui::UiWindowApply)
+                -> Result<$crate::ui::UiWindowApplied, String> = Err("no plugin UI".to_owned()),
+                permission: None, window: true, since: (1, 14);
+            /// Place several registered windows at once, in order: one
+            /// answer each, as `ui_window_apply` gives it.
+            UiWindowsApply = ui_windows_apply(Vec<$crate::ui::UiWindowApply>)
+                -> Vec<Result<$crate::ui::UiWindowApplied, String>>,
+                permission: None, window: true, since: (1, 14);
+            /// Hold registered windows out of sight, in place of the ones
+            /// the plugin held (an empty list lets them all go): they are not
+            /// drawn and take no input, the game's own windows included,
+            /// while the client keeps them shown or hidden as the game has
+            /// them and saves them so. Placings of a held window still
+            /// apply. A window is held while any plugin holds it; the hold
+            /// ends by itself when the plugin unloads, is reloaded or turned
+            /// off, and when the character leaves the world. An error
+            /// without a window or before the character's layout is
+            /// restored; a name no window has is refused in the answer.
+            UiWindowsHold = ui_windows_hold(Vec<String>)
+                -> Result<$crate::ui::UiWindowsHeld, String> = Err("no plugin UI".to_owned()),
+                permission: None, window: true, since: (1, 14);
             /// Register a canvas.
             UiCanvasRegister = ui_canvas_register($crate::ui::CanvasRegistration)
                 -> Result<u32, String> = Err("no plugin UI".to_owned()),

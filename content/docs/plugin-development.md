@@ -175,6 +175,12 @@ API 1.13 added WebP to the formats `Host::image_decode` reads (PNG, JPEG,
 BMP, TGA and GIF before): lossy, lossless and with alpha, and an animation's
 first frame, as for a GIF. No call changed; a client older than 1.13 refuses
 the bytes (handle 0), so a plugin that ships only WebP art builds for 1.13.
+API 1.14 added the screen and the registered windows: `Host::screen_size`,
+`Host::windows`, `Host::apply_window`, `Host::apply_windows` and
+`Host::hold_windows`, and the events `Event::ScreenSizeChanged` and
+`Event::UiWindowsChanged`, which a plugin built for an older version never
+gets ([Window layouts](#window-layouts), [Holding windows out of
+sight](#holding-windows-out-of-sight)).
 
 Everything the client offers goes through
 `Host`: game state, items, chat, movement and navigation, trade and vendors,
@@ -318,6 +324,96 @@ of the handle keeps the old size; `Canvas::state` asks the client for the size
 it has now. Resizing to the size it has answers true and changes nothing.
 It answers false, and nothing changes, for a width or height below 1, a
 removed canvas, and an in-markup canvas.
+
+### Window layouts
+
+A plugin can read the screen the interface lays out in and every registered
+window, and place them (API 1.14), say to keep one layout per screen size for
+every character. `Host::screen_size` is the game window's size in interface
+pixels (`None` until a window tells the session). `Host::windows` lists every
+registered window in registration order: the client's own, the plugin dock
+and every plugin's. Each `UiWindowInfo` has its `name` (what the client saves
+its layout under; a plugin's window is `plugin:<plugin id>:<window id>`), its
+`owner` (`Client`, `Dock` or `Plugin(id)`), a plugin window's `title`, its
+`layout` (`x`, `y`, `width`, `height`, `visible`, `collapsed`, `maximized`, as
+the client saves it), `state_managed`, and its smallest and largest width and
+height, and whether its width and its height can change at all
+(`resizable_width`, `resizable_height`). A `state_managed` window is one the
+game shows and hides by itself (a vendor, a trade, the combat bar).
+Windows that share one place and size carry the same `shares_place` key:
+every main panel (inventory, character, spellbook, the map and
+the rest) has `UI_WINDOWS_MAIN_PANELS` (`"main-panels"`), and a window on its
+own has `None`. Placing one of them places them all, so keep one place for
+the group; the one shown now has `layout.visible` set. `held` says a plugin
+holds the window out of sight.
+
+`Host::apply_window(name, &layout, parts)` places a window as the client
+restores a saved layout. `parts` (`WindowParts::PLACE`, `SIZE`, `SHOWN`,
+`STATE`, combined with `|`, or `ALL`) says which parts of the layout to
+apply; the window keeps the rest. The size stays within the window's limits
+and the screen (a window fixed in width or height keeps it), and the window
+on the screen. A shown state is never applied
+to a `state_managed` window: the answer's `shown_ignored` says so, and its
+place and size still apply. A main panel is shown or hidden through the
+panel switcher, so the toolbar follows: it is shown before it is placed and
+hidden after, and the other main panels take its place and size, as when the
+player moves one. The client saves the result for the character, per screen
+size, as if the player had moved the window, so the character keeps it if
+the plugin goes. `Host::apply_windows` places several in one call, one
+answer each. Placings of one window in a row build on each other: a size
+alone after a place keeps the new place.
+
+Placings wait for the character's window layout. Before it is restored (on
+entering the world), and while a pre-game screen covers the game, a placing
+is an error: the restore would put the window back, and nothing would be
+saved. Once the layout is restored, the client tells
+`Event::ScreenSizeChanged` and then `Event::UiWindowsChanged` again, so a
+plugin that places its layout on those events places it over the
+character's own, at login and on every new screen.
+
+The windows live in the window, the plugin in the session, so a placing is
+carried out before the next frame, not during the call. The answer is where
+the client's rules put the window, worked out when asked. A window whose own
+state changes its size (the toolbar snaps to its collapsed or expanded stop,
+a maximized chat window fills its place, a dock closed to its tile) can end
+up at another size and place. `Host::windows` reads what the window
+last reported, so a window just placed reads where it went from the next
+pass. A name no window has, or no window attached, is an error.
+
+`Event::ScreenSizeChanged` carries each new screen size, the first one a
+window reports included, and the size again when the character's layout is
+restored. The client has reflowed or restored its windows before it tells
+the size, so the windows a plugin reads then are where they landed.
+`Event::UiWindowsChanged` says a window was registered or unregistered (a
+plugin's window came or went, the first report of a window included), or
+the layout was restored: read `Host::windows` again. Neither needs a permission, and
+neither is raised on a session without a window.
+
+### Holding windows out of sight
+
+`Host::hold_windows(&names)` holds registered windows out of
+sight, say while a layout editor paints a box for every window on canvases,
+which sit under every window. A held window is not drawn and takes no
+pointer or keys, the game's own windows included: the vitals, the combat bar
+and the main panels. Each call replaces the windows the plugin held, and an
+empty list lets them all go. The answer's `held` lists the windows now held,
+and `refused` each name no registered window has, with the reason.
+
+Holding changes nothing the client saves. A held window stays shown or
+hidden as the game has it: `Host::windows` reports its `layout.visible` as
+before, with `held` set, and `/saveui` saves it as it is. The game goes on
+showing and hiding it underneath (a vendor opening, the combat bar on a
+stance change, the player pressing a panel key), which shows once the hold
+ends. `Host::apply_window` on a held window still applies and saves, and the
+window stays held. Holding one main panel holds only that one: hold every
+window with the same `shares_place` to hold the group.
+
+A window is held while any plugin holds it. The hold ends by itself when the
+plugin unloads, is reloaded or turned off, and when the character leaves the
+world, so a forgotten hold never leaves a window missing. Like a placing, a
+hold waits for the character's window layout: before it is restored, or with
+no window attached, holding is an error (letting go never is). It needs no
+permission.
 
 **World drawing.** A plugin can put labels over objects
 (`Host::show_labels`), lines (`Host::create_line_layer`) and filled triangles
@@ -634,7 +730,17 @@ assert_eq!(host.posted[0].text, "Hello, world!");
 gets the inert answer (nothing found, unavailable). For services,
 `FakeHost::set_service` stands in for another plugin's service, and
 `FakeHost::request_service` calls one of the plugin's own as another plugin
-would.
+would. For window layouts, `FakeHost::report_windows` plays a window's report
+of the screen and its windows (the plugin hears both events) and
+`FakeHost::set_screen_size` a new screen, and `FakeHost::set_layout_restored`
+the character's layout not yet restored, then restored; the fake window
+places the windows
+the plugin asks for as the client would, `FakeHost::windows` reads them back,
+and `FakeHost::window_applies` records each request. A window reported with
+`held` set is held by another plugin; `FakeHost::window_holds` records each
+`Host::hold_windows` list, `FakeHost::held_windows` says which are held now,
+and the holds end on `FakeHost::disable` and when the layout stops being
+restored, as when the character leaves the world.
 
 ## plugin.json
 
@@ -646,7 +752,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.13",
+  "apiVersion": "1.14",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -662,7 +768,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.13"`), which must match the version the SDK writes into the module. The launcher installs a plugin only when the installed client loads this version (each client release says which versions it loads; see [Plugin API versions](rust-client.md#plugin-api-versions)), and refuses an install while no client is installed. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.14"`), which must match the version the SDK writes into the module. The launcher installs a plugin only when the installed client loads this version (each client release says which versions it loads; see [Plugin API versions](rust-client.md#plugin-api-versions)), and refuses an install while no client is installed. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |

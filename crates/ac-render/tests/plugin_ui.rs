@@ -1015,3 +1015,558 @@ fn a_plugin_windows_file_icon_is_held_while_drawn_and_drawn_once_held() {
         SessionCommand::PluginUi(UiInput::FileIconsShown { panel: p, paths })
             if *p == panel && paths.is_empty())));
 }
+
+/// A character in the world, so the window restores, reflows and saves its
+/// layouts.
+fn in_world(name: &str) -> PresentationEvent {
+    use ac_runtime::world::{ObjectKey, ObjectView, WorldSnapshot};
+    PresentationEvent::Snapshot(WorldSnapshot {
+        player_guid: Some(0x5000_0001),
+        objects: vec![ObjectView {
+            key: ObjectKey {
+                local_id: 1,
+                incarnation: 1,
+            },
+            guid: 0x5000_0001,
+            name: Some(name.to_owned()),
+            setup_id: None,
+            position: None,
+            parent: None,
+            placement: None,
+            rest_placement: 0,
+            scale: None,
+            translucency: None,
+            state: 0,
+            velocity: None,
+            model: ac_proto::ModelData::default(),
+            motion_table_id: None,
+            sound_table_id: None,
+            radar: ac_runtime::world::RadarFacts::default(),
+            motion: None,
+            effects: ac_runtime::world::EffectFacts::default(),
+            step_blend: None,
+        }],
+    })
+}
+
+/// The last report of the screen and the registered windows among the
+/// window's commands.
+fn windows_report(
+    commands: &[SessionCommand],
+) -> Option<((i32, i32), Vec<ac_plugin_ui::WindowReport>)> {
+    commands.iter().rev().find_map(|c| match c {
+        SessionCommand::PluginUi(UiInput::Windows {
+            screen, windows, ..
+        }) => Some((*screen, windows.clone())),
+        _ => None,
+    })
+}
+
+/// The window tells the session its screen and every registered window
+/// (whose each is, its limits, which the game shows and hides); a plugin
+/// places a client window and its own as a saved layout is restored, the
+/// result is saved for the character as the player's own change, a window
+/// the game shows and hides keeps its shown state, and a new screen
+/// arrives with the windows already reflowed onto it.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_plugin_reads_and_places_the_registered_windows() {
+    use ac_plugin_ui::{WindowLayout, WindowOwner, WindowParts};
+    use ac_render::ui::window::RADAR_WINDOW;
+    const VENDOR_WINDOW: &str = "vendor";
+    let settings =
+        std::env::temp_dir().join(format!("openac-plugin-windows-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&settings);
+    let size = (1280, 720);
+    let (mut state, _) = session();
+    let mut ui = WindowUi::build(dats(), size).expect("the UI builds");
+    ui.set_stores(
+        Some(Box::new(ac_host::settings::SettingsStore::new(
+            settings.clone(),
+        ))),
+        None,
+    );
+    let mut scene = Scene::default();
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.snapshot(),
+    )));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+    // Before the character's layout is restored the windows are reported,
+    // but a placing is refused: the restore would undo it.
+    deliver(&mut state, ui.drain());
+    assert_eq!(state.screen_size(), Some((1280, 720)));
+    assert!(!state.windows_ready());
+    assert_eq!(state.take_screen_change(), Some((1280, 720)));
+    assert!(state.take_windows_change());
+    let early = state.registered_windows()[0].clone();
+    assert!(
+        state
+            .apply_window(&early.name, &early.layout, WindowParts::ALL)
+            .is_err()
+    );
+
+    // In the world: the layout is restored, and both are told again.
+    scene.apply(in_world("Alice"));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+    let commands = ui.drain();
+    let (screen, windows) = windows_report(&commands).expect("the window reports its windows");
+    assert_eq!(screen, (1280, 720));
+    let find = |windows: &[ac_plugin_ui::WindowReport], name: &str| {
+        windows.iter().find(|w| w.name == name).cloned()
+    };
+    let plugin = find(&windows, "plugin:test.demo:main").unwrap();
+    assert_eq!(plugin.owner, WindowOwner::Plugin("test.demo".into()));
+    assert_eq!(plugin.title.as_deref(), Some("Demo"));
+    let dock = find(&windows, ac_ui::plugin::dock::WINDOW).unwrap();
+    assert_eq!(dock.owner, WindowOwner::Dock);
+    let radar = find(&windows, RADAR_WINDOW).unwrap();
+    assert_eq!(radar.owner, WindowOwner::Client);
+    assert!(!radar.state_managed);
+    let vendor = find(&windows, VENDOR_WINDOW).unwrap();
+    assert!(vendor.state_managed);
+    assert!(!vendor.layout.visible);
+    deliver(&mut state, commands);
+    assert!(state.windows_ready());
+    assert_eq!(state.take_screen_change(), Some((1280, 720)));
+    assert!(state.take_windows_change());
+
+    // The plugin moves the radar and its own window, and asks to show the
+    // vendor window, which the game shows by itself.
+    let place = WindowParts {
+        place: true,
+        ..WindowParts::default()
+    };
+    let radar_at = WindowLayout {
+        x: 40.0,
+        y: 60.0,
+        ..radar.layout
+    };
+    let applied = state.apply_window(RADAR_WINDOW, &radar_at, place).unwrap();
+    assert_eq!((applied.layout.x, applied.layout.y), (40.0, 60.0));
+    let plugin_at = WindowLayout {
+        x: 500.0,
+        y: 300.0,
+        ..plugin.layout
+    };
+    state
+        .apply_window("plugin:test.demo:main", &plugin_at, place)
+        .unwrap();
+    let vendor_at = WindowLayout {
+        x: 100.0,
+        y: 120.0,
+        visible: true,
+        ..vendor.layout
+    };
+    let vendor_applied = state
+        .apply_window(VENDOR_WINDOW, &vendor_at, WindowParts::ALL)
+        .unwrap();
+    assert!(vendor_applied.shown_ignored);
+    assert!(!vendor_applied.layout.visible);
+    assert!(state.apply_window("nowhere", &radar_at, place).is_err());
+    // A hidden main panel placed, sized and shown in one go: shown through
+    // the panel switcher first, so the switcher's shared place does not
+    // undo the placing, and the other main panels take its place.
+    let inventory = find(&windows, INVENTORY_WINDOW).unwrap();
+    assert!(!inventory.layout.visible);
+    let inventory_at = WindowLayout {
+        x: 60.0,
+        y: 50.0,
+        width: inventory.layout.width,
+        height: 500.0,
+        visible: true,
+        ..inventory.layout
+    };
+    let inventory_applied = state
+        .apply_window(INVENTORY_WINDOW, &inventory_at, WindowParts::ALL)
+        .unwrap();
+    // The toolbar: a size it cannot take on a fixed axis is not predicted.
+    let toolbar = find(&windows, "toolbar").unwrap();
+    let toolbar_size = WindowParts {
+        size: true,
+        ..WindowParts::default()
+    };
+    let toolbar_applied = state
+        .apply_window(
+            "toolbar",
+            &WindowLayout {
+                width: 600.0,
+                height: 60.0,
+                ..toolbar.layout
+            },
+            toolbar_size,
+        )
+        .unwrap();
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.take_changes(),
+    )));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+    // Only the windows that changed or were placed are reported, not the
+    // whole list: the toolbar's placing changed nothing, and it is
+    // reported all the same.
+    let commands = ui.drain();
+    assert!(windows_report(&commands).is_none(), "no whole report");
+    let changed: Vec<String> = commands
+        .iter()
+        .find_map(|c| match c {
+            SessionCommand::PluginUi(UiInput::WindowsChanged(windows)) => {
+                Some(windows.iter().map(|w| w.name.clone()).collect())
+            }
+            _ => None,
+        })
+        .expect("the changed windows are reported");
+    for name in [
+        RADAR_WINDOW,
+        "plugin:test.demo:main",
+        VENDOR_WINDOW,
+        INVENTORY_WINDOW,
+        "toolbar",
+        ac_render::ui::window::CHARACTER_WINDOW,
+    ] {
+        assert!(changed.iter().any(|n| n == name), "{name}: {changed:?}");
+    }
+    assert!(!changed.iter().any(|n| n == "chat"), "{changed:?}");
+    deliver(&mut state, commands);
+    let windows = state.registered_windows().to_vec();
+    // A frame with nothing changed reports nothing.
+    ui.frame(Instant::now(), size);
+    assert!(
+        !ui.drain().iter().any(|c| matches!(
+            c,
+            SessionCommand::PluginUi(UiInput::Windows { .. } | UiInput::WindowsChanged(_))
+        )),
+        "nothing changed"
+    );
+    // Each answer was where the window went.
+    let landed = |name: &str| find(&windows, name).unwrap().layout;
+    assert_eq!(landed(INVENTORY_WINDOW), inventory_applied.layout);
+    // The toolbar is fixed in width, as predicted; its height snaps to the
+    // stop its own state keeps (expanded), which the answer cannot know.
+    let toolbar_landed = landed("toolbar");
+    assert!(!toolbar.resizable.0);
+    assert_eq!(
+        (toolbar_landed.x, toolbar_landed.width),
+        (toolbar_applied.layout.x, toolbar_applied.layout.width)
+    );
+    assert_eq!(toolbar_landed.width, toolbar.layout.width);
+    assert_eq!(
+        toolbar_landed.height, toolbar.layout.height,
+        "its expanded stop"
+    );
+    assert_eq!(landed(RADAR_WINDOW), applied.layout);
+    let shared = landed(ac_render::ui::window::CHARACTER_WINDOW);
+    assert_eq!(
+        (shared.x, shared.y, shared.height),
+        (60.0, 50.0, 500.0),
+        "the other main panels share the placed one's place and size"
+    );
+    assert!(ui.host().root.is_window_visible(INVENTORY_WINDOW));
+    let place_of = |name: &str| {
+        let w = find(&windows, name).unwrap();
+        (w.layout.x, w.layout.y, w.layout.visible)
+    };
+    assert_eq!(place_of(RADAR_WINDOW), (40.0, 60.0, radar.layout.visible));
+    assert_eq!(
+        place_of("plugin:test.demo:main"),
+        (500.0, 300.0, plugin.layout.visible)
+    );
+    assert_eq!(place_of(VENDOR_WINDOW), (100.0, 120.0, false));
+    assert!(!ui.host().root.is_window_visible(VENDOR_WINDOW));
+
+    // Saved for the character at this screen size, as a drag would be.
+    let store = ac_host::settings::SettingsStore::new(settings.clone());
+    let saved = |name: &str| {
+        store
+            .load_window_layout(
+                "Alice",
+                "1280x720",
+                name,
+                &ac_host::settings::UiWindowLayout::default(),
+            )
+            .map(|l| (l.x, l.y))
+    };
+    assert_eq!(saved(RADAR_WINDOW), Some((40.0, 60.0)));
+    assert_eq!(saved(INVENTORY_WINDOW), Some((60.0, 50.0)));
+    assert!(
+        store
+            .load_window_layout(
+                "Alice",
+                "1280x720",
+                INVENTORY_WINDOW,
+                &ac_host::settings::UiWindowLayout::default(),
+            )
+            .unwrap()
+            .visible,
+        "shown, and saved shown"
+    );
+    assert_eq!(saved("plugin:test.demo:main"), Some((500.0, 300.0)));
+
+    // A smaller screen: the report that carries it has the windows already
+    // reflowed onto it.
+    let small = (800, 600);
+    ui.frame(Instant::now(), small);
+    let (screen, windows) = windows_report(&ui.drain()).expect("the new screen is reported");
+    assert_eq!(screen, (800, 600));
+    for w in &windows {
+        let l = w.layout;
+        assert!(
+            l.x + l.width.min(800.0) <= 800.5 && l.y + l.height.min(600.0) <= 600.5,
+            "{} is off the 800x600 screen: {l:?}",
+            w.name
+        );
+    }
+    let plugin = find(&windows, "plugin:test.demo:main").unwrap();
+    assert!(plugin.layout.x < 500.0, "reflowed: {:?}", plugin.layout);
+    let _ = std::fs::remove_file(&settings);
+}
+
+/// The window and the session in the world as "Alice", the layouts saved to
+/// `settings`, the window's reports delivered and the changes taken.
+fn in_world_with_layouts(
+    settings: &std::path::Path,
+    size: (u32, u32),
+) -> (PluginUi, WindowUi, Scene) {
+    let (mut state, _) = session();
+    let mut ui = WindowUi::build(dats(), size).expect("the UI builds");
+    ui.set_stores(
+        Some(Box::new(ac_host::settings::SettingsStore::new(
+            settings.to_path_buf(),
+        ))),
+        None,
+    );
+    let mut scene = Scene::default();
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.snapshot(),
+    )));
+    scene.apply(in_world("Alice"));
+    for _ in 0..2 {
+        ui.feed(&mut scene);
+        ui.frame(Instant::now(), size);
+        deliver(&mut state, ui.drain());
+    }
+    assert!(state.windows_ready());
+    state.take_changes();
+    (state, ui, scene)
+}
+
+/// The session's changes to the window, and one frame.
+fn pass(state: &mut PluginUi, ui: &mut WindowUi, scene: &mut Scene, size: (u32, u32)) {
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.take_changes(),
+    )));
+    ui.feed(scene);
+    ui.frame(Instant::now(), size);
+    deliver(state, ui.drain());
+}
+
+/// Every main panel reports the place it shares; a window on its own
+/// reports none.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn the_main_panels_report_the_place_they_share() {
+    let settings =
+        std::env::temp_dir().join(format!("openac-plugin-shared-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&settings);
+    let size = (1280, 720);
+    let (state, _ui, _scene) = in_world_with_layouts(&settings, size);
+    let shares = |name: &str| {
+        state
+            .registered_windows()
+            .iter()
+            .find(|w| w.name == name)
+            .unwrap_or_else(|| panic!("{name} is registered"))
+            .shares_place
+            .clone()
+    };
+    for name in [
+        INVENTORY_WINDOW,
+        ac_render::ui::window::CHARACTER_WINDOW,
+        "spellbook",
+    ] {
+        assert_eq!(
+            shares(name).as_deref(),
+            Some(ac_plugin_ui::MAIN_PANELS),
+            "{name}"
+        );
+    }
+    assert_eq!(shares(ac_render::ui::window::CHAT_WINDOW), None);
+    assert_eq!(shares(ac_render::ui::window::VITALS_WINDOW), None);
+    assert_eq!(shares("plugin:test.demo:main"), None);
+    let _ = std::fs::remove_file(&settings);
+}
+
+/// A plugin holds windows out of sight: a held window is not drawn and
+/// takes no input, but stays shown as the game has it, and nothing saved
+/// changes. The game goes on showing a held main panel underneath, which
+/// shows once the hold ends. A placing of a held window applies and is
+/// saved. Unloading the plugin, and the character leaving the world, end
+/// its hold.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_plugin_holds_windows_out_of_sight_without_saving_anything() {
+    use ac_plugin_ui::{WindowLayout, WindowParts};
+    use ac_render::ui::window::VITALS_WINDOW;
+    let settings =
+        std::env::temp_dir().join(format!("openac-plugin-holds-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&settings);
+    let size = (1280, 720);
+    let (mut state, mut ui, mut scene) = in_world_with_layouts(&settings, size);
+    let drawn = |ui: &mut WindowUi| {
+        ui.host_mut()
+            .draw((1280.0, 720.0), &ac_ui::draw::NoSprites)
+            .commands()
+            .count()
+    };
+    let reported = |state: &PluginUi, name: &str| {
+        state
+            .registered_windows()
+            .iter()
+            .find(|w| w.name == name)
+            .unwrap()
+            .clone()
+    };
+    assert!(ui.host().root.is_window_visible(VITALS_WINDOW));
+    assert!(!ui.host().root.is_window_visible(INVENTORY_WINDOW));
+    let saved_before = std::fs::read(&settings).ok();
+    let shown = drawn(&mut ui);
+
+    let held = state
+        .hold_windows(
+            "test.demo",
+            &[VITALS_WINDOW.to_owned(), INVENTORY_WINDOW.to_owned()],
+        )
+        .unwrap();
+    assert_eq!(held.held.len(), 2);
+    pass(&mut state, &mut ui, &mut scene, size);
+    let root = &ui.host().root;
+    assert!(root.is_window_held(VITALS_WINDOW));
+    assert!(root.is_window_visible(VITALS_WINDOW), "still shown");
+    let vitals = root.window(VITALS_WINDOW).unwrap().frame;
+    assert!(!root.element(vitals).unwrap().drawn());
+    assert!(drawn(&mut ui) < shown, "the vitals are not drawn");
+    assert!(reported(&state, VITALS_WINDOW).layout.visible);
+    assert!(state.is_window_held(VITALS_WINDOW));
+
+    // The game opens the held inventory underneath: shown, still held.
+    assert!(state.client_window(ClientWindow::Inventory, ClientWindowAction::Show));
+    pass(&mut state, &mut ui, &mut scene, size);
+    assert!(ui.host().root.is_window_visible(INVENTORY_WINDOW));
+    assert!(ui.host().root.is_window_held(INVENTORY_WINDOW));
+    assert!(reported(&state, INVENTORY_WINDOW).layout.visible);
+    assert!(state.client_window(ClientWindow::Inventory, ClientWindowAction::Hide));
+    pass(&mut state, &mut ui, &mut scene, size);
+    assert_eq!(std::fs::read(&settings).ok(), saved_before, "nothing saved");
+
+    // A placing of the held vitals applies and is saved; they stay held.
+    let vitals_now = reported(&state, VITALS_WINDOW);
+    let at = WindowLayout {
+        x: 30.0,
+        y: 40.0,
+        ..vitals_now.layout
+    };
+    let place = WindowParts {
+        place: true,
+        ..WindowParts::default()
+    };
+    state.apply_window(VITALS_WINDOW, &at, place).unwrap();
+    pass(&mut state, &mut ui, &mut scene, size);
+    let placed = reported(&state, VITALS_WINDOW).layout;
+    assert_eq!((placed.x, placed.y), (30.0, 40.0));
+    assert!(ui.host().root.is_window_held(VITALS_WINDOW));
+    let store = ac_host::settings::SettingsStore::new(settings.clone());
+    let saved = store
+        .load_window_layout(
+            "Alice",
+            "1280x720",
+            VITALS_WINDOW,
+            &ac_host::settings::UiWindowLayout::default(),
+        )
+        .unwrap();
+    assert_eq!((saved.x, saved.y), (30.0, 40.0));
+
+    // The plugin unloads: its hold ends, and the vitals are drawn again.
+    state.release("test.demo");
+    pass(&mut state, &mut ui, &mut scene, size);
+    assert!(!ui.host().root.is_window_held(VITALS_WINDOW));
+    assert!(!ui.host().root.is_window_held(INVENTORY_WINDOW));
+    let root = &ui.host().root;
+    assert!(root.element(vitals).unwrap().drawn(), "drawn again");
+
+    // Held again, then the character leaves the world: the hold ends.
+    let (mut state, _) = {
+        let (mut fresh, id) = session();
+        // The window keeps its windows; the session hears them again.
+        fresh.input(UiInput::Windows {
+            screen: (1280, 720),
+            ready: true,
+            windows: state.registered_windows().to_vec(),
+        });
+        (fresh, id)
+    };
+    state
+        .hold_windows("test.demo", &[VITALS_WINDOW.to_owned()])
+        .unwrap();
+    pass(&mut state, &mut ui, &mut scene, size);
+    assert!(ui.host().root.is_window_held(VITALS_WINDOW));
+    scene.apply(PresentationEvent::Snapshot(
+        ac_runtime::world::WorldSnapshot {
+            player_guid: None,
+            objects: Vec::new(),
+        },
+    ));
+    for _ in 0..2 {
+        pass(&mut state, &mut ui, &mut scene, size);
+    }
+    assert!(!state.windows_ready());
+    assert!(!state.is_window_held(VITALS_WINDOW));
+    assert!(!ui.host().root.is_window_held(VITALS_WINDOW));
+    let _ = std::fs::remove_file(&settings);
+}
+
+/// A placing changes only the parts asked for. The rest stays where the
+/// window is now, whatever the request carries for it: the session fills
+/// those in from the window's last report, and the player may have moved
+/// the window since.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_placing_leaves_the_parts_not_asked_for_where_the_window_is() {
+    use ac_plugin_ui::{UiChange, WindowParts};
+    use ac_render::ui::window::RADAR_WINDOW;
+    let settings =
+        std::env::temp_dir().join(format!("openac-plugin-partial-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&settings);
+    let size = (1280, 720);
+    let (state, mut ui, mut scene) = in_world_with_layouts(&settings, size);
+    let reported = state
+        .registered_windows()
+        .iter()
+        .find(|w| w.name == RADAR_WINDOW)
+        .unwrap()
+        .layout;
+    // The player moves the radar after that report.
+    let moved = (reported.x - 200.0, reported.y + 150.0);
+    assert!(
+        ui.host_mut()
+            .root
+            .move_window(RADAR_WINDOW, moved.0, moved.1)
+    );
+    // A placing of its shown state alone, carrying the reported place.
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        vec![UiChange::WindowApply {
+            name: RADAR_WINDOW.to_owned(),
+            layout: reported,
+            parts: WindowParts {
+                shown: true,
+                ..WindowParts::default()
+            },
+        }],
+    )));
+    ui.feed(&mut scene);
+    ui.frame(Instant::now(), size);
+    let now = ac_ui::layout_persistence::capture(ui.host(), RADAR_WINDOW).unwrap();
+    assert_eq!((now.x, now.y), moved, "the radar stays where it was moved");
+    assert_eq!((now.width, now.height), (reported.width, reported.height));
+    let _ = std::fs::remove_file(&settings);
+}
