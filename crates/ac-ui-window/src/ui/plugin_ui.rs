@@ -134,6 +134,118 @@ struct PlacedDrawing {
     at: Vec3,
 }
 
+/// What the plugins' drawings draw with: each plugin's fonts and the images
+/// its paint names, gathered once and kept until the plugins change
+/// something, so a frame only places the drawings.
+#[derive(Debug)]
+struct DrawingResourceCache {
+    /// The revision of the plugins' side it was gathered at.
+    revision: u64,
+    /// The drawings it was gathered for.
+    entries: Arc<Vec<WorldDrawingEntry>>,
+    /// The plugins with drawings, in the order of `resources`.
+    owners: Vec<String>,
+    /// Each of those plugins' images and fonts.
+    resources: Arc<Vec<DrawingResources>>,
+    /// For each drawing, its plugin's place in `resources`.
+    of_entry: Vec<usize>,
+    /// The images named that could not be drawn yet (an object's icon
+    /// before the object is known), by plugin and handle: asked for again
+    /// each frame.
+    waiting: Vec<(usize, u32)>,
+}
+
+impl DrawingResourceCache {
+    /// Gather for `entries` (each plugin's drawings together, as the copy
+    /// merges them) at `revision`: `fonts` are every plugin's by plugin and
+    /// handle, `font_of` gives a font its textures and `image` a plugin's
+    /// handle its texture.
+    fn gather(
+        revision: u64,
+        entries: &Arc<Vec<WorldDrawingEntry>>,
+        fonts: &BTreeMap<(String, u32), ac_plugin_ui::fonts::FontView>,
+        font_of: &mut dyn FnMut(&ac_plugin_ui::fonts::FontView) -> CanvasFont,
+        image: &mut dyn FnMut(&str, u32) -> Option<Icon>,
+    ) -> Self {
+        let mut owners: Vec<String> = Vec::new();
+        let mut resources: Vec<DrawingResources> = Vec::new();
+        let mut of_entry = Vec::with_capacity(entries.len());
+        let mut waiting = Vec::new();
+        for entry in entries.iter() {
+            let owner = entry.owner.as_str();
+            let index = match owners.iter().rposition(|o| o == owner) {
+                Some(index) => index,
+                None => {
+                    owners.push(owner.to_owned());
+                    resources.push(DrawingResources {
+                        images: HashMap::new(),
+                        fonts: fonts
+                            .values()
+                            .filter(|f| f.owner == owner)
+                            .map(|f| (f.handle, font_of(f)))
+                            .collect(),
+                    });
+                    resources.len() - 1
+                }
+            };
+            of_entry.push(index);
+            for command in entry.drawing.paint.iter() {
+                let (PaintCmd::Image { image: handle, .. }
+                | PaintCmd::ImageTransformed { image: handle, .. }) = command
+                else {
+                    continue;
+                };
+                let images = &mut resources[index].images;
+                if images.contains_key(handle) || waiting.contains(&(index, *handle)) {
+                    continue;
+                }
+                match image(owner, *handle) {
+                    Some(icon) => {
+                        images.insert(*handle, icon);
+                    }
+                    None => waiting.push((index, *handle)),
+                }
+            }
+        }
+        Self {
+            revision,
+            entries: Arc::clone(entries),
+            owners,
+            resources: Arc::new(resources),
+            of_entry,
+            waiting,
+        }
+    }
+
+    /// Whether it still stands for `entries` at `revision`.
+    fn is_for(&self, revision: u64, entries: &Arc<Vec<WorldDrawingEntry>>) -> bool {
+        self.revision == revision && Arc::ptr_eq(&self.entries, entries)
+    }
+
+    /// Ask again for the images that could not be drawn yet.
+    fn retry(&mut self, image: &mut dyn FnMut(&str, u32) -> Option<Icon>) {
+        if self.waiting.is_empty() {
+            return;
+        }
+        let owners = &self.owners;
+        let mut found = Vec::new();
+        self.waiting
+            .retain(|&(index, handle)| match image(&owners[index], handle) {
+                Some(icon) => {
+                    found.push((index, handle, icon));
+                    false
+                }
+                None => true,
+            });
+        if !found.is_empty() {
+            let resources = Arc::make_mut(&mut self.resources);
+            for (index, handle, icon) in found {
+                resources[index].images.insert(handle, icon);
+            }
+        }
+    }
+}
+
 /// The screen and registered windows as told to the session: the snapshot
 /// (attach) they were told in, the screen, whether the character's layout
 /// was restored, and the windows.
@@ -287,6 +399,8 @@ pub struct PluginWindowUi {
     /// This frame's drawings: none while the portal view hides the world.
     world_drawings: Vec<PlacedDrawing>,
     drawing_entries: Arc<Vec<WorldDrawingEntry>>,
+    /// What those drawings draw with, while it stands.
+    drawing_resources: Option<DrawingResourceCache>,
     samples: Vec<ProjectileDebugSample>,
     projectile_set: Option<(u64, Instant)>,
     setup_shapes: HashMap<u32, Option<SetupShape>>,
@@ -1733,54 +1847,53 @@ impl WindowUi {
             );
         }
         if let Some(overlay) = status.overlays.drawings_mut() {
-            // Each plugin's images and fonts, gathered once for all its
-            // drawings: the fonts it holds, and the images its paint names.
-            let mut owners: HashMap<&str, usize> = HashMap::new();
-            let mut resources: Vec<DrawingResources> = Vec::new();
-            let mut items = Vec::with_capacity(plugins.world_drawings.len());
-            for placed in &plugins.world_drawings {
-                let Some(entry) = plugins.drawing_entries.get(placed.entry) else {
-                    continue;
-                };
-                let owner = entry.owner.as_str();
-                let index = *owners.entry(owner).or_insert_with(|| {
-                    let fonts = view
-                        .fonts
-                        .values()
-                        .filter(|f| f.owner == owner)
-                        .map(|f| (f.handle, font_of(f)))
-                        .collect();
-                    resources.push(DrawingResources {
-                        images: HashMap::new(),
-                        fonts,
-                    });
-                    resources.len() - 1
-                });
-                for command in entry.drawing.paint.iter() {
-                    let (PaintCmd::Image { image: handle, .. }
-                    | PaintCmd::ImageTransformed { image: handle, .. }) = command
-                    else {
-                        continue;
-                    };
-                    let images = &mut resources[index].images;
-                    if !images.contains_key(handle)
-                        && let Some(icon) = image(owner, *handle)
-                    {
-                        images.insert(*handle, icon);
-                    }
-                }
-                let drawing = &entry.drawing;
-                items.push(WorldDrawingItem {
-                    at: placed.at,
-                    size: drawing.size,
-                    pivot: drawing.pivot,
-                    paint: Arc::clone(&drawing.paint),
-                    scale: drawing.scale,
-                    max_range: drawing.max_range,
-                    resources: index,
-                });
+            // Each plugin's images and fonts are gathered when the plugins
+            // changed something, not each frame: every change the plugins
+            // send (a drawing, an image, a font) moves the revision.
+            let entries = &plugins.drawing_entries;
+            if plugins
+                .drawing_resources
+                .as_ref()
+                .is_some_and(|c| !c.is_for(view.revision, entries))
+            {
+                plugins.drawing_resources = None;
             }
-            overlay.tick(&mut host.root, items, resources, camera.as_ref());
+            if plugins.world_drawings.is_empty() {
+                overlay.tick(&mut host.root, Vec::new(), Arc::default(), camera.as_ref());
+            } else {
+                let cache = plugins.drawing_resources.get_or_insert_with(|| {
+                    DrawingResourceCache::gather(
+                        view.revision,
+                        entries,
+                        &view.fonts,
+                        &mut font_of,
+                        &mut image,
+                    )
+                });
+                cache.retry(&mut image);
+                let items = plugins
+                    .world_drawings
+                    .iter()
+                    .filter_map(|placed| {
+                        let drawing = &entries.get(placed.entry)?.drawing;
+                        Some(WorldDrawingItem {
+                            at: placed.at,
+                            size: drawing.size,
+                            pivot: drawing.pivot,
+                            paint: Arc::clone(&drawing.paint),
+                            scale: drawing.scale,
+                            max_range: drawing.max_range,
+                            resources: *cache.of_entry.get(placed.entry)?,
+                        })
+                    })
+                    .collect();
+                overlay.tick(
+                    &mut host.root,
+                    items,
+                    Arc::clone(&cache.resources),
+                    camera.as_ref(),
+                );
+            }
         }
         let (sets, _) = &view.projectile;
         if plugins.projectile_set.is_none_or(|(seen, _)| seen != *sets) {
@@ -1938,12 +2051,13 @@ impl WindowUi {
         }
         plugins.drawing_entries = Arc::clone(&view.drawings);
         if world_shown {
+            // How many raised drawings each plugin has had over each anchor
+            // so far, which tells them apart.
+            let mut raised: HashMap<(IconProbeKey, u64), u32> = HashMap::new();
+            let mut plugin: Option<(&str, u64)> = None;
             for (entry, placed) in view.drawings.iter().enumerate() {
                 let drawing = &placed.drawing;
                 let raise = drawing.height_offset;
-                let Some(key) = drawing_probe_key(drawing.anchor, raise) else {
-                    continue;
-                };
                 // The point the drawing hangs from, which is the one tested
                 // against the world: an object's top, as for its icons, or
                 // the position, raised.
@@ -1968,6 +2082,19 @@ impl WindowUi {
                     }
                 };
                 if drawing.hidden_by_world {
+                    let owner = placed.owner.as_str();
+                    let plugin = match plugin {
+                        Some((of, hash)) if of == owner => hash,
+                        _ => {
+                            let hash = plugin_hash(owner);
+                            plugin = Some((owner, hash));
+                            hash
+                        }
+                    };
+                    let Some(key) = drawing_probe_key(drawing.anchor, raise, plugin, &mut raised)
+                    else {
+                        continue;
+                    };
                     plugins.icon_probes.push(IconProbe { key, anchor: at });
                     if world.icon_probe_visible(key) != Some(true) {
                         continue;
@@ -2169,19 +2296,46 @@ fn icon_probe_key(point: MapPoint) -> IconProbeKey {
     ])
 }
 
-/// What the occlusion answer of a drawing raised `raise` metres above its
-/// anchor is kept under: the raised point, which is what the probe tests.
-/// Not raised, it is the anchor's own key, shared with the icons there.
-fn drawing_probe_key(anchor: MarkerAnchor, raise: f32) -> Option<IconProbeKey> {
-    match anchor {
-        MarkerAnchor::None => None,
-        MarkerAnchor::Object(id) if raise == 0.0 => Some(IconProbeKey::Object(id)),
-        MarkerAnchor::Object(id) => Some(IconProbeKey::RaisedObject(id, raise.to_bits())),
-        MarkerAnchor::Position { point, .. } => Some(icon_probe_key(MapPoint {
-            elevation: point.elevation + f64::from(raise) / MapPoint::UNIT_METRES,
-            ..point
-        })),
+/// A plugin's id as the probe keys carry it.
+fn plugin_hash(owner: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    owner.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// What the occlusion answer of a drawing of `plugin` raised `raise` metres
+/// above its anchor is kept under. Not raised, it is the anchor's own key,
+/// shared with the icons there. Raised, the tested point is its own, so the
+/// key is too: the anchor, the plugin and which of the plugin's raised
+/// drawings over that anchor it is (`raised` counts them, over one frame's
+/// drawings). The height is no part of it: a drawing whose height changes
+/// every frame would never have an answer, which comes a frame or two late,
+/// and would never show.
+fn drawing_probe_key(
+    anchor: MarkerAnchor,
+    raise: f32,
+    plugin: u64,
+    raised: &mut HashMap<(IconProbeKey, u64), u32>,
+) -> Option<IconProbeKey> {
+    let base = match anchor {
+        MarkerAnchor::None => return None,
+        MarkerAnchor::Object(id) => IconProbeKey::Object(id),
+        MarkerAnchor::Position { point, .. } => icon_probe_key(point),
+    };
+    if raise == 0.0 {
+        return Some(base);
     }
+    let count = raised.entry((base, plugin)).or_insert(0);
+    let nth = *count;
+    *count += 1;
+    Some(match base {
+        IconProbeKey::Position(bits) => IconProbeKey::RaisedPosition(bits, plugin, nth),
+        IconProbeKey::Object(id) | IconProbeKey::RaisedObject(id, ..) => {
+            IconProbeKey::RaisedObject(id, plugin, nth)
+        }
+        IconProbeKey::RaisedPosition(bits, ..) => IconProbeKey::RaisedPosition(bits, plugin, nth),
+    })
 }
 
 /// `0xRRGGBBAA` as red, green, blue and alpha in 0..1.
@@ -2388,39 +2542,167 @@ mod tests {
 
     /// A drawing raised above its anchor is tested at the raised point, so
     /// it does not share the answer of the point below it (hidden by a low
-    /// wall it stands over) or of another drawing raised higher; not
-    /// raised, it shares its anchor's.
+    /// wall it stands over), of another drawing of its plugin there or of
+    /// another plugin's; not raised, it shares its anchor's.
     #[test]
     fn a_raised_drawing_keeps_its_own_probe_answer() {
+        let (mine, theirs) = (plugin_hash("my.plugin"), plugin_hash("their.plugin"));
+        assert_ne!(mine, theirs);
+        // One frame's keys for drawings given as (anchor, raise, plugin).
+        let frame = |drawings: &[(MarkerAnchor, f32, u64)]| -> Vec<Option<IconProbeKey>> {
+            let mut raised = HashMap::new();
+            drawings
+                .iter()
+                .map(|(anchor, raise, plugin)| {
+                    drawing_probe_key(*anchor, *raise, *plugin, &mut raised)
+                })
+                .collect()
+        };
         let object = MarkerAnchor::Object(7);
-        assert_eq!(
-            drawing_probe_key(object, 0.0),
-            Some(IconProbeKey::Object(7))
-        );
-        let low = drawing_probe_key(object, 0.5);
-        let high = drawing_probe_key(object, 2.0);
-        assert_ne!(low, Some(IconProbeKey::Object(7)));
-        assert_ne!(low, high);
-        assert_eq!(drawing_probe_key(object, 0.5), low);
-
         let place = MarkerAnchor::Position {
             point: at(40.0),
             is_outdoor: true,
         };
-        assert_eq!(
-            drawing_probe_key(place, 0.0),
-            Some(icon_probe_key(at(40.0)))
-        );
-        // Raised a full map unit, it is the point a unit up.
-        let up = MapPoint {
-            elevation: at(40.0).elevation + 1.0,
-            ..at(40.0)
+        let keys = frame(&[
+            (object, 0.0, mine),
+            (object, 0.5, mine),
+            (object, 2.0, mine),
+            (object, 0.5, theirs),
+            (MarkerAnchor::Object(8), 0.5, mine),
+            (place, 0.0, mine),
+            (place, 1.0, mine),
+            (MarkerAnchor::None, 1.0, mine),
+        ]);
+        assert_eq!(keys[0], Some(IconProbeKey::Object(7)));
+        assert_eq!(keys[5], Some(icon_probe_key(at(40.0))));
+        assert_eq!(keys[7], None);
+        let own: Vec<_> = [1, 2, 3, 4, 6].map(|i| keys[i]).to_vec();
+        for (i, key) in own.iter().enumerate() {
+            assert!(key.is_some());
+            assert!(!own[..i].contains(key), "{key:?} is shared");
+            assert!(![keys[0], keys[5]].contains(key), "{key:?} is the anchor's");
+        }
+    }
+
+    /// The answer comes a frame or two after the test, so a raised drawing
+    /// keeps its key from frame to frame while its height changes (kept
+    /// under its height, one that bobs or rises would never show), and
+    /// while its plugin's drawings over other objects come and go.
+    #[test]
+    fn a_raised_drawing_keeps_its_probe_key_as_its_height_changes() {
+        let plugin = plugin_hash("my.plugin");
+        let key = |others: &[u32], raise: f32| {
+            let mut raised = HashMap::new();
+            for other in others {
+                drawing_probe_key(MarkerAnchor::Object(*other), 1.0, plugin, &mut raised);
+            }
+            drawing_probe_key(MarkerAnchor::Object(7), raise, plugin, &mut raised)
         };
+        let first = key(&[3, 4], 0.50);
+        assert!(first.is_some());
         assert_eq!(
-            drawing_probe_key(place, MapPoint::UNIT_METRES as f32),
-            Some(icon_probe_key(up))
+            key(&[3, 4], 0.51),
+            first,
+            "a new height is the same drawing"
         );
-        assert_eq!(drawing_probe_key(MarkerAnchor::None, 1.0), None);
+        assert_eq!(
+            key(&[4], 0.52),
+            first,
+            "so is it with another object's gone"
+        );
+        let place = |raise: f32| {
+            drawing_probe_key(
+                MarkerAnchor::Position {
+                    point: at(40.0),
+                    is_outdoor: true,
+                },
+                raise,
+                plugin,
+                &mut HashMap::new(),
+            )
+        };
+        assert_eq!(place(0.5), place(0.75));
+    }
+
+    /// What the drawings draw with is gathered once, not each frame: each
+    /// image a plugin's paint names is asked for once, however many of its
+    /// drawings name it; one that cannot be drawn yet is asked for again
+    /// each frame until it can; and what was gathered stands until the
+    /// plugins change something.
+    #[test]
+    fn the_drawings_images_are_gathered_once_and_kept() {
+        use ac_plugin_ui::{Color8, DrawingScale, PaintRect, WorldDrawing};
+        let entry = |owner: &str, images: &[u32]| WorldDrawingEntry {
+            owner: owner.to_owned(),
+            drawing: WorldDrawing {
+                anchor: MarkerAnchor::Object(7),
+                height_offset: 0.0,
+                size: (16.0, 16.0),
+                pivot: (8.0, 16.0),
+                paint: Arc::new(
+                    images
+                        .iter()
+                        .map(|image| PaintCmd::Image {
+                            image: *image,
+                            rect: PaintRect {
+                                x: 0.0,
+                                y: 0.0,
+                                w: 16.0,
+                                h: 16.0,
+                            },
+                            tint: Color8::WHITE,
+                        })
+                        .collect(),
+                ),
+                scale: DrawingScale::Fixed,
+                max_range: 50.0,
+                hidden_by_world: false,
+            },
+        };
+        let entries = Arc::new(vec![
+            entry("a.plugin", &[1, 2]),
+            entry("a.plugin", &[1]),
+            entry("b.plugin", &[1, 1]),
+        ]);
+        let asked = std::cell::RefCell::new(Vec::new());
+        let known = std::cell::Cell::new(false);
+        let mut image = |owner: &str, handle: u32| -> Option<Icon> {
+            asked.borrow_mut().push((owner.to_owned(), handle));
+            // Image 2 is an object's icon, not drawable before the object
+            // is known.
+            (handle == 1 || known.get()).then_some((TextureRef::Runtime(handle), 16.0, 16.0))
+        };
+        let mut font_of =
+            |_: &ac_plugin_ui::fonts::FontView| -> CanvasFont { unreachable!("no fonts are held") };
+        let mut cache =
+            DrawingResourceCache::gather(5, &entries, &BTreeMap::new(), &mut font_of, &mut image);
+        let a = |handle: u32| ("a.plugin".to_owned(), handle);
+        assert_eq!(
+            *asked.borrow(),
+            [a(1), a(2), ("b.plugin".to_owned(), 1)],
+            "each plugin's image once"
+        );
+        assert_eq!(cache.of_entry, [0, 0, 1]);
+        assert_eq!(cache.resources.len(), 2);
+        assert!(cache.resources[0].images.contains_key(&1));
+        assert!(!cache.resources[0].images.contains_key(&2));
+        assert!(cache.resources[1].images.contains_key(&1));
+
+        // It stands while nothing changed, and not after.
+        assert!(cache.is_for(5, &entries));
+        assert!(!cache.is_for(6, &entries));
+        assert!(!cache.is_for(5, &Arc::new(entries.to_vec())));
+
+        // A frame asks only for what is still missing.
+        asked.borrow_mut().clear();
+        cache.retry(&mut image);
+        assert_eq!(*asked.borrow(), [a(2)]);
+        known.set(true);
+        cache.retry(&mut image);
+        assert!(cache.resources[0].images.contains_key(&2));
+        asked.borrow_mut().clear();
+        cache.retry(&mut image);
+        assert!(asked.borrow().is_empty(), "nothing is missing any more");
     }
 
     #[test]

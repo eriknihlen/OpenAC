@@ -1453,8 +1453,7 @@ impl PluginUi {
         if let Some(l) = self.marker_layers.iter_mut().find(|l| l.id == layer) {
             l.drawings = kept;
         }
-        self.changes
-            .push(UiChange::Drawings(self.merged_drawings()));
+        self.changes.push(self.drawings_change(owner));
         true
     }
 
@@ -1466,17 +1465,34 @@ impl PluginUi {
             .retain(|l| !(l.id == layer && l.owner == owner));
         let removed = self.marker_layers.len() != before;
         if removed {
-            self.push_markers();
+            self.push_markers(&[owner]);
         }
         removed
     }
 
-    /// Tells the window every kind of marker changed.
-    fn push_markers(&mut self) {
+    /// Tells the window every kind of marker changed: the icons and shapes
+    /// of all, and the drawings of each of `owners`.
+    fn push_markers(&mut self, owners: &[&str]) {
         self.changes.push(UiChange::Icons(self.merged_icons()));
         self.changes.push(UiChange::Shapes(self.merged_shapes()));
-        self.changes
-            .push(UiChange::Drawings(self.merged_drawings()));
+        for owner in owners {
+            self.changes.push(self.drawings_change(owner));
+        }
+    }
+
+    /// What tells the window `owner`'s drawings as they stand: its layers'
+    /// in the order they were made, each in the order given.
+    fn drawings_change(&self, owner: &str) -> UiChange {
+        UiChange::Drawings {
+            owner: owner.to_owned(),
+            drawings: Arc::new(
+                self.marker_layers
+                    .iter()
+                    .filter(|l| l.owner == owner)
+                    .flat_map(|l| l.drawings.iter().cloned())
+                    .collect(),
+            ),
+        }
     }
 
     /// Takes every plugin's markers over objects down: the character left
@@ -1494,12 +1510,19 @@ impl PluginUi {
         }) {
             return;
         }
+        let mut owners: Vec<String> = Vec::new();
         for layer in &mut self.marker_layers {
             layer.icons.retain(|i| !on_object(&i.anchor));
             layer.shapes.retain(|s| !on_object(&s.anchor));
+            let before = layer.drawings.len();
             layer.drawings.retain(|d| !on_object(&d.anchor));
+            if layer.drawings.len() != before && !owners.contains(&layer.owner) {
+                owners.push(layer.owner.clone());
+            }
         }
-        self.push_markers();
+        owners.sort();
+        let owners: Vec<&str> = owners.iter().map(String::as_str).collect();
+        self.push_markers(&owners);
     }
 
     /// Every icon of every plugin, by plugin id, then its layers in the
@@ -1536,7 +1559,8 @@ impl PluginUi {
     }
 
     /// Every drawing of every plugin, in the same order as
-    /// [`Self::merged_icons`].
+    /// [`Self::merged_icons`]: what the window has once it took in every
+    /// plugin's [`UiChange::Drawings`].
     #[must_use]
     pub fn merged_drawings(&self) -> Arc<Vec<WorldDrawingEntry>> {
         let mut layers: Vec<&MarkerLayer> = self.marker_layers.iter().collect();
@@ -1715,7 +1739,7 @@ impl PluginUi {
         let before = self.marker_layers.len();
         self.marker_layers.retain(|l| l.owner != owner);
         if self.marker_layers.len() != before {
-            self.push_markers();
+            self.push_markers(&[owner]);
         }
         self.hotkeys.release(owner);
         self.follow_hotkeys();
@@ -1771,7 +1795,15 @@ impl PluginUi {
         out.push(UiChange::Triangles(self.merged_triangles()));
         out.push(UiChange::Icons(self.merged_icons()));
         out.push(UiChange::Shapes(self.merged_shapes()));
-        out.push(UiChange::Drawings(self.merged_drawings()));
+        let mut drawing_owners: Vec<&str> = self
+            .marker_layers
+            .iter()
+            .filter(|l| !l.drawings.is_empty())
+            .map(|l| l.owner.as_str())
+            .collect();
+        drawing_owners.sort_unstable();
+        drawing_owners.dedup();
+        out.extend(drawing_owners.into_iter().map(|o| self.drawings_change(o)));
         out.push(UiChange::Hotkeys(Arc::new(self.hotkeys.bound())));
         out.extend(
             self.dialogs

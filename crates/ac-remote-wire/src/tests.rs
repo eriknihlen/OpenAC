@@ -40,8 +40,8 @@ use ac_plugin_ui::{
     ClientWindowAction, Color8, DialogView, DrawingScale, GroundShape, GroundShapeKind,
     ImageSource, ImageView, ItemRecord, MapPoint, MarkerAnchor, MarkupDocument, PaintCmd,
     PaintRect, PanelDescriptor, PanelView, PluginIcon, PointerEvent, PointerKind, ProjectileSample,
-    Rgba, ThemeKind, UiChange, UiInput, UiOwner, UiValue, WorldDrawing, WorldDrawingEntry,
-    WorldIcon, WorldIconEntry, WorldLabel, WorldLine, WorldTriangle,
+    Rgba, ThemeKind, UiChange, UiInput, UiOwner, UiValue, WorldDrawing, WorldIcon, WorldIconEntry,
+    WorldLabel, WorldLine, WorldTriangle,
 };
 use ac_proto::allegiance::{AllegianceMember, AllegianceProfile};
 use ac_proto::appraise::{ArmorProfile, IdentifyObjectResponse};
@@ -1133,10 +1133,10 @@ fn plugin_ui_changes() -> Vec<UiChange> {
             },
         },
         UiChange::WindowsHeld(vec!["inventory".into(), "vitals".into()]),
-        UiChange::Drawings(Arc::new(vec![
-            WorldDrawingEntry {
-                owner: "example".into(),
-                drawing: WorldDrawing {
+        UiChange::Drawings {
+            owner: "example".into(),
+            drawings: Arc::new(vec![
+                WorldDrawing {
                     anchor: MarkerAnchor::Object(0x8000_0002),
                     height_offset: 0.25,
                     size: (120.0, 24.0),
@@ -1167,10 +1167,7 @@ fn plugin_ui_changes() -> Vec<UiChange> {
                     max_range: 80.0,
                     hidden_by_world: true,
                 },
-            },
-            WorldDrawingEntry {
-                owner: "other".into(),
-                drawing: WorldDrawing {
+                WorldDrawing {
                     anchor: MarkerAnchor::Position {
                         point: map_point(6.0),
                         is_outdoor: false,
@@ -1183,8 +1180,8 @@ fn plugin_ui_changes() -> Vec<UiChange> {
                     max_range: 40.0,
                     hidden_by_world: false,
                 },
-            },
-        ])),
+            ]),
+        },
     ]
 }
 
@@ -2849,7 +2846,7 @@ fn the_subscription_filters_the_stateless_kinds() {
 /// a link must be built from the same layout).
 #[test]
 fn the_shape_is_pinned() {
-    assert_eq!(shape_hex(), "cf48e832dcc7f203", "{:#x}", shape());
+    assert_eq!(shape_hex(), "3919adf2a553653f", "{:#x}", shape());
 }
 
 /// The size of a representative attach: a snapshot of a busy spot, a full

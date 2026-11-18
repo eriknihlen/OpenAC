@@ -148,9 +148,15 @@ pub fn place_shape(
 pub enum IconProbeKey {
     /// An object, whichever of its icons asked.
     Object(u32),
-    /// A point raised above an object's top, by the object and the bits of
-    /// the height in metres: a drawing hung higher than its icons.
-    RaisedObject(u32, u32),
+    /// A point raised above an object's top, where a drawing hangs higher
+    /// than the object's icons: by the object, the plugin (its id, hashed)
+    /// and which of that plugin's raised drawings over the object it is, in
+    /// the order the plugin has them. Not by the height, so a drawing keeps
+    /// its answer while its height changes.
+    RaisedObject(u32, u64, u32),
+    /// The same above a fixed position, by the bits of the position's map
+    /// coordinates.
+    RaisedPosition([u64; 3], u64, u32),
     /// A fixed position, by the bits of its map coordinates (east-west,
     /// north-south, elevation): every icon there shares the answer, and an
     /// icon put somewhere else, even in the place of one taken away, starts

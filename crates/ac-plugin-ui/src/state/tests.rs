@@ -1254,22 +1254,41 @@ fn drawing_layers_merge_by_plugin_and_go_with_it() {
             ("z.plugin", MarkerAnchor::Object(3)),
         ]
     );
-    assert!(matches!(
-        ui.take_changes().last(),
-        Some(UiChange::Drawings(d)) if d.len() == 2
-    ));
-    assert!(
-        ui.snapshot()
-            .iter()
-            .any(|c| matches!(c, UiChange::Drawings(d) if d.len() == 2))
-    );
+    // Each set sent only its own plugin's drawings, and a window that took
+    // them in has them all, in the same order.
+    let changes = ui.take_changes();
+    let sent: Vec<_> = changes
+        .iter()
+        .filter_map(|c| match c {
+            UiChange::Drawings { owner, drawings } => Some((owner.as_str(), drawings.len())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent, [("z.plugin", 1), ("a.plugin", 1)]);
+    let mut copy = PluginUiView::new();
+    for change in changes {
+        copy.apply(change);
+    }
+    assert_eq!(copy.drawings, merged);
+    // A window that attaches gets the same, a plugin at a time.
+    let mut fresh = PluginUiView::new();
+    for change in ui.snapshot() {
+        fresh.apply(change);
+    }
+    assert_eq!(fresh.drawings, merged);
     // Drawings and icons on one layer are set apart.
     assert!(ui.set_icons("a.plugin", first, vec![icon(MarkerAnchor::Object(1))]));
     assert_eq!(ui.merged_drawings().len(), 2);
+    drop(ui.take_changes());
     ui.release("a.plugin");
     assert_eq!(ui.merged_drawings().len(), 1);
     assert!(ui.remove_marker_layer("z.plugin", later));
     assert!(ui.merged_drawings().is_empty());
+    // The window is told of each plugin's going, and has none left.
+    for change in ui.take_changes() {
+        copy.apply(change);
+    }
+    assert!(copy.drawings.is_empty());
 }
 
 #[test]
@@ -1463,8 +1482,7 @@ fn clearing_markers_empties_the_layers_and_they_stay_usable() {
     assert!(ui.merged_icons().is_empty());
     assert!(matches!(
         ui.take_changes().as_slice(),
-        [UiChange::Icons(i), UiChange::Shapes(s), UiChange::Drawings(d)]
-            if i.is_empty() && s.is_empty() && d.is_empty()
+        [UiChange::Icons(i), UiChange::Shapes(s)] if i.is_empty() && s.is_empty()
     ));
     ui.clear_object_markers();
     assert!(ui.take_changes().is_empty());
@@ -1536,8 +1554,8 @@ fn clearing_object_markers_keeps_markers_lines_and_triangles_at_positions() {
     assert_eq!(ui.merged_triangles().len(), 1);
     assert!(matches!(
         ui.take_changes().as_slice(),
-        [UiChange::Icons(i), UiChange::Shapes(s), UiChange::Drawings(d)]
-            if i.len() == 1 && s.len() == 1 && d.len() == 1
+        [UiChange::Icons(i), UiChange::Shapes(s), UiChange::Drawings { owner, drawings }]
+            if i.len() == 1 && s.len() == 1 && owner == "edwards.tank" && drawings.len() == 1
     ));
     // Nothing on an object is left, so a second clear changes nothing.
     ui.clear_object_markers();

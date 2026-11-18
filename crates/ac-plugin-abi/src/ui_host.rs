@@ -764,7 +764,7 @@ pub fn handle(
             state.set_shapes(id, r.layer, shapes).to_bytes()
         }
         Import::UiMarkersSetDrawings => {
-            let r = DrawingSet::from_bytes(request).map_err(bad)?;
+            let r = DrawingSet::from_bytes_at(request, version).map_err(bad)?;
             let drawings = r
                 .drawings
                 .into_iter()

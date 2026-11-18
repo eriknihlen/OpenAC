@@ -22,8 +22,8 @@ use ac_plugin_ui::{
     GroundShapeKind, ImageSource, ImageView, ItemRecord, MapPoint, MarkerAnchor, MarkupDocument,
     PaintCmd, PaintRect, PanelDescriptor, PanelView, PluginIcon, PointerEvent, PointerKind,
     ProjectileSample, Rgba, ThemeKind, UiChange, UiInput, UiOwner, UiValue, WindowIcon,
-    WindowLayout, WindowOwner, WindowParts, WindowReport, WorldDrawing, WorldDrawingEntry,
-    WorldIcon, WorldIconEntry, WorldLabel, WorldLine, WorldTriangle,
+    WindowLayout, WindowOwner, WindowParts, WindowReport, WorldDrawing, WorldIcon, WorldIconEntry,
+    WorldLabel, WorldLine, WorldTriangle,
 };
 
 use crate::codec::{
@@ -247,7 +247,6 @@ record! {
         max_range: f32,
         hidden_by_world: bool,
     }
-    WorldDrawingEntry { owner: String, drawing: WorldDrawing }
     GroundShape {
         anchor: MarkerAnchor,
         kind: GroundShapeKind,
@@ -606,7 +605,7 @@ union! {
         29 => Modal { panel: u32, owner: Option<u32> },
         30 => WindowApply { name: String, layout: WindowLayout, parts: WindowParts },
         31 => WindowsHeld(names: Vec<String>),
-        32 => Drawings(drawings: Arc<Vec<WorldDrawingEntry>>),
+        32 => Drawings { owner: String, drawings: Arc<Vec<WorldDrawing>> },
     }
     WindowOwner: "window owner" {
         0 => Client,

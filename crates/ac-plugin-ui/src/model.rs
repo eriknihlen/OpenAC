@@ -1074,8 +1074,16 @@ pub enum UiChange {
     Icons(Arc<Vec<WorldIconEntry>>),
     /// Every plugin's ground shapes, merged.
     Shapes(Arc<Vec<GroundShape>>),
-    /// Every plugin's world drawings, merged.
-    Drawings(Arc<Vec<WorldDrawingEntry>>),
+    /// One plugin's world drawings: its layers' in the order they were made,
+    /// each in the order given; none when it has none any more. Every other
+    /// plugin's stay as they are, so a plugin that sets its drawings often
+    /// sends only its own.
+    Drawings {
+        /// The plugin.
+        owner: String,
+        /// Its drawings from now on.
+        drawings: Arc<Vec<WorldDrawing>>,
+    },
     /// Projectile markers to show for a moment.
     ProjectileDebug(Arc<Vec<ProjectileSample>>),
     /// A plugin asks the window to show, hide or toggle a client window.

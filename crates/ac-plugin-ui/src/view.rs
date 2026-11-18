@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::model::{
     CanvasView, ClientWindow, ClientWindowAction, GroundShape, ImageView, PanelView,
-    ProjectileSample, UiChange, WorldDrawingEntry, WorldIconEntry, WorldLabel, WorldLine,
-    WorldTriangle,
+    ProjectileSample, UiChange, WorldDrawing, WorldDrawingEntry, WorldIconEntry, WorldLabel,
+    WorldLine, WorldTriangle,
 };
 
 /// What changed in the copy since the window last looked.
@@ -46,8 +46,11 @@ pub struct PluginUiView {
     pub icons: Arc<Vec<WorldIconEntry>>,
     /// The ground shapes.
     pub shapes: Arc<Vec<GroundShape>>,
-    /// The world drawings.
+    /// The world drawings, every plugin's merged: by plugin id, then in
+    /// the order the plugin has them.
     pub drawings: Arc<Vec<WorldDrawingEntry>>,
+    /// The same by plugin, as each last sent its own.
+    drawings_by_owner: BTreeMap<String, Arc<Vec<WorldDrawing>>>,
     /// The projectile markers last sent, with how many sets have come
     /// (the window shows each set for a moment).
     pub projectile: (u64, Arc<Vec<ProjectileSample>>),
@@ -155,6 +158,7 @@ impl PluginUiView {
                 self.icons = Arc::default();
                 self.shapes = Arc::default();
                 self.drawings = Arc::default();
+                self.drawings_by_owner.clear();
                 self.hotkeys = Arc::default();
                 self.client_requests.clear();
                 self.window_applies.clear();
@@ -273,7 +277,24 @@ impl PluginUiView {
             UiChange::Triangles(triangles) => self.triangles = triangles,
             UiChange::Icons(icons) => self.icons = icons,
             UiChange::Shapes(shapes) => self.shapes = shapes,
-            UiChange::Drawings(drawings) => self.drawings = drawings,
+            UiChange::Drawings { owner, drawings } => {
+                if drawings.is_empty() {
+                    self.drawings_by_owner.remove(&owner);
+                } else {
+                    self.drawings_by_owner.insert(owner, drawings);
+                }
+                self.drawings = Arc::new(
+                    self.drawings_by_owner
+                        .iter()
+                        .flat_map(|(owner, drawings)| {
+                            drawings.iter().map(|drawing| WorldDrawingEntry {
+                                owner: owner.clone(),
+                                drawing: drawing.clone(),
+                            })
+                        })
+                        .collect(),
+                );
+            }
             UiChange::ProjectileDebug(samples) => {
                 self.projectile = (self.projectile.0 + 1, samples);
             }

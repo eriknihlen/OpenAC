@@ -118,7 +118,7 @@ pub fn place_drawings(
 pub struct WorldDrawingLayer {
     font: Option<Arc<UiFont>>,
     drawings: Vec<WorldDrawingItem>,
-    resources: Vec<DrawingResources>,
+    resources: Arc<Vec<DrawingResources>>,
     placements: Vec<DrawingPlacement>,
 }
 
@@ -206,12 +206,13 @@ impl WorldDrawingOverlay {
     }
 
     /// Place `drawings` for this frame (none without a camera), drawing each
-    /// with the `resources` it names.
+    /// with the `resources` it names (shared, so the caller keeps them from
+    /// frame to frame).
     pub fn tick(
         &mut self,
         ui: &mut UiRoot,
         drawings: Vec<WorldDrawingItem>,
-        resources: Vec<DrawingResources>,
+        resources: Arc<Vec<DrawingResources>>,
         camera: Option<&OverlayCamera>,
     ) {
         self.scratch.clear();

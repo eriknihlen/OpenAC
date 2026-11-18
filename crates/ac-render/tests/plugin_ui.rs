@@ -1576,3 +1576,179 @@ fn a_placing_leaves_the_parts_not_asked_for_where_the_window_is() {
     assert_eq!((now.width, now.height), (reported.width, reported.height));
     let _ = std::fs::remove_file(&settings);
 }
+
+/// A world for the window to place things in: flat, with a landblock's
+/// metres as the drawing frame, a camera, and the answers the test gives
+/// for what the world hides.
+struct FlatWorld {
+    view: glam::Mat4,
+    projection: glam::Mat4,
+    portal: std::cell::Cell<bool>,
+    in_sight:
+        std::cell::RefCell<std::collections::HashMap<ac_ui_window::world::IconProbeKey, bool>>,
+}
+
+impl ac_ui_window::world::WorldFrame for FlatWorld {
+    fn frame_position(&self, _cell_id: u32, local: glam::Vec3) -> Option<glam::Vec3> {
+        Some(local)
+    }
+
+    fn published_root_pose(&self, _guid: u32) -> Option<glam::Mat4> {
+        None
+    }
+
+    fn view_matrices(&self) -> Option<(glam::Mat4, glam::Mat4)> {
+        Some((self.view, self.projection))
+    }
+
+    fn portal_hides_world(&self) -> bool {
+        self.portal.get()
+    }
+
+    fn icon_probe_visible(&self, key: ac_ui_window::world::IconProbeKey) -> Option<bool> {
+        self.in_sight.borrow().get(&key).copied()
+    }
+
+    fn sample_terrain_z(&self, _x: f32, _y: f32) -> Option<f32> {
+        None
+    }
+}
+
+/// A plugin's drawing in the real window: its paint lands with its pivot on
+/// the point its anchor projects to; asked to hide behind the world, it
+/// waits for the world's answer for its point and follows it, keeping the
+/// answer while its height changes; and nothing hangs over the portal view.
+#[test]
+#[ignore = "needs the retail dat files"]
+fn a_plugins_drawing_hangs_at_its_place_and_hides_behind_the_world() {
+    use ac_plugin_ui::{Color8, DrawingScale, MapPoint, MarkerAnchor, PaintCmd, PaintRect};
+    use glam::Vec3;
+    let size = (800, 600);
+    let mut state = PluginUi::new();
+    state.set_window_attached(true);
+    let layer = state.create_marker_layer("test.draw");
+    let point = MapPoint {
+        east_west: 10.0,
+        north_south: 20.0,
+        elevation: 0.0,
+    };
+    // A 100x20 plate standing on a point `raise` metres over the position.
+    let plate = |raise: f32, hidden_by_world: bool| ac_plugin_ui::WorldDrawing {
+        anchor: MarkerAnchor::Position {
+            point,
+            is_outdoor: true,
+        },
+        height_offset: raise,
+        size: (100.0, 20.0),
+        pivot: (50.0, 20.0),
+        paint: Arc::new(vec![PaintCmd::FillRect {
+            rect: PaintRect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 20.0,
+            },
+            color: Color8::new(255, 0, 255, 255),
+        }]),
+        scale: DrawingScale::Fixed,
+        max_range: 50.0,
+        hidden_by_world,
+    };
+    assert!(state.set_drawings("test.draw", layer, vec![plate(2.0, false)]));
+
+    let mut ui = WindowUi::build(dats(), size).expect("the UI builds");
+    ui.set_pixels_per_unit(1.0);
+    let mut scene = Scene::default();
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.snapshot(),
+    )));
+    ui.feed(&mut scene);
+
+    // The camera stands 10 m south of the position, at its height, looking
+    // north with a right angle of view top to bottom: a point `h` metres up
+    // lands at the middle of the screen across and `h * 30` pixels over the
+    // middle down.
+    let (_, _, x, y, z) = point.to_landblock().expect("a place on the map");
+    let eye = Vec3::new(x, y - 10.0, z);
+    let world = FlatWorld {
+        view: glam::camera::rh::view::look_at_mat4(eye, eye + Vec3::Y, Vec3::Z),
+        projection: glam::camera::rh::proj::directx::perspective(
+            std::f32::consts::FRAC_PI_2,
+            4.0 / 3.0,
+            0.1,
+            100.0,
+        ),
+        portal: std::cell::Cell::new(false),
+        in_sight: std::cell::RefCell::default(),
+    };
+    let camera = ac_ui::overlay::OverlayCamera {
+        view: world.view,
+        projection: world.projection,
+        viewport: (800.0, 600.0),
+    };
+    // One frame as the surface runs it; the plates drawn, by their boxes.
+    let frame = |ui: &mut WindowUi, scene: &Scene| -> Vec<(f32, f32, f32, f32)> {
+        ui.set_world_view(Some(camera), None);
+        ui.set_plugin_world(Some(&world), Some(scene));
+        ui.frame(Instant::now(), size)
+            .commands()
+            .filter_map(|c| match c {
+                ac_ui::draw::DrawCmd::Fill { x, y, w, h, color }
+                    if (color.r, color.g, color.b) == (1.0, 0.0, 1.0) =>
+                {
+                    Some((*x, *y, *w, *h))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let at_two_metres = [(350.0, 220.0, 100.0, 20.0)];
+    assert_eq!(frame(&mut ui, &scene), at_two_metres);
+    assert!(ui.plugin_icon_probes().is_empty(), "it did not ask to hide");
+    // A frame with nothing changed draws the same.
+    assert_eq!(frame(&mut ui, &scene), at_two_metres);
+
+    // Asked to hide behind the world, it is tested at the point it hangs
+    // from, and stays out of sight until the world says it is in sight.
+    let set = |state: &mut PluginUi, scene: &mut Scene, ui: &mut WindowUi, raise: f32| {
+        assert!(state.set_drawings("test.draw", layer, vec![plate(raise, true)]));
+        scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+            state.take_changes(),
+        )));
+        ui.feed(scene);
+    };
+    set(&mut state, &mut scene, &mut ui, 2.0);
+    assert!(frame(&mut ui, &scene).is_empty(), "no answer yet");
+    let probes = ui.plugin_icon_probes().to_vec();
+    assert_eq!(probes.len(), 1);
+    assert!((probes[0].anchor - Vec3::new(x, y, z + 2.0)).length() < 1e-3);
+    world.in_sight.borrow_mut().insert(probes[0].key, false);
+    assert!(frame(&mut ui, &scene).is_empty(), "the world hides it");
+    world.in_sight.borrow_mut().insert(probes[0].key, true);
+    assert_eq!(frame(&mut ui, &scene), at_two_metres);
+
+    // Its height changes, as one that bobs or rises does every frame: the
+    // answer it has is still its own, so it shows at once at the new place,
+    // and the new point is the one tested.
+    set(&mut state, &mut scene, &mut ui, 2.5);
+    assert_eq!(frame(&mut ui, &scene), [(350.0, 205.0, 100.0, 20.0)]);
+    let moved = ui.plugin_icon_probes().to_vec();
+    assert_eq!(moved.len(), 1);
+    assert_eq!(moved[0].key, probes[0].key);
+    assert!((moved[0].anchor - Vec3::new(x, y, z + 2.5)).length() < 1e-3);
+
+    // Nothing hangs over the portal view, and nothing is tested.
+    world.portal.set(true);
+    assert!(frame(&mut ui, &scene).is_empty());
+    assert!(ui.plugin_icon_probes().is_empty());
+    world.portal.set(false);
+    assert_eq!(frame(&mut ui, &scene).len(), 1);
+
+    // The layer goes, and its drawing with it.
+    assert!(state.remove_marker_layer("test.draw", layer));
+    scene.apply(PresentationEvent::Interface(InterfaceEvent::PluginUi(
+        state.take_changes(),
+    )));
+    ui.feed(&mut scene);
+    assert!(frame(&mut ui, &scene).is_empty());
+}

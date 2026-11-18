@@ -159,7 +159,7 @@ fn draw_once_with(
     let mut ui = root(800.0, 600.0);
     let mut host = OverlayHost::mount(&mut ui);
     let mut overlay = WorldDrawingOverlay::mount(&mut ui, &mut host, interface_font);
-    overlay.tick(&mut ui, drawings, resources, Some(&camera()));
+    overlay.tick(&mut ui, drawings, Arc::new(resources), Some(&camera()));
     let placed = ui
         .widget::<WorldDrawingLayer>(overlay.element())
         .unwrap()
