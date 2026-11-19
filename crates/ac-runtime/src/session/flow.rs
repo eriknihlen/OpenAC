@@ -1060,7 +1060,7 @@ impl SessionFlow {
         self.events
             .push_back(SessionEvent::LoggedOff { confirmed: true });
         self.generation = self.generation.next();
-        self.active_character = None;
+        let left = self.active_character.take().map(|c| c.id);
         self.pending_enter_world = None;
         self.pending_chargen = PendingChargen::None;
         self.creates_since_character_list = 0;
@@ -1075,6 +1075,10 @@ impl SessionFlow {
             let population = u32::try_from(name.current_connections).ok();
             let world = name.world_name.clone();
             self.selection.apply_world_name(&world, population);
+        }
+        // The character just left stays highlighted on the roster.
+        if let Some(id) = left {
+            self.selection.try_highlight(id);
         }
         self.events
             .push_back(SessionEvent::ReturnedToCharacterSelect(self.generation));

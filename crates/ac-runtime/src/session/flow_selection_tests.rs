@@ -376,6 +376,22 @@ fn a_logoff_to_selection_starts_a_new_generation_on_the_same_connection() {
 }
 
 #[test]
+fn the_character_logged_off_is_highlighted_on_the_roster() {
+    let mut flow = selecting();
+    flow.enter_world(Duration::ZERO, &CharacterSelector::Name("Amy".into()))
+        .unwrap();
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DF]));
+    flow.handle_message(Duration::ZERO, &create_object(0x5000_0003));
+    flow.request_return_to_selection(Duration::ZERO).unwrap();
+    flow.handle_message(Duration::ZERO, &words(&[0xF653]));
+    assert_eq!(flow.phase(), Phase::InCharacterSelect);
+    assert_eq!(
+        flow.selection().snapshot().highlighted_character_id,
+        0x5000_0003
+    );
+}
+
+#[test]
 fn the_next_login_character_enters_once_after_the_return() {
     // NextLoginAutomaticallyEntersTheRememberedRosterCharacterOnce.
     let mut flow = selecting_in_world();
