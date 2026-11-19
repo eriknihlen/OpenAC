@@ -2858,6 +2858,17 @@ mod tests {
     use super::*;
     use ac_launcher_core::window::profile_editor::ProfileTextEditor;
 
+    /// The header's Settings gear needs a symbol font; since egui 0.37 that
+    /// is a feature of its own, and without it the gear is an empty box.
+    #[test]
+    fn the_settings_gear_has_a_glyph() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let font = egui::FontId::proportional(16.0);
+        assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font, '⚙')));
+    }
+
     /// Runs frames of the profile editor body in a headless egui context,
     /// feeding each frame its events.
     struct Harness {
