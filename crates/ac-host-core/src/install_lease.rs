@@ -16,7 +16,18 @@ pub const LOCK_FILE_NAME: &str = ".update-session.lock";
 /// A hold on the install's session lock; released when dropped.
 #[derive(Debug)]
 pub struct InstallSessionLease {
-    _file: File,
+    file: File,
+}
+
+impl Drop for InstallSessionLease {
+    fn drop(&mut self) {
+        // Closing the file alone releases the lock only once every handle
+        // to that open file is closed, and a process being started holds a
+        // copy of each until it has loaded its program: the lock would
+        // outlive the hold by that long. Nothing can be done about a
+        // failure here; the close that follows releases it as before.
+        let _ = self.file.unlock();
+    }
 }
 
 impl InstallSessionLease {
@@ -62,7 +73,7 @@ impl InstallSessionLease {
             file.try_lock_shared()
         };
         match locked {
-            Ok(()) => Ok(Some(Self { _file: file })),
+            Ok(()) => Ok(Some(Self { file })),
             // Held in a way this request cannot share: that is the answer.
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(error)) => Err(error),
@@ -105,6 +116,21 @@ mod tests {
                     .unwrap()
                     .is_none()
             );
+        }
+        // A hold that is dropped is over at once, also while a copy of its
+        // file is open (a process being started holds one for a moment).
+        {
+            let writer = InstallSessionLease::try_acquire_exclusive(&paths)
+                .unwrap()
+                .expect("free");
+            let copy = writer.file.try_clone().unwrap();
+            drop(writer);
+            assert!(
+                InstallSessionLease::try_acquire_shared(&paths)
+                    .unwrap()
+                    .is_some()
+            );
+            drop(copy);
         }
         assert_eq!(
             InstallSessionLease::lock_path(&paths),

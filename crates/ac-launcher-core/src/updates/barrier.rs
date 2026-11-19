@@ -20,14 +20,36 @@ pub struct UpdateSessionBarrier {
 /// A running session's shared hold; released when dropped.
 #[derive(Debug)]
 pub struct SessionLease {
-    _file: File,
+    file: File,
 }
 
 /// An update's exclusive hold; released when dropped.
 #[derive(Debug)]
 pub struct ExclusiveLease {
-    _file: File,
+    file: File,
     lock_path: PathBuf,
+}
+
+/// Releases a lease's lock. Closing the file alone releases it only once
+/// every handle to that open file is closed, and a process being started
+/// holds a copy of each until it has loaded its program: the lock would
+/// outlive the lease by that long, and a lease asked for right after would
+/// be refused. Nothing can be done about a failure here; the close that
+/// follows releases the lock as before.
+fn release(file: &File) {
+    let _ = file.unlock();
+}
+
+impl Drop for SessionLease {
+    fn drop(&mut self) {
+        release(&self.file);
+    }
+}
+
+impl Drop for ExclusiveLease {
+    fn drop(&mut self) {
+        release(&self.file);
+    }
 }
 
 impl ExclusiveLease {
@@ -84,7 +106,7 @@ impl UpdateSessionBarrier {
     pub fn try_acquire_session(&self) -> Result<Option<SessionLease>, UpdateError> {
         let file = self.open()?;
         match file.try_lock_shared() {
-            Ok(()) => Ok(Some(SessionLease { _file: file })),
+            Ok(()) => Ok(Some(SessionLease { file })),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(error)) => Err(UpdateError::io(
                 format!("The update/session lease could not be opened: {error}"),
@@ -109,7 +131,7 @@ impl UpdateSessionBarrier {
         let file = self.open()?;
         match file.try_lock() {
             Ok(()) => Ok(Some(ExclusiveLease {
-                _file: file,
+                file,
                 lock_path: self.lock_path.clone(),
             })),
             Err(TryLockError::WouldBlock) => Ok(None),
@@ -141,5 +163,34 @@ impl UpdateSessionBarrier {
                 "The cleanup operation does not hold this update barrier's exclusive lease.",
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ids::unique_hex32;
+
+    // A process being started holds a copy of every open file of this one
+    // until it has loaded its program. Closing a lease's file does not
+    // release the lock while such a copy is alive, so a lease taken right
+    // after one was dropped (staging, then a client start) was refused now
+    // and then. Dropping a lease releases the lock itself.
+    #[test]
+    fn a_dropped_lease_is_released_while_a_copy_of_its_file_is_open() {
+        let root = std::env::temp_dir().join(format!("acl-barrier-{}", unique_hex32()));
+        let barrier = UpdateSessionBarrier::new(&root);
+
+        let update = barrier.acquire_exclusive().unwrap();
+        let copy = update.file.try_clone().unwrap();
+        drop(update);
+        let session = barrier.acquire_session().expect("the update is over");
+
+        let copy_of_session = session.file.try_clone().unwrap();
+        drop(session);
+        barrier.acquire_exclusive().expect("no session is left");
+
+        drop((copy, copy_of_session));
+        crate::fsutil::try_delete_tree(&root);
     }
 }

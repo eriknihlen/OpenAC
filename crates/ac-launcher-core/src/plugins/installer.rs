@@ -176,8 +176,17 @@ pub struct PluginInstaller {
 /// plugin write lock alone; both go when it is dropped.
 #[derive(Debug)]
 struct PluginWriteLease {
-    _write_lock: std::fs::File,
+    write_lock: std::fs::File,
     _session: crate::updates::SessionLease,
+}
+
+impl Drop for PluginWriteLease {
+    fn drop(&mut self) {
+        // Released here and not by the close alone: a process being started
+        // holds a copy of the open file for a moment, and the lock would
+        // last as long as the copy (see the session lock).
+        let _ = self.write_lock.unlock();
+    }
 }
 
 impl std::fmt::Debug for PluginInstaller {
@@ -301,7 +310,7 @@ impl PluginInstaller {
             .map_err(busy)?;
         match file.try_lock() {
             Ok(()) => Ok(PluginWriteLease {
-                _write_lock: file,
+                write_lock: file,
                 _session: session,
             }),
             Err(std::fs::TryLockError::WouldBlock) => {
