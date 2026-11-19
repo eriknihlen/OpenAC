@@ -12,6 +12,24 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.15 (2026-11-19)
+
+- The character you just logged off stays highlighted on the character
+  list, as in the original client. Before, the list went back to its first
+  character. Code by Johan Lundberg.
+- Plugin API 1.14, by David Smith:
+  - A plugin can paint its own pictures (a name plate, a bar, text in its
+    own font, its own images) and hang them over objects or at places in the
+    world, at one size or shrinking with distance, hidden behind walls if it
+    asks.
+  - A plugin can read the screen's size and every registered window, place
+    windows, and hold windows out of sight without changing what the player
+    saved.
+- When the server stops answering your moves, the client log now says where
+  the character was over the last moments, to help find out why.
+- The plugin engine is updated to wasmtime 48.0.9, which brings two security
+  fixes; the launcher's window library is updated too.
+
 ## OpenAC (Rust) 0.2.14 (2026-11-17)
 
 - A Yes/No question from the server that times out is now answered "No",
