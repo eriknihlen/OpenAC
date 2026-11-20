@@ -159,15 +159,51 @@ fn the_hover_caption_carries_the_material_prefix_and_stays_plain_without_one() {
 }
 
 #[test]
-fn the_window_starts_hidden_and_follows_the_trade_opening_and_closing() {
+fn the_window_starts_hidden_and_shows_when_a_trade_opens() {
     let mut t = trade_window();
     assert!(!t.visible());
     t.update(&open_view(&[]));
     assert!(t.visible());
+}
+
+// The game client empties a cancelled trade's window and blanks the
+// partner's name but leaves the window up; the player closes it.
+#[test]
+fn a_cancelled_trade_empties_the_window_and_leaves_it_up_until_the_player_closes_it() {
+    let mut t = trade_window();
+    t.objects.add(plain_item(PLAIN_ITEM));
+    t.objects.add(material_item(MATERIAL_ITEM));
+    let mut v = open_view(&[PLAIN_ITEM]);
+    v.partner_items = vec![MATERIAL_ITEM];
+    v.partner_accepted = true;
+    v.partner_name = Some("Partner".to_owned());
+    t.update(&v);
+    assert_eq!(
+        text_of(&t.host.root, t.ids[&trade::PARTNER_NAME_ID]),
+        "Partner"
+    );
     t.update(&TradeView {
         revision: 2,
         ..TradeView::default()
     });
+    assert!(t.visible());
+    let ui = &t.host.root;
+    assert_eq!(text_of(ui, t.ids[&trade::PARTNER_NAME_ID]), "");
+    assert_eq!(text_of(ui, t.ids[&trade::SELF_COUNT_ID]), "0");
+    assert_eq!(text_of(ui, t.ids[&trade::PARTNER_COUNT_ID]), "0");
+    for list in [trade::SELF_LIST_ID, trade::PARTNER_LIST_ID] {
+        let l = ui.widget::<ItemList>(t.ids[&list]).unwrap();
+        assert!(
+            (0..l.num_items()).all(|i| t.slot(list, i).object_id == 0),
+            "{list:#X} still shows an item"
+        );
+    }
+    let status = ui
+        .widget::<DatElement>(t.ids[&trade::PARTNER_STATUS_ID])
+        .unwrap();
+    assert_eq!(status.active_state, "");
+    // Closing it now only hides it: there is no trade left to end.
+    assert!(t.click(trade::CLOSE_BUTTON_ID).is_empty());
     assert!(!t.visible());
 }
 
@@ -239,10 +275,18 @@ fn clear_all_and_close_act_only_on_an_open_trade() {
         t.click(trade::CLEAR_ALL_BUTTON_ID),
         [SessionCommand::Item(ItemCommand::ResetTrade)]
     );
+    // Close hides the window at once and ends the trade.
     assert_dbg_eq!(
         t.click(trade::CLOSE_BUTTON_ID),
         [SessionCommand::Item(ItemCommand::CloseTrade)]
     );
+    assert!(!t.visible());
+    // The server's close that follows leaves it hidden.
+    t.update(&TradeView {
+        revision: 2,
+        ..TradeView::default()
+    });
+    assert!(!t.visible());
 }
 
 #[test]

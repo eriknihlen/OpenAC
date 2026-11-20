@@ -3,10 +3,13 @@
 //! clear all and close.
 //!
 //! The window shows the runtime's [`TradeView`] it is handed each update
-//! (rebuilt when its revision moves) and follows the trade opening and
-//! closing by showing and hiding itself. Items dropped from a pack on the
-//! player's own row are offered; the buttons send the trade commands. A
-//! right-click on an item in either row selects and examines it.
+//! (rebuilt when its revision moves) and shows itself when a trade opens.
+//! A trade the partner or the server ends empties the window and blanks
+//! the partner's name, but the window stays up until the player closes it;
+//! its close button hides it at once and ends a trade still open. Items
+//! dropped from a pack on the player's own row are offered; the buttons
+//! send the trade commands. A right-click on an item in either row selects
+//! and examines it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -215,8 +218,9 @@ impl SecureTradeController {
         item_command(ui, ItemCommand::OpenTrade(ObjectRef::Guid(partner)));
     }
 
-    /// Show `trade`: open or close the window as the trade does, and
-    /// rebuild both sides when its revision moved.
+    /// Show `trade`: show the window when a trade opens, and rebuild both
+    /// sides when its revision moved. A trade that ends leaves the window
+    /// up, emptied; the player closes it.
     pub fn update(
         &mut self,
         ui: &mut UiRoot,
@@ -241,9 +245,8 @@ impl SecureTradeController {
             }
             self.pending_stage_item = 0;
             self.pending_partner = 0;
-        } else if !trade.open && self.was_open {
+        } else if !trade.open {
             self.was_open = false;
-            ui.hide_window(&self.window);
         }
         if self.last_revision == Some(trade.revision) {
             return;
@@ -298,7 +301,7 @@ impl SecureTradeController {
     }
 
     /// Show or hide the window as the trade stands now (after the window
-    /// was attached).
+    /// was attached): up with an open trade, hidden without one.
     pub fn sync_visibility(
         &mut self,
         ui: &mut UiRoot,
@@ -307,7 +310,10 @@ impl SecureTradeController {
         icons: &mut dyn IconSource,
         strings: Option<&dyn PanelStrings>,
     ) {
-        self.was_open = !trade.open;
+        self.was_open = false;
+        if !trade.open {
+            ui.hide_window(&self.window);
+        }
         self.update(ui, trade, items, icons, strings);
     }
 }
@@ -398,8 +404,13 @@ impl PanelController for SecureTradeController {
             return true;
         }
         if Some(element) == self.close {
-            if clicked && self.trade.open {
-                item_command(ui, ItemCommand::CloseTrade);
+            // Close hides the window at once; a trade still open ends with
+            // it.
+            if clicked {
+                ui.hide_window(&self.window);
+                if self.trade.open {
+                    item_command(ui, ItemCommand::CloseTrade);
+                }
             }
             return true;
         }
