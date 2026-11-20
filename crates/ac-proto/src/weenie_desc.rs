@@ -2,6 +2,8 @@
 //! messages: name, class, icon, item type, and the optional item fields
 //! selected by two flag words.
 
+use std::collections::HashSet;
+
 use ac_bits::Reader;
 
 use crate::{ProtoError, Result};
@@ -182,12 +184,11 @@ fn read_old_guests(r: &mut Reader<'_>) -> Result<Vec<HouseGuest>> {
         };
     }
     let guests = read_guest_pairs(r, count)?;
-    for (i, guest) in guests.iter().enumerate() {
-        if guests[..i].iter().any(|g| g.guest_id == guest.guest_id) {
-            return Err(ProtoError::Inconsistent {
-                what: "old house guest table repeats a guest",
-            });
-        }
+    let mut seen = HashSet::with_capacity(guests.len());
+    if !guests.iter().all(|g| seen.insert(g.guest_id)) {
+        return Err(ProtoError::Inconsistent {
+            what: "old house guest table repeats a guest",
+        });
     }
     Ok(guests)
 }
@@ -523,6 +524,35 @@ mod tests {
             }
         );
         assert_every_prefix_fails(w.as_slice(), read);
+    }
+
+    #[test]
+    fn a_large_old_table_is_read_in_linear_time() {
+        const GUESTS: u32 = 100_000;
+        let table = |last: u32| {
+            let mut w = Writer::new();
+            w.u32(0x1000_0001);
+            w.u32(0);
+            w.u32(0);
+            w.u32(0x1000_0000 | GUESTS); // 16 bucket bits
+            for guest in 1..GUESTS {
+                w.u32(guest);
+                w.u32(0);
+            }
+            w.u32(last);
+            w.u32(0);
+            w.into_vec()
+        };
+        let start = std::time::Instant::now();
+        let h = read(&table(GUESTS)).unwrap();
+        assert_eq!(h.guests.len(), GUESTS as usize);
+        // A repeat as the very last guest is still found.
+        assert!(read(&table(1)).is_err());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
