@@ -33,9 +33,12 @@ if [ -f "$dat_dir/client_portal.dat" ]; then
     echo "Retail dats found in $dat_dir; running ignored tests too."
     cargo test --workspace -- --include-ignored
     # A test that is not ignored must pass on a machine without the game: run the tests again
-    # with every OPENAC_* variable cleared (OPENAC_DAT_DIR and the tests' opt-ins) and the home
-    # folder, where the dats are looked for by default, pointed at an empty folder. The build is
-    # reused; only the environment differs. Without dats the run below is already such a run.
+    # with every OPENAC_* variable cleared (OPENAC_DAT_DIR and the tests' opt-ins) and the user's
+    # folders (home, application data, the XDG folders), where the dats and the launcher's install
+    # record are looked for, pointed at an empty folder. A fixed path such as C:\Turbine cannot be
+    # hidden this way. OPENAC_LAUNCHER_FINGERPRINT is kept: it is read when the launcher is
+    # compiled, and the build is reused (only the environment differs). Without dats the run below
+    # is such a run.
     echo "Running the tests again without the retail dats."
     empty_home="$PWD/target/no-game-data-home"
     rm -rf "$empty_home"
@@ -46,10 +49,14 @@ if [ -f "$dat_dir/client_portal.dat" ]; then
         export CARGO_HOME="${CARGO_HOME:-$real_home/.cargo}"
         export RUSTUP_HOME="${RUSTUP_HOME:-$real_home/.rustup}"
         for name in $(env | sed -n 's/^\(OPENAC_[A-Za-z0-9_]*\)=.*/\1/p'); do
-            unset "$name"
+            if [ "$name" != OPENAC_LAUNCHER_FINGERPRINT ]; then
+                unset "$name"
+            fi
         done
-        export HOME="$empty_home"
-        export USERPROFILE="$empty_home"
+        for name in HOME USERPROFILE LOCALAPPDATA APPDATA \
+            XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_STATE_HOME; do
+            export "$name=$empty_home"
+        done
         cargo test --workspace
     )
 else
