@@ -1,9 +1,10 @@
 //! The automatic level-of-detail bias: the game measures the frame rate over
 //! the last 20 frames and, with "automatic degrades" on, moves the degrade
 //! multiplier (-1 to 1) toward fewer details when the rate is low and more
-//! when it is high, committing a new value only once the candidate has held
-//! steady for 30 frames. With it off, the "graphics performance" slider is
-//! the multiplier.
+//! when it is high. A new value is taken unless the multiplier was already
+//! there (within 0.01) in the last 29 frames, which keeps it from flipping
+//! back and forth between two levels and ignores steps too small to matter.
+//! With it off, the "graphics performance" slider is the multiplier.
 //!
 //! The arithmetic keeps the game's precision: a single-precision frame
 //! history summed in double, the five fuzzy weights in double, and the
@@ -11,8 +12,11 @@
 
 /// Frames the rate is measured over.
 pub const FPS_HISTORY_LENGTH: usize = 20;
-/// Frames a candidate must hold before it is committed.
+/// Frames of multiplier history kept: the newest slot takes the value in
+/// force after each frame.
 pub const CANDIDATE_HISTORY_LENGTH: usize = 30;
+/// Slots a candidate is compared with: all but the newest.
+pub const COMPARED_HISTORY_LENGTH: usize = CANDIDATE_HISTORY_LENGTH - 1;
 /// Below this rate the bias moves toward fewer details fastest.
 pub const MINIMUM_FPS: f32 = 8.0;
 /// The rate the bias leaves alone.
@@ -90,8 +94,8 @@ pub fn advance_frame_history(history: &mut [f32; FPS_HISTORY_LENGTH], frame_seco
 }
 
 /// Shift the candidate history down one and advance the multiplier: off,
-/// it is kept; on, the candidate is committed only when every one of the 30
-/// prior slots lies strictly within 0.01 of it.
+/// it is kept; on, the candidate is taken unless one of the 29 compared
+/// slots lies strictly within 0.01 of it.
 pub fn advance_automatic_multiplier(
     history: &mut [f32; CANDIDATE_HISTORY_LENGTH],
     automatic: bool,
@@ -104,19 +108,20 @@ pub fn advance_automatic_multiplier(
         return current;
     }
     let candidate = calculate_candidate(fps, current);
-    if is_candidate_stable(history, candidate) {
+    if is_candidate_new(history, candidate) {
         current = candidate;
     }
     history[CANDIDATE_HISTORY_LENGTH - 1] = current;
     current
 }
 
-/// Every slot within 0.01 (a double constant) of `candidate`.
+/// No compared slot (all but the newest) lies within 0.01 (a double
+/// constant) of `candidate`: the multiplier has not been there lately.
 #[must_use]
-pub fn is_candidate_stable(history: &[f32; CANDIDATE_HISTORY_LENGTH], candidate: f32) -> bool {
-    history
+pub fn is_candidate_new(history: &[f32; CANDIDATE_HISTORY_LENGTH], candidate: f32) -> bool {
+    !history[..COMPARED_HISTORY_LENGTH]
         .iter()
-        .all(|&h| (f64::from(h) - f64::from(candidate)).abs() < 0.01)
+        .any(|&h| (f64::from(h) - f64::from(candidate)).abs() < 0.01)
 }
 
 /// The multiplier the rate asks for: the current one moved by the five
@@ -245,14 +250,16 @@ mod tests {
             (f64::INFINITY, 0),
             (f64::NEG_INFINITY, 0),
         ] {
+            // The rate is measured whether or not automatic degrades are on;
+            // off, the multiplier stays where it is.
             let mut c = BuildingDegradeController::default();
             for _ in 0..20 {
-                c.tick(0.05, true);
+                c.tick(0.05, false);
             }
-            c.tick(delta, true);
+            c.tick(delta, false);
             assert_eq!(c.fps().to_bits(), 0x41A0_0000, "{delta}");
             assert_eq!(c.automatic_multiplier().to_bits(), 0);
-            c.tick(0.05, true);
+            c.tick(0.05, false);
             assert_eq!(c.fps().to_bits(), following, "{delta}");
             assert_eq!(c.automatic_multiplier().to_bits(), 0);
         }
@@ -289,37 +296,70 @@ mod tests {
     }
 
     #[test]
-    fn stability_uses_the_double_constant() {
+    fn the_band_uses_the_double_constant() {
         let candidate = f32::from_bits(0x3C13_D70A);
         let prior = -f32::from_bits(0x3A80_0001);
         let history = [prior; 30];
         let difference = (f64::from(prior) - f64::from(candidate)).abs();
         assert!(difference > f64::from(0.01_f32));
         assert!(difference < 0.01);
-        assert!(is_candidate_stable(&history, candidate));
+        assert!(!is_candidate_new(&history, candidate));
     }
 
+    // The game client takes the candidate unless the multiplier was within
+    // 0.01 of it in one of the 29 frames before.
     #[test]
-    fn a_commit_needs_all_thirty_slots_within_the_band() {
-        let mut history = [0.1_f32; 30];
-        history[15] = 0.0;
+    fn a_candidate_is_taken_unless_a_recent_slot_matches_it() {
+        let mut history = [0.0_f32; 30];
+        let taken = advance_automatic_multiplier(&mut history, true, 20.0, 0.0);
+        assert!((taken - 0.1).abs() < 1e-7);
+        assert_eq!(history[29], taken);
+
+        let mut history = [0.0_f32; 30];
+        history[15] = 0.1;
         assert_eq!(
             advance_automatic_multiplier(&mut history, true, 20.0, 0.0),
-            0.0
+            0.0,
+            "it was there 14 frames ago"
         );
         assert_eq!(history[29], 0.0);
-        let mut history = [0.1_f32; 30];
-        let committed = advance_automatic_multiplier(&mut history, true, 20.0, 0.0);
-        assert!((committed - 0.1).abs() < 1e-7);
-        assert!(history.iter().all(|h| (h - 0.1).abs() < 1e-7));
+
+        let mut history = [0.0_f32; 30];
+        history[0] = 0.1;
+        let taken = advance_automatic_multiplier(&mut history, true, 20.0, 0.0);
+        assert!((taken - 0.1).abs() < 1e-7, "the oldest slot fell off");
+    }
+
+    // A slow frame rate moves the multiplier every frame until it reaches
+    // the bottom of its range.
+    #[test]
+    fn a_slow_frame_rate_walks_the_multiplier_to_its_floor() {
+        let mut history = [0.0_f32; 30];
+        let mut multiplier = 0.0;
+        for frame in 1..=6 {
+            multiplier = advance_automatic_multiplier(&mut history, true, 4.0, multiplier);
+            let expected = (-0.15 * frame as f32).max(-1.0);
+            assert!((multiplier - expected).abs() < 1e-5, "frame {frame}");
+        }
+        multiplier = advance_automatic_multiplier(&mut history, true, 4.0, multiplier);
+        assert_eq!(multiplier, -1.0);
+        assert_eq!(
+            advance_automatic_multiplier(&mut history, true, 4.0, multiplier),
+            -1.0
+        );
     }
 
     #[test]
     fn the_clamp_and_the_manual_arm() {
-        let mut history = [1.0_f32; 30];
+        let mut history = [0.0_f32; 30];
         assert_eq!(
             advance_automatic_multiplier(&mut history, true, 25.0, 0.95),
             1.0
+        );
+        assert_eq!(
+            advance_automatic_multiplier(&mut history, true, 25.0, 1.0),
+            1.0,
+            "held at the top"
         );
         history[10] = -1.0;
         assert_eq!(
