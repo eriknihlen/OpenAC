@@ -6,10 +6,13 @@
 //! The tree comes from `cargo metadata`. Its resolved graph unifies features
 //! across the whole workspace, which would make every crate that depends on
 //! the runtime look as if it ran plugins (the client turns the runtime's
-//! `host` feature on). So each crate's tree is resolved here as building that
-//! crate alone resolves it: from the crate with all its own features on,
-//! following normal and build dependencies (not dev-dependencies) on every
-//! platform, each dependency with the features its dependents ask for.
+//! `host` feature on). So each crate's tree is resolved here from that crate:
+//! its features propagated to the dependencies that ask for them, following
+//! normal and build dependencies (not dev-dependencies). The result is an
+//! upper bound of what building the crate alone compiles, not exactly it: the
+//! crate's features are all on, every platform's dependencies are followed,
+//! and build dependencies are merged with normal ones. A crate the tree does
+//! not hold is therefore never built for it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -17,8 +20,8 @@ use std::sync::OnceLock;
 
 use ac_host::json::{self, Node, Value};
 
-/// The window, GPU and audio device crates.
-const DEVICES: [&str; 3] = ["winit", "wgpu", "cpal"];
+/// The window, GPU, audio device and window-system crates.
+const DEVICES: [&str; 5] = ["winit", "wgpu", "cpal", "arboard", "raw-window-handle"];
 
 /// The workspace crates allowed to reach a window, GPU or audio device, and
 /// why. Every other workspace crate must reach none of [`DEVICES`].
@@ -67,31 +70,52 @@ fn string_items(node: &Node) -> Vec<String> {
         .collect()
 }
 
-/// One entry of a manifest's dependency tables.
+/// A dependency's kind and platform: the kind is `None` for a normal
+/// dependency, `"build"` for a build dependency; the platform is the table
+/// it is listed under, `None` for every platform.
+type KindAndTarget = (Option<String>, Option<String>);
+
+fn kind_and_target(node: &Node) -> KindAndTarget {
+    (
+        text(node, "kind").map(str::to_owned),
+        text(node, "target").map(str::to_owned),
+    )
+}
+
+/// One normal or build entry of a manifest's dependency tables.
 struct Dependency {
-    /// The package's name.
-    name: String,
     /// The name the manifest gives it (its rename, else its package name):
     /// the name features refer to it by.
     key: String,
-    renamed: bool,
     optional: bool,
     default_features: bool,
     features: Vec<String>,
+    /// The package (by its id in the resolve) it resolved to; `None` only
+    /// for an optional dependency that nothing in the workspace turns on.
+    to: Option<usize>,
 }
 
 struct Package {
     name: String,
-    local: bool,
+    /// A workspace member (`workspace_members`), not a patched or vendored
+    /// path crate.
+    member: bool,
     features: HashMap<String, Vec<String>>,
-    /// Normal and build dependencies, on every platform.
     dependencies: Vec<Dependency>,
-    /// The resolved dependencies: (library name as the dependent sees it, package).
-    resolved: Vec<(String, usize)>,
 }
+
+/// A crate's tree: every package it compiles, each with the package that
+/// first pulled it in (`None` for the crate itself).
+type Tree = BTreeMap<usize, Option<usize>>;
+
+/// A resolved edge: the package, its library name as the dependent sees it,
+/// and the kinds and platforms it is a dependency for.
+type Edge<'a> = (usize, &'a str, Vec<KindAndTarget>);
 
 struct Graph {
     packages: Vec<Package>,
+    /// Each package's tree, resolved when first asked for.
+    trees: Vec<OnceLock<Tree>>,
 }
 
 impl Graph {
@@ -112,7 +136,8 @@ impl Graph {
             .expect("cargo metadata runs");
         assert!(
             output.status.success(),
-            "{}",
+            "cargo metadata --offline failed (run `cargo fetch` first if the \
+             dependencies are not downloaded):\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
         let document = json::parse(&output.stdout).expect("cargo metadata prints JSON");
@@ -122,11 +147,38 @@ impl Graph {
             .enumerate()
             .filter_map(|(i, package)| Some((text(package, "id")?, i)))
             .collect();
-        let mut packages: Vec<Package> = listed
+        let members: BTreeSet<&str> = items(&document, "workspace_members")
             .iter()
-            .map(|package| Package {
-                name: text(package, "name").unwrap_or_default().to_owned(),
-                local: member(package, "source").is_none_or(json::is_null),
+            .filter_map(|id| match &id.value {
+                Value::String(id) => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(members.len() > 20, "workspace members read: {members:?}");
+        let names: Vec<&str> = listed
+            .iter()
+            .map(|package| text(package, "name").unwrap_or_default())
+            .collect();
+        let mut edges: Vec<Vec<Edge>> = vec![Vec::new(); listed.len()];
+        let resolve = member(&document, "resolve").expect("a resolved graph");
+        for node in items(resolve, "nodes") {
+            let from = index[text(node, "id").expect("a resolve node's id")];
+            for dep in items(node, "deps") {
+                let to = index[text(dep, "pkg").expect("a resolved dependency's id")];
+                let library = text(dep, "name").expect("a resolved dependency's name");
+                let kinds = items(dep, "dep_kinds")
+                    .iter()
+                    .map(kind_and_target)
+                    .collect();
+                edges[from].push((to, library, kinds));
+            }
+        }
+        let packages: Vec<Package> = listed
+            .iter()
+            .enumerate()
+            .map(|(from, package)| Package {
+                name: names[from].to_owned(),
+                member: text(package, "id").is_some_and(|id| members.contains(id)),
                 features: member(package, "features")
                     .and_then(|node| json::object_members(node).ok())
                     .unwrap_or_default()
@@ -136,66 +188,70 @@ impl Graph {
                 dependencies: items(package, "dependencies")
                     .iter()
                     .filter(|dependency| text(dependency, "kind") != Some("dev"))
-                    .map(|dependency| {
-                        let name = text(dependency, "name").unwrap_or_default().to_owned();
-                        let rename = text(dependency, "rename").map(str::to_owned);
-                        Dependency {
-                            key: rename.clone().unwrap_or_else(|| name.clone()),
-                            renamed: rename.is_some(),
-                            name,
-                            optional: member(dependency, "optional")
-                                .is_some_and(|node| node.value == Value::Bool(true)),
-                            default_features: member(dependency, "uses_default_features")
-                                .is_none_or(|node| node.value == Value::Bool(true)),
-                            features: strings(dependency, "features"),
-                        }
-                    })
+                    .map(|dependency| Self::entry(names[from], dependency, &edges[from], &names))
                     .collect(),
-                resolved: Vec::new(),
             })
             .collect();
-        let resolve = member(&document, "resolve").expect("a resolved graph");
-        for node in items(resolve, "nodes") {
-            let Some(&from) = text(node, "id").and_then(|id| index.get(id)) else {
-                continue;
-            };
-            packages[from].resolved = items(node, "deps")
-                .iter()
-                .filter_map(|dep| {
-                    let to = *index.get(text(dep, "pkg")?)?;
-                    Some((text(dep, "name")?.to_owned(), to))
-                })
-                .collect();
+        Self {
+            trees: packages.iter().map(|_| OnceLock::new()).collect(),
+            packages,
         }
-        Self { packages }
+    }
+
+    /// A manifest entry of package `name`, with the package it resolved to:
+    /// the resolved edge of the same kind and platform and the same rename
+    /// or package name (two versions of one crate differ in one of those).
+    fn entry(name: &str, dependency: &Node, edges: &[Edge], names: &[&str]) -> Dependency {
+        let crate_name = text(dependency, "name").unwrap_or_default();
+        let rename = text(dependency, "rename");
+        let kind = kind_and_target(dependency);
+        let matches: Vec<usize> = edges
+            .iter()
+            .filter(|(to, library, kinds)| {
+                kinds.contains(&kind)
+                    && match rename {
+                        Some(rename) => *library == rename.replace('-', "_"),
+                        None => names[*to] == crate_name,
+                    }
+            })
+            .map(|(to, _, _)| *to)
+            .collect();
+        assert!(
+            matches.len() <= 1,
+            "{name}: its dependency {crate_name} resolves to several packages"
+        );
+        let optional =
+            member(dependency, "optional").is_some_and(|node| node.value == Value::Bool(true));
+        let to = matches.first().copied();
+        assert!(
+            to.is_some() || optional,
+            "{name}: its dependency {crate_name} ({kind:?}) is not in the resolve"
+        );
+        Dependency {
+            key: rename.unwrap_or(crate_name).to_owned(),
+            optional,
+            default_features: member(dependency, "uses_default_features")
+                .is_none_or(|node| node.value == Value::Bool(true)),
+            features: strings(dependency, "features"),
+            to,
+        }
     }
 
     fn find(&self, name: &str) -> usize {
         self.packages
             .iter()
-            .position(|package| package.local && package.name == name)
+            .position(|package| package.member && package.name == name)
             .unwrap_or_else(|| panic!("no workspace crate {name}"))
     }
 
-    /// The package a dependency entry resolved to, if the resolve has it.
-    fn target(&self, from: usize, dependency: &Dependency) -> Option<usize> {
-        let library = dependency.key.replace('-', "_");
-        self.packages[from]
-            .resolved
-            .iter()
-            .find(|(name, to)| {
-                if dependency.renamed {
-                    *name == library
-                } else {
-                    self.packages[*to].name == dependency.name
-                }
-            })
-            .map(|&(_, to)| to)
+    /// `root`'s tree, resolved once.
+    fn tree(&self, root: usize) -> &Tree {
+        self.trees[root].get_or_init(|| self.resolve(root))
     }
 
-    /// Every package a build of `root` (all its features on) compiles, each
-    /// with the package that first pulled it in.
-    fn tree(&self, root: usize) -> BTreeMap<usize, Option<usize>> {
+    /// Every package `root` compiles (an upper bound, see the module
+    /// comment), each with the package that first pulled it in.
+    fn resolve(&self, root: usize) -> Tree {
         let mut enabled: Vec<Option<BTreeSet<String>>> = vec![None; self.packages.len()];
         let mut parent = BTreeMap::from([(root, None)]);
         let mut features: BTreeSet<String> = self.packages[root].features.keys().cloned().collect();
@@ -230,18 +286,23 @@ impl Graph {
                 }
                 for dependency in &package.dependencies {
                     let key = &dependency.key;
+                    let switch = format!("dep:{key}");
                     let strong = format!("{key}/");
                     let weak = format!("{key}?/");
                     let active = !dependency.optional
                         || listed
                             .iter()
-                            .any(|item| item == &format!("dep:{key}") || item.starts_with(&strong));
+                            .any(|item| *item == switch || item.starts_with(&strong));
                     if !active {
                         continue;
                     }
-                    let Some(to) = self.target(from, dependency) else {
-                        continue;
-                    };
+                    let to = dependency.to.unwrap_or_else(|| {
+                        panic!(
+                            "{}: its optional dependency {key} is turned on, but cargo \
+                             metadata did not resolve it",
+                            package.name
+                        )
+                    });
                     let mut wanted = dependency.features.clone();
                     if dependency.default_features {
                         wanted.push("default".to_owned());
@@ -291,7 +352,7 @@ impl Graph {
     fn workspace_crates(&self) -> Vec<&str> {
         self.packages
             .iter()
-            .filter(|package| package.local)
+            .filter(|package| package.member)
             .map(|package| package.name.as_str())
             .collect()
     }
@@ -303,39 +364,10 @@ fn graph() -> &'static Graph {
     GRAPH.get_or_init(Graph::load)
 }
 
-/// Rules the tree breaks today, each a (crate, forbidden crate, why) the
-/// tests accept until it is fixed. Each must still hold: a fixed one is
-/// dropped from this list.
-const KNOWN_EXCEPTIONS: [(&str, &str, &str); 2] = [
-    (
-        "ac-render",
-        "ac-plugin",
-        "ac-render asks for the runtime's `host` feature (the session runner), which brings the plugin host",
-    ),
-    (
-        "ac-render",
-        "wasmtime",
-        "ac-render asks for the runtime's `host` feature (the session runner), which brings the plugin host",
-    ),
-];
-
 fn assert_reaches_none(graph: &Graph, roots: &[&str], forbidden: &[&str]) {
     let mut failures = Vec::new();
     for root in roots {
-        for name in forbidden {
-            let excepted = KNOWN_EXCEPTIONS
-                .iter()
-                .any(|(from, to, _)| from == root && to == name);
-            let found = graph.reaches(root, &[name]);
-            if excepted {
-                assert!(
-                    !found.is_empty(),
-                    "{root} no longer reaches {name}: drop it from KNOWN_EXCEPTIONS"
-                );
-            } else {
-                failures.extend(found);
-            }
-        }
+        failures.extend(graph.reaches(root, forbidden));
     }
     assert!(
         failures.is_empty(),
@@ -416,9 +448,7 @@ fn only_the_presentation_crates_reach_a_device() {
 }
 
 /// Plugins are loaded by the session, never by the window: the window's
-/// crates do not reach the plugin host through anything they use (the
-/// renderer does today, through the runtime's `host` feature: see
-/// [`KNOWN_EXCEPTIONS`]; its own code does not, `crate_graph.rs`).
+/// crates do not reach the plugin host through anything they use.
 #[test]
 fn the_window_crates_do_not_reach_the_plugin_host() {
     let graph = graph();

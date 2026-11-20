@@ -44,13 +44,19 @@ if ($datsFound) {
 }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # A test that is not ignored must pass on a machine without the game: run the tests again with
-# every OPENAC_* variable cleared (OPENAC_DAT_DIR and the tests' opt-ins) and the home folder,
-# where the dats are looked for by default, pointed at an empty folder. The build is reused; only
-# the environment differs. Without dats the run above was already such a run.
+# every OPENAC_* variable cleared (OPENAC_DAT_DIR and the tests' opt-ins) and the user's folders
+# (home, application data, the XDG folders), where the dats and the launcher's install record are
+# looked for, pointed at an empty folder. A fixed path such as C:\Turbine cannot be hidden this
+# way. OPENAC_LAUNCHER_FINGERPRINT is kept: it is read when the launcher is compiled, and the
+# build is reused (only the environment differs). Without dats the run above was such a run.
 if ($datsFound) {
     Write-Host "Running the tests again without the retail dats."
-    $names = @(Get-ChildItem Env: | Where-Object Name -like 'OPENAC_*' | ForEach-Object Name) +
-             @('USERPROFILE', 'HOME', 'CARGO_HOME', 'RUSTUP_HOME')
+    $folders = 'USERPROFILE', 'HOME', 'LOCALAPPDATA', 'APPDATA',
+               'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME'
+    $cleared = @(Get-ChildItem Env: |
+                 Where-Object { $_.Name -like 'OPENAC_*' -and $_.Name -ne 'OPENAC_LAUNCHER_FINGERPRINT' } |
+                 ForEach-Object Name)
+    $names = $cleared + $folders + @('CARGO_HOME', 'RUSTUP_HOME')
     $saved = @{}
     foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
     $realHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
@@ -59,13 +65,10 @@ if ($datsFound) {
         # cargo and rustup find their own folders under the home folder unless told where.
         if (-not $env:CARGO_HOME) { $env:CARGO_HOME = Join-Path $realHome '.cargo' }
         if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = Join-Path $realHome '.rustup' }
-        foreach ($name in $names) {
-            if ($name -like 'OPENAC_*') { [Environment]::SetEnvironmentVariable($name, $null) }
-        }
+        foreach ($name in $cleared) { [Environment]::SetEnvironmentVariable($name, $null) }
         if (Test-Path -LiteralPath $emptyHome) { Remove-Item -LiteralPath $emptyHome -Recurse -Force }
         New-Item -ItemType Directory -Path $emptyHome | Out-Null
-        $env:USERPROFILE = $emptyHome
-        $env:HOME = $emptyHome
+        foreach ($name in $folders) { [Environment]::SetEnvironmentVariable($name, $emptyHome) }
         cargo test --workspace
     } finally {
         foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
