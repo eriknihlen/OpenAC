@@ -39,4 +39,12 @@ pub struct TransportStats {
     /// Numbered packets sent carrying the time-sync and echo pair (first
     /// sends; resends count in `resends_sent`).
     pub time_pairs_sent: u64,
+    /// Keep-alives sent to the server's connect port (not in
+    /// `packets_sent`: they bypass the reliable transport).
+    pub keep_alives_sent: u64,
+    /// Packets the header check dropped and counted: a sender id of 256
+    /// or more, or a numbered packet from a sender id with no connection.
+    /// (Its other drops, a wrong address or iteration or an oversized
+    /// body, are not counted.)
+    pub bad_packets: u64,
 }

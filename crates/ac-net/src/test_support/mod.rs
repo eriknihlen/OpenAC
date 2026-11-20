@@ -37,6 +37,10 @@ pub fn is_connect_response(datagram: &[u8]) -> bool {
     PacketHeader::from_bytes(datagram).is_some_and(|h| h.flags.has(PacketFlags::CONNECT_RESPONSE))
 }
 
+pub fn is_keep_alive(datagram: &[u8]) -> bool {
+    PacketHeader::from_bytes(datagram).is_some_and(|h| h.flags == PacketFlags::CICMD_COMMAND)
+}
+
 /// A client [`Connection`] wired to a [`ServerModel`] through a scripted
 /// link (and optionally the lossy filter, client side), on virtual time.
 /// Sends reach the server immediately; the server's replies wait in a
@@ -50,6 +54,8 @@ pub struct Harness {
     pub conn: Option<Connection>,
     pub received: Vec<InboundMessage>,
     pub connect_port_sends: usize,
+    /// Keep-alives the client sent the connect port.
+    pub keep_alives: usize,
     to_client: VecDeque<Vec<u8>>,
 }
 
@@ -69,6 +75,7 @@ impl Harness {
             conn: None,
             received: Vec::new(),
             connect_port_sends: 0,
+            keep_alives: 0,
             to_client: VecDeque::new(),
         }
     }
@@ -115,13 +122,20 @@ impl Harness {
 
     fn send_to_server(&mut self, t: Transmit) {
         let connect_response = is_connect_response(&t.datagram);
+        let keep_alive = is_keep_alive(&t.datagram);
         assert_eq!(
             t.destination == Destination::Connect,
-            connect_response,
-            "only the connect response goes to the connect port"
+            connect_response || keep_alive,
+            "only the connect response and the keep-alive go to the connect port"
         );
         if connect_response {
             self.connect_port_sends += 1;
+        }
+        if keep_alive {
+            // The connect port takes the keep-alive and answers nothing;
+            // the session the model plays is on the login port.
+            self.keep_alives += 1;
+            return;
         }
         let pass = self
             .lossy

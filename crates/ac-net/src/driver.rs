@@ -405,9 +405,12 @@ mod tests {
         w.u32(0x0102_0304);
         w.u32(0);
         let body = w.into_vec();
+        // A server stamps its own id on every packet; with id 0 the
+        // connection would drop all its numbered packets.
         let mut header = PacketHeader {
             flags: PacketFlags::CONNECT_REQUEST,
             data_size: body.len() as u16,
+            id: 0x000B,
             iteration,
             ..PacketHeader::default()
         };

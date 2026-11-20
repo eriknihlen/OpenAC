@@ -472,6 +472,24 @@ pub fn transport_disconnect(client_id: u16, iteration: u16) -> Vec<u8> {
     datagram
 }
 
+/// The command word the keep-alive carries.
+pub const KEEP_ALIVE_COMMAND: u32 = 1;
+
+/// The keep-alive the client sends the server's connect port: a lone
+/// command section (the command word, then a zero parameter word),
+/// unnumbered and in the clear, with no client id, time or iteration.
+#[must_use]
+pub fn keep_alive() -> Vec<u8> {
+    let header = PacketHeader {
+        sequence: 0,
+        flags: PacketFlags::CICMD_COMMAND,
+        ..PacketHeader::default()
+    };
+    let mut body = [0u8; 8];
+    body[..4].copy_from_slice(&KEEP_ALIVE_COMMAND.to_le_bytes());
+    encode(header, &body, None).expect("an 8-byte cleartext command section always encodes")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

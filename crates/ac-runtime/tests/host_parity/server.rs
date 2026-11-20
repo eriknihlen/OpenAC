@@ -37,6 +37,9 @@ use ac_net::packet::{
 
 const SERVER_SEED: u32 = 0x1357_9BDF;
 const CLIENT_SEED: u32 = 0x2468_ACE0;
+/// The server stamps its id, and the connection's iteration (7 here), on
+/// every packet it sends.
+const SERVER_ID: u16 = 0x000B;
 
 /// The client action envelope.
 pub const GAME_ACTION: u32 = 0xF7B1;
@@ -288,6 +291,8 @@ impl Server {
             let header = PacketHeader {
                 sequence: self.sequence,
                 flags: PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM,
+                id: SERVER_ID,
+                iteration: 7,
                 ..PacketHeader::default()
             };
             let datagram = encode(header, &fragment, Some(&mut self.keystream)).unwrap();
@@ -427,6 +432,8 @@ impl Server {
         }
         let header = PacketHeader {
             flags: PacketFlags::REQUEST_RETRANSMIT,
+            id: SERVER_ID,
+            iteration: 7,
             ..PacketHeader::default()
         };
         let datagram = encode(header, w.as_slice(), None).unwrap();
@@ -483,6 +490,7 @@ fn connect_request() -> Vec<u8> {
     w.u32(0);
     let header = PacketHeader {
         flags: PacketFlags::CONNECT_REQUEST,
+        id: SERVER_ID,
         iteration: 7,
         ..PacketHeader::default()
     };

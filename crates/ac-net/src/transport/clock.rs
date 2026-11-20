@@ -31,12 +31,12 @@ impl IntervalClock {
     }
 
     /// Advance by every whole interval elapsed since the last advance.
-    /// Returns whether the advance reached a time-sync point
-    /// ([`crosses_time_sync`]).
-    pub fn update(&mut self, now: NetTime) -> bool {
+    /// Returns which periodic points the advance reached
+    /// ([`crosses_time_sync`], [`crosses_keep_alive`]).
+    pub fn update(&mut self, now: NetTime) -> IntervalPoints {
         let elapsed = now.since(self.base);
         if elapsed < INTERVAL {
-            return false;
+            return IntervalPoints::default();
         }
         let steps = elapsed.as_nanos() / INTERVAL.as_nanos();
         let old = self.interval_id;
@@ -44,23 +44,53 @@ impl IntervalClock {
         self.interval_id = self.interval_id.wrapping_add((steps % 65_536) as u16);
         // `steps * INTERVAL` is at most `elapsed`, which fits a Duration.
         self.base += Duration::from_nanos((steps * INTERVAL.as_nanos()) as u64);
-        crosses_time_sync(old, u32::try_from(steps).unwrap_or(u32::MAX))
+        let steps = u32::try_from(steps).unwrap_or(u32::MAX);
+        IntervalPoints {
+            time_sync: crosses_time_sync(old, steps),
+            keep_alive: crosses_keep_alive(old, steps),
+        }
     }
+}
+
+/// The periodic points one advance of the interval counter reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IntervalPoints {
+    /// A time-sync point: the time-sync and echo pair is due.
+    pub time_sync: bool,
+    /// A keep-alive point: the command packet to the connect port is due.
+    pub keep_alive: bool,
 }
 
 /// Intervals between two time-sync points (six half seconds: 3 s).
 pub const TIME_SYNC_PERIOD: u32 = 6;
 
+/// Intervals between two keep-alive points (220 half seconds: 110 s).
+pub const KEEP_ALIVE_PERIOD: u32 = 220;
+
 /// Whether advancing the interval counter from `old` by `steps` reaches a
-/// time-sync point: the counter lands on a value that is 1 modulo 6, or
-/// passes one (it advanced six or more, or its remainder modulo 6 went
-/// down without reaching 0). The sum is taken in 32 bits, before the
+/// point of `period`: the counter lands on a value that is 1 modulo
+/// `period`, or passes one (it advanced `period` or more, or its remainder
+/// went down without reaching 0). The sum is taken in 32 bits, before the
 /// counter's 16-bit wrap.
+fn crosses_point(old: u16, steps: u32, period: u32) -> bool {
+    let old = u32::from(old);
+    let reached = old.wrapping_add(steps) % period;
+    reached == 1 || steps >= period || (reached > 0 && reached < old % period)
+}
+
+/// Whether advancing the interval counter from `old` by `steps` reaches a
+/// time-sync point ([`TIME_SYNC_PERIOD`]; the rule is [`crosses_point`]'s).
 #[must_use]
 pub fn crosses_time_sync(old: u16, steps: u32) -> bool {
-    let old = u32::from(old);
-    let reached = old.wrapping_add(steps) % TIME_SYNC_PERIOD;
-    reached == 1 || steps >= TIME_SYNC_PERIOD || (reached > 0 && reached < old % TIME_SYNC_PERIOD)
+    crosses_point(old, steps, TIME_SYNC_PERIOD)
+}
+
+/// Whether advancing the interval counter from `old` by `steps` reaches a
+/// keep-alive point ([`KEEP_ALIVE_PERIOD`]; the same rule as the
+/// time-sync point).
+#[must_use]
+pub fn crosses_keep_alive(old: u16, steps: u32) -> bool {
+    crosses_point(old, steps, KEEP_ALIVE_PERIOD)
 }
 
 #[cfg(test)]
@@ -96,6 +126,48 @@ mod tests {
         assert_eq!(clock.interval_id(), 3);
     }
 
+    // The game client's keep-alive point: the time-sync rule on a period of
+    // 220 intervals (110 s).
+    #[test]
+    fn the_keep_alive_point_is_every_220th_interval_or_passed() {
+        let fired: Vec<u16> = (1u16..700)
+            .filter(|&id| crosses_keep_alive(id - 1, 1))
+            .collect();
+        assert_eq!(fired, vec![1, 221, 441, 661]);
+        assert!(!crosses_keep_alive(218, 2)); // 218 -> 220 (0)
+        assert!(crosses_keep_alive(219, 3)); // 219 -> 222 (2): passed 221
+        assert!(crosses_keep_alive(5, 220));
+        assert!(crosses_keep_alive(5, 219)); // 5 -> 224 (4): the remainder went down
+        assert!(!crosses_keep_alive(2, 217)); // 2 -> 219
+        // Both points from one advance: 221 is 5 (mod 6), so 220 -> 221
+        // brings only the keep-alive; 660 -> 661 (1 mod 6) brings both.
+        let mut now = NetTime::ZERO;
+        let mut clock = IntervalClock::new(now);
+        now += INTERVAL * 219;
+        clock.update(now);
+        assert_eq!(clock.interval_id(), 220);
+        now += INTERVAL;
+        let points = clock.update(now);
+        assert_eq!(
+            points,
+            IntervalPoints {
+                time_sync: false,
+                keep_alive: true
+            }
+        );
+        now += INTERVAL * 439;
+        clock.update(now);
+        assert_eq!(clock.interval_id(), 660);
+        now += INTERVAL;
+        assert_eq!(
+            clock.update(now),
+            IntervalPoints {
+                time_sync: true,
+                keep_alive: true
+            }
+        );
+    }
+
     // The time-sync point: landing on 1 modulo 6, a jump of six or more,
     // or passing 1 (the remainder went down without reaching 0).
     #[test]
@@ -127,7 +199,7 @@ mod tests {
         let mut fired = Vec::new();
         for half_second in 1..=13 {
             now += INTERVAL;
-            if clock.update(now) {
+            if clock.update(now).time_sync {
                 fired.push(half_second);
             }
         }
@@ -135,13 +207,13 @@ mod tests {
         assert_eq!(fired, vec![6, 12]);
         // A 2 s stall from 14 to 18 stays below 19.
         now += INTERVAL * 4;
-        assert!(!clock.update(now));
+        assert!(!clock.update(now).time_sync);
         // From a multiple of 6 the remainder cannot go down, so 18 -> 20
         // steps over 19 without a point; 20 -> 25 lands on 1 (mod 6).
         now += INTERVAL * 2;
-        assert!(!clock.update(now));
+        assert!(!clock.update(now).time_sync);
         now += INTERVAL * 5;
-        assert!(clock.update(now));
+        assert!(clock.update(now).time_sync);
     }
 
     // Across the 16-bit wrap, one interval at a time: the stored id wraps
@@ -152,12 +224,12 @@ mod tests {
         let mut now = NetTime::ZERO;
         let mut clock = IntervalClock::new(now);
         now += INTERVAL * 65_520; // 1 -> 65521, a jump of six or more
-        assert!(clock.update(now));
+        assert!(clock.update(now).time_sync);
         assert_eq!(clock.interval_id(), 65_521);
         let mut fired = Vec::new();
         for _ in 0..30 {
             now += INTERVAL;
-            if clock.update(now) {
+            if clock.update(now).time_sync {
                 fired.push(clock.interval_id());
             }
         }
@@ -172,7 +244,7 @@ mod tests {
         clock.update(now);
         assert_eq!(clock.interval_id(), 65_535);
         now += INTERVAL * 2;
-        assert!(!clock.update(now));
+        assert!(!clock.update(now).time_sync);
         assert_eq!(clock.interval_id(), 1);
     }
 }
