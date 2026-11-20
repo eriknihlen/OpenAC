@@ -51,8 +51,12 @@ mod tests {
     }
 
     #[test]
-    fn overlong_account_name_is_an_error() {
+    fn overlong_account_name_takes_the_long_length_form() {
+        // The game client writes a string of 0xFFFF bytes or more with the
+        // marker 0xFFFF and a u32 length.
         let name = "a".repeat(usize::from(u16::MAX) + 1);
-        assert!(build_enter_world(1, &name).is_err());
+        let body = build_enter_world(1, &name).unwrap();
+        assert_eq!(body[8..14], [0xFF, 0xFF, 0x00, 0x00, 0x01, 0x00]);
+        assert_eq!(body.len(), 8 + (6 + name.len()).next_multiple_of(4));
     }
 }
