@@ -626,6 +626,9 @@ pub struct Inventory {
     interaction: Interaction,
     wield: wield::AutoWield,
     vendor: VendorState,
+    /// How many shop listings the server has sent, a refresh of the open
+    /// vendor's among them.
+    vendor_approaches: u64,
     /// The open vendor's listing in the item table.
     shop_items: ShopItems,
     /// The open vendor's buy and sell lists.
@@ -840,6 +843,13 @@ impl Inventory {
     #[must_use]
     pub fn vendor(&self) -> &VendorState {
         &self.vendor
+    }
+
+    /// How many shop listings the server has sent: each approach to a
+    /// vendor counts, the one whose window is already open as well.
+    #[must_use]
+    pub fn vendor_approaches(&self) -> u64 {
+        self.vendor_approaches
     }
 
     /// The open vendor's listing in the item table.
@@ -1415,6 +1425,7 @@ impl Inventory {
         };
         let items = approach.items.iter().map(views::shop_item).collect();
         if let Some(transition) = self.vendor.apply(approach.vendor_guid, profile, items) {
+            self.vendor_approaches += 1;
             self.vendor_changed(&transition, world, tx);
         }
     }

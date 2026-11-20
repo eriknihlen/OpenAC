@@ -2,9 +2,10 @@
 //! `tests/AcDream.Runtime.Tests/Gameplay/RuntimeTradeAutomationTests.cs`
 //! and `RuntimeVendorAutomationTests.cs`.
 
+use ac_core::items::WeenieData;
 use ac_plugin::abi::Event;
 use ac_plugin::abi::calls;
-use ac_plugin::abi::trade::{TradeEvent, TradeStatus, VendorStatus};
+use ac_plugin::abi::trade::{TradeEvent, TradeStatus, VendorEvent, VendorStatus};
 use ac_proto::{GameEventType, Inbound};
 
 use super::tests::{CLOCKS, PLAYER, call, in_world, with_binding};
@@ -14,6 +15,8 @@ use crate::session::{Outbox, SessionState};
 use crate::world::tests::game_event;
 
 const PARTNER: u32 = 0x5000_00BB;
+const VENDOR: u32 = 0x7000_0003;
+const OTHER_VENDOR: u32 = 0x7000_0004;
 const OTHER: u32 = 0x5000_00CC;
 const GEM: u32 = 0x8000_0001;
 const ORE: u32 = 0x8000_0002;
@@ -151,4 +154,84 @@ fn with_no_vendor_open_the_lists_are_refused_and_limits_read_none() {
             VendorStatus::Sent
         );
     });
+}
+
+fn vendor_events(state: &mut SessionState) -> Vec<VendorEvent> {
+    trade::follow(state)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::Vendor(v) => Some(v),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The server's shop listing for `vendor`, with no items.
+fn approach_vendor(state: &mut SessionState, vendor: u32) {
+    // Vendor, item types, value range, magic, rates, alternate currency,
+    // its empty plural name, no items.
+    server(
+        state,
+        GameEventType::APPROACH_VENDOR,
+        &[vendor, 0, 0, 1000, 0, 0, 0, 0, 0, 0, 0],
+    );
+}
+
+/// A vendor open with the gem on the plugin's sell list.
+fn vendor_with_a_sell_list(outbox: &mut Outbox) -> SessionState {
+    let mut state = in_world();
+    state.world.ingest_item(&WeenieData {
+        guid: GEM,
+        name: Some("Gem".into()),
+        container_id: Some(PLAYER),
+        ..WeenieData::default()
+    });
+    approach_vendor(&mut state, VENDOR);
+    assert_eq!(vendor_events(&mut state), [VendorEvent::Opened(VENDOR)]);
+    with_binding(&mut state, outbox, |b| {
+        assert_eq!(
+            call::<calls::VendorAddSell>(b, &GEM).status,
+            VendorStatus::Sent
+        );
+    });
+    state
+}
+
+fn sell_list(state: &mut SessionState, outbox: &mut Outbox) -> Vec<u32> {
+    with_binding(state, outbox, |b| {
+        call::<calls::VendorState>(b, &()).sell_list
+    })
+}
+
+#[test]
+fn a_vendor_opens_once_and_no_approach_raises_nothing() {
+    let mut state = in_world();
+    assert!(vendor_events(&mut state).is_empty());
+    approach_vendor(&mut state, VENDOR);
+    assert_eq!(vendor_events(&mut state), [VendorEvent::Opened(VENDOR)]);
+    assert!(vendor_events(&mut state).is_empty());
+}
+
+#[test]
+fn approaching_the_open_vendor_again_opens_it_again_keeping_the_lists() {
+    let mut outbox = Outbox::new();
+    let mut state = vendor_with_a_sell_list(&mut outbox);
+    assert!(vendor_events(&mut state).is_empty());
+    approach_vendor(&mut state, VENDOR);
+    assert_eq!(vendor_events(&mut state), [VendorEvent::Opened(VENDOR)]);
+    assert_eq!(sell_list(&mut state, &mut outbox), [GEM]);
+    assert!(vendor_events(&mut state).is_empty());
+}
+
+#[test]
+fn another_vendor_closes_the_first_and_clears_the_lists() {
+    let mut outbox = Outbox::new();
+    let mut state = vendor_with_a_sell_list(&mut outbox);
+    approach_vendor(&mut state, OTHER_VENDOR);
+    assert_eq!(
+        vendor_events(&mut state),
+        [VendorEvent::Closed, VendorEvent::Opened(OTHER_VENDOR)]
+    );
+    assert!(sell_list(&mut state, &mut outbox).is_empty());
+    assert!(vendor_events(&mut state).is_empty());
 }
