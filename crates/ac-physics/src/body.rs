@@ -361,8 +361,9 @@ impl PhysicsBody {
 
     /// Ground friction over `dt` seconds: on walkable ground, unless moving
     /// away from it (0.25 m/s or more), removes the into-ground part of the
-    /// velocity and decays it by `(1 − friction)^dt`. Sleds slide freely
-    /// below 1.25 m/s and with little friction fast on near-level ground.
+    /// velocity and decays it by `(1 − friction)^dt`. A sled stops below
+    /// 1.25 m/s and keeps only a little friction (0.2) at 2.5 m/s or more on
+    /// ground steeper than 10 degrees.
     pub fn calc_friction(&mut self, dt: f32, velocity_mag2: f32) {
         if !self.transient_state.contains(TransientState::ON_WALKABLE) {
             return;
@@ -377,7 +378,7 @@ impl PhysicsBody {
         if self.state.contains(PhysicsState::SLEDDING) {
             if velocity_mag2 < 1.5625 {
                 friction = 1.0;
-            } else if velocity_mag2 >= 6.25 && self.ground_normal.z > COS_10_DEGREES {
+            } else if velocity_mag2 >= 6.25 && self.ground_normal.z < COS_10_DEGREES {
                 friction = 0.2;
             }
         }

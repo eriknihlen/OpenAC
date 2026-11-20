@@ -357,45 +357,54 @@ fn grounded_root_motion_friction_threshold_does_not_hammer_locomotion_tests() {
     assert!(b.velocity.z.abs() < 0.05);
 }
 
-#[test]
-fn calc_friction_sledding_state_gate_reachable_with_new_threshold() {
+/// A sled on ground tilted `degrees` from flat, moving `speed` m/s along
+/// the slope, after one 60 Hz step.
+fn sled_speed_after_one_step(degrees: f32, speed: f32) -> f32 {
+    let (s, c) = (degrees * PI / 180.0).sin_cos();
     let mut b = grounded();
-    b.ground_normal = Vec3::Z;
+    b.ground_normal = Vec3::new(s, 0.0, c);
     b.state.insert(PhysicsState::SLEDDING);
-    b.velocity = Vec3::new(3.0, 0.0, -0.5);
+    b.velocity = Vec3::new(0.0, speed, 0.0);
     let m = b.velocity.length_squared();
     b.calc_friction(1.0 / 60.0, m);
-    assert!(b.velocity.length() > 2.9);
+    b.velocity.length()
 }
 
+// The game client gives a fast sled (2.5 m/s or more) the light 0.2
+// friction only on ground steeper than 10 degrees.
 #[test]
-fn calc_friction_sledding_fast_override_engages_at_5_degrees_from_flat() {
-    let (s, c) = (5.0f32 * PI / 180.0).sin_cos();
-    let mut b = grounded();
-    b.ground_normal = Vec3::new(s, 0.0, c);
-    b.state.insert(PhysicsState::SLEDDING);
-    b.velocity = Vec3::new(0.0, 3.0, 0.0);
-    let m = b.velocity.length_squared();
-    let dt = 1.0 / 60.0;
-    b.calc_friction(dt, m);
-    assert_eq_prec(3.0 * 0.8f32.powf(dt), b.velocity.length(), 3);
-}
-
-#[test]
-fn calc_friction_sledding_fast_override_does_not_engage_at_15_degrees_from_flat() {
-    let (s, c) = (15.0f32 * PI / 180.0).sin_cos();
-    let mut b = grounded();
-    b.ground_normal = Vec3::new(s, 0.0, c);
-    b.state.insert(PhysicsState::SLEDDING);
-    b.velocity = Vec3::new(0.0, 3.0, 0.0);
-    let m = b.velocity.length_squared();
-    let dt = 1.0 / 60.0;
-    b.calc_friction(dt, m);
+fn a_fast_sled_glides_on_ground_steeper_than_10_degrees() {
+    let dt = 1.0f32 / 60.0;
     assert_eq_prec(
-        3.0 * (1.0 - PhysicsBody::DEFAULT_FRICTION).powf(dt),
-        b.velocity.length(),
+        3.0 * 0.8f32.powf(dt),
+        sled_speed_after_one_step(15.0, 3.0),
         3,
     );
+}
+
+// On flatter ground a fast sled keeps its own friction.
+#[test]
+fn a_fast_sled_keeps_its_own_friction_on_ground_flatter_than_10_degrees() {
+    let dt = 1.0f32 / 60.0;
+    let own = 3.0 * (1.0 - PhysicsBody::DEFAULT_FRICTION).powf(dt);
+    assert_eq_prec(own, sled_speed_after_one_step(5.0, 3.0), 3);
+    assert_eq_prec(own, sled_speed_after_one_step(0.0, 3.0), 3);
+}
+
+// Between 1.25 and 2.5 m/s the slope does not matter: its own friction.
+#[test]
+fn a_middling_sled_keeps_its_own_friction_on_any_slope() {
+    let dt = 1.0f32 / 60.0;
+    let own = 2.0 * (1.0 - PhysicsBody::DEFAULT_FRICTION).powf(dt);
+    assert_eq_prec(own, sled_speed_after_one_step(15.0, 2.0), 3);
+    assert_eq_prec(own, sled_speed_after_one_step(5.0, 2.0), 3);
+}
+
+// Below 1.25 m/s a sled's friction is 1: it stops.
+#[test]
+fn a_slow_sled_stops() {
+    assert_eq!(sled_speed_after_one_step(15.0, 1.0), 0.0);
+    assert_eq!(sled_speed_after_one_step(0.0, 1.0), 0.0);
 }
 
 #[test]
