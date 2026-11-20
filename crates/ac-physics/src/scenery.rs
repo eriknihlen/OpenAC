@@ -299,30 +299,16 @@ pub fn heading_of(v: Vec3) -> f32 {
     (450.0 - n.y.atan2(n.x).to_degrees()) % 360.0
 }
 
-/// An orientation turned to face `degrees` (compass), keeping the up
-/// component of its current heading.
+/// An orientation turned to face `degrees` (compass). The new forward is
+/// the horizontal unit heading with the current forward axis's rise (its up
+/// component) added, so a pitched base keeps a pitch; the frame faces along
+/// it, pitched about its own right axis, which stays level (no roll).
 #[must_use]
 pub fn set_heading(orientation: Quat, degrees: f32) -> Quat {
     let radians = f64::from(degrees) * 0.017_453_292_519_943_295;
-    let m = Mat3::from_quat(orientation);
-    let heading = Vec3::new(
-        radians.sin() as f32,
-        radians.cos() as f32,
-        m.y_axis.z + m.x_axis.z,
-    );
-    set_vector_heading(orientation, heading)
-}
-
-/// An orientation facing along `heading`: a turn about z to its compass
-/// heading and a tilt for its up component.
-fn set_vector_heading(orientation: Quat, heading: Vec3) -> Quat {
-    let Some(n) = normalize_checked(heading) else {
-        return orientation;
-    };
-    let z_degrees = 450.0 - n.y.atan2(n.x).to_degrees();
-    let z_rotation = -(z_degrees % 360.0).to_radians();
-    let x_rotation = n.z.asin();
-    (Quat::from_rotation_y(x_rotation) * Quat::from_rotation_z(z_rotation)).normalize()
+    let rise = Mat3::from_quat(orientation).y_axis.z;
+    let heading = Vec3::new(radians.sin() as f32, radians.cos() as f32, rise);
+    crate::frame_math::set_vector_heading(orientation, heading)
 }
 
 /// `v` normalized; `None` when it is too short to have a direction.
@@ -577,6 +563,69 @@ mod tests {
                 "{degrees}: {forward}"
             );
         }
+    }
+
+    /// The world directions of an orientation's local right (+x),
+    /// forward (+y) and up (+z) axes.
+    fn axes(q: Quat) -> [Vec3; 3] {
+        [q * Vec3::X, q * Vec3::Y, q * Vec3::Z]
+    }
+
+    fn assert_axes(q: Quat, golden: [[f32; 3]; 3], what: &str) {
+        for (axis, want) in axes(q).iter().zip(golden) {
+            let want = Vec3::from(want);
+            assert!((*axis - want).length() < 1e-5, "{what}: {axis} vs {want}");
+        }
+    }
+
+    // Golden axes from the game client's heading step: the new forward is
+    // (sin h, cos h, rise) normalized, where the rise is the height of the
+    // base orientation's forward axis alone; the frame is pitched about its
+    // own right axis to that rise, then turned about world up to the
+    // heading, so the right axis stays level.
+
+    #[test]
+    fn set_heading_keeps_the_rise_of_the_forward_axis_alone() {
+        // A base turned 30 degrees about up, 10 about north and 20 about
+        // east: both its forward and its right axis rise. Facing south-east,
+        // the level right axis points south-west.
+        use std::f32::consts::FRAC_1_SQRT_2;
+        let base = Quat::from_xyzw(0.144_878_13, 0.127_679_44, 0.239_298_34, 0.951_548_5);
+        let q = set_heading(base, 135.0);
+        assert_axes(
+            q,
+            [
+                [-FRAC_1_SQRT_2, -FRAC_1_SQRT_2, 0.0],
+                [0.670_115_3, -0.670_115_3, 0.319_203_5],
+                [-0.225_711, 0.225_711, 0.947_686_2],
+            ],
+            "tilted base at 135 degrees",
+        );
+    }
+
+    #[test]
+    fn set_heading_pitches_about_the_right_axis_without_roll() {
+        // A base pitched 10 degrees nose-up: its forward rises sin 10
+        // degrees, so the new forward rises atan(sin 10) = 9.85 degrees.
+        let base = Quat::from_rotation_x(10f32.to_radians());
+        assert_axes(
+            set_heading(base, 0.0),
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.985_255_8, 0.171_087_9],
+                [0.0, -0.171_087_9, 0.985_255_8],
+            ],
+            "pitched base at 0 degrees",
+        );
+        assert_axes(
+            set_heading(base, 250.0),
+            [
+                [-0.342_020_1, 0.939_692_6, 0.0],
+                [-0.925_837_6, -0.336_977_3, 0.171_087_9],
+                [0.160_77, 0.058_515_5, 0.985_255_8],
+            ],
+            "pitched base at 250 degrees",
+        );
     }
 
     fn block_with_roads(roads: [(usize, u16); 4]) -> LandBlock {
