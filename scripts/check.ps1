@@ -17,8 +17,19 @@ if ((rustup target list --installed) -contains 'wasm32-unknown-unknown') {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cargo build -p ac-ui-web --target wasm32-unknown-unknown --release
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # The game logic, data and protocol crates hold no platform code: keep them building for
+    # WebAssembly. The runtime builds there without its `host` feature (sessions, sockets and the
+    # plugin host).
+    $wasmCrates = 'ac-bits', 'ac-clock', 'ac-core', 'ac-dat', 'ac-host', 'ac-host-core', 'ac-motion',
+                  'ac-nav', 'ac-net', 'ac-physics', 'ac-plugin-abi', 'ac-plugin-icon',
+                  'ac-plugin-manifest', 'ac-plugin-ui', 'ac-plugin-version', 'ac-proto',
+                  'ac-remote-wire', 'ac-ui', 'ac-ui-window', 'ac-vfx', 'openac-plugin'
+    cargo check --target wasm32-unknown-unknown @($wasmCrates | ForEach-Object { '-p', $_ })
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    cargo check -p ac-runtime --no-default-features --target wasm32-unknown-unknown
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
-    Write-Host "wasm32-unknown-unknown not installed; skipping the plugin-crate WebAssembly build."
+    Write-Host "wasm32-unknown-unknown not installed; skipping the WebAssembly builds."
 }
 $datDir = if ($env:OPENAC_DAT_DIR) { $env:OPENAC_DAT_DIR }
           elseif ($env:USERPROFILE) { Join-Path $env:USERPROFILE "Documents\Asheron's Call" }

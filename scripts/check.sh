@@ -13,8 +13,17 @@ if rustup target list --installed | grep -qx 'wasm32-unknown-unknown'; then
     # release build to check that it imports nothing).
     cargo clippy -p ac-ui-web --target wasm32-unknown-unknown -- -D warnings
     cargo build -p ac-ui-web --target wasm32-unknown-unknown --release
+    # The game logic, data and protocol crates hold no platform code: keep them building for
+    # WebAssembly. The runtime builds there without its `host` feature (sessions, sockets and the
+    # plugin host).
+    cargo check --target wasm32-unknown-unknown \
+        -p ac-bits -p ac-clock -p ac-core -p ac-dat -p ac-host -p ac-host-core -p ac-motion \
+        -p ac-nav -p ac-net -p ac-physics -p ac-plugin-abi -p ac-plugin-icon \
+        -p ac-plugin-manifest -p ac-plugin-ui -p ac-plugin-version -p ac-proto \
+        -p ac-remote-wire -p ac-ui -p ac-ui-window -p ac-vfx -p openac-plugin
+    cargo check -p ac-runtime --no-default-features --target wasm32-unknown-unknown
 else
-    echo "wasm32-unknown-unknown not installed; skipping the plugin-crate WebAssembly build."
+    echo "wasm32-unknown-unknown not installed; skipping the WebAssembly builds."
 fi
 # The default is assigned on its own: macOS's /bin/sh reads the apostrophe inside `${...:-...}`
 # as an opening quote.
