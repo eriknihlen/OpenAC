@@ -16,7 +16,7 @@ use ac_proto::character::{
     build_character_restore,
 };
 use ac_proto::{
-    Character, CharacterError, CharacterList, Inbound, Opcode, ServerName,
+    Character, CharacterError, CharacterList, GameEventType, Inbound, Opcode, ServerName,
     build_data_check_complete, build_enter_world, build_enter_world_request, build_house_query,
     build_interrogation_response, build_login_complete, build_logoff_request, read_opcode,
 };
@@ -34,8 +34,11 @@ use crate::local_time::LocalZone;
 /// How long connecting may take, from the login request to a usable
 /// character list with the data check finished.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long the server may take to say it is ready for the character.
-pub const ENTER_WORLD_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long entering the world may take, from asking for the character
+/// (once the server said it is ready) until the character's description
+/// arrives, as the game client allows. The wait for the server to get
+/// ready has no limit of its own.
+pub const ENTER_WORLD_TIMEOUT: Duration = Duration::from_secs(110);
 /// How long to wait for the server to confirm a log off. Longer than the
 /// longest time the server holds a character in the world before letting go.
 pub const LOGOFF_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(45);
@@ -101,8 +104,9 @@ pub enum SessionError {
     /// died, or dropped the session without a word).
     #[error("the connection to the server was lost")]
     ConnectionLost,
-    /// The server did not get ready for the character in time.
-    #[error("enter world timed out: server ready not received")]
+    /// The character was asked for but its description did not arrive in
+    /// time.
+    #[error("enter world timed out: the character's description not received")]
     EnterWorldTimeout,
     /// The session stayed in portal space (entering the world, or in a
     /// teleport) for longer than this client allows.
@@ -490,7 +494,7 @@ impl SessionFlow {
                 let message = banned_message(ban, now, &self.zone);
                 self.end_by_server(SessionError::AccountBanned(message));
             }
-            Inbound::ServerReady => self.on_server_ready(),
+            Inbound::ServerReady => self.on_server_ready(now),
             Inbound::CharacterDeleteAcknowledged => self.selection.apply_delete_acknowledged(),
             Inbound::CharGenVerification(response) => self.on_chargen_answer(now, response),
             Inbound::DddInterrogation => {
@@ -546,6 +550,11 @@ impl SessionFlow {
             | Inbound::PrivateUpdateSkill(_)
             | Inbound::SetStackSize(_)
             | Inbound::InventoryRemoveObject(_) => {}
+            // The character's description means the character is set up:
+            // the enter-world wait is over.
+            Inbound::GameEvent(event) if event.event_type == GameEventType::PLAYER_DESCRIPTION => {
+                self.on_player_description();
+            }
             // World-object messages belong to the world model.
             Inbound::GameEvent(_)
             | Inbound::UpdateObject(_)
@@ -619,12 +628,13 @@ impl SessionFlow {
         self.enter_highlighted(now)
     }
 
-    /// Enter the world with the highlighted character.
+    /// Enter the world with the highlighted character. Asking to enter
+    /// starts no timer, so the session time is not needed.
     ///
     /// # Errors
     /// Outside character selection, or the highlighted character cannot
     /// enter (none, pending deletion, a delete open).
-    pub fn enter_highlighted(&mut self, now: Duration) -> Result<(), SessionError> {
+    pub fn enter_highlighted(&mut self, _now: Duration) -> Result<(), SessionError> {
         self.require_selection("entering the world")?;
         let entry = self
             .selection
@@ -646,7 +656,9 @@ impl SessionFlow {
         self.active_character = Some(character);
         self.send(build_enter_world_request(), Queue::Ui);
         self.set_phase(Phase::EnteringWorld);
-        self.deadline = Some(now + ENTER_WORLD_TIMEOUT);
+        // The wait for the server's ready has no limit; the enter-world
+        // timeout starts when the character is asked for.
+        self.deadline = None;
         Ok(())
     }
 
@@ -867,7 +879,9 @@ impl SessionFlow {
                 };
                 self.fail(SessionError::ConnectTimeout(step));
             }
-            Phase::EnteringWorld => self.fail(SessionError::EnterWorldTimeout),
+            // The only deadline in the world is the wait for the
+            // character's description.
+            Phase::InWorld => self.fail(SessionError::EnterWorldTimeout),
             Phase::LoggingOff => self.finish_logoff(false),
             _ => self.deadline = None,
         }
@@ -987,17 +1001,24 @@ impl SessionFlow {
         }
     }
 
-    fn on_server_ready(&mut self) {
+    fn on_server_ready(&mut self, now: Duration) {
         if self.phase != Phase::EnteringWorld {
             return;
         }
         if let Some((character, body)) = self.pending_enter_world.take() {
             self.send(body, Queue::Ui);
-            self.deadline = None;
+            // Asking for the character starts the wait for its description.
+            self.deadline = Some(now + ENTER_WORLD_TIMEOUT);
             self.selection.complete_enter(character.id);
             self.creation.complete_enter();
             self.events.push_back(SessionEvent::EnteredWorld(character));
             self.set_phase(Phase::InWorld);
+        }
+    }
+
+    fn on_player_description(&mut self) {
+        if self.phase == Phase::InWorld {
+            self.deadline = None;
         }
     }
 
