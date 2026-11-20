@@ -19,6 +19,9 @@ use crate::plugins::{PluginEvent, PluginSetup};
 
 const SERVER_SEED: u32 = 0x1122_3344;
 const CLIENT_SEED: u32 = 0x5566_7788;
+/// The server stamps its id, and the connection's iteration (7 here), on
+/// every packet it sends.
+const SERVER_ID: u16 = 0x000B;
 const PLAYER: u32 = 0x5000_000B;
 
 fn connect_request() -> Vec<u8> {
@@ -31,6 +34,7 @@ fn connect_request() -> Vec<u8> {
     w.u32(0);
     let header = PacketHeader {
         flags: PacketFlags::CONNECT_REQUEST,
+        id: SERVER_ID,
         iteration: 7,
         ..PacketHeader::default()
     };
@@ -84,6 +88,8 @@ impl Server {
         let header = PacketHeader {
             sequence: self.sequence,
             flags: PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM,
+            id: SERVER_ID,
+            iteration: 7,
             ..PacketHeader::default()
         };
         self.sequence += 1;

@@ -42,4 +42,9 @@ pub struct TransportStats {
     /// Keep-alives sent to the server's connect port (not in
     /// `packets_sent`: they bypass the reliable transport).
     pub keep_alives_sent: u64,
+    /// Packets the header check dropped and counted: a sender id of 256
+    /// or more, or a numbered packet from a sender id with no connection.
+    /// (Its other drops, a wrong address or iteration or an oversized
+    /// body, are not counted.)
+    pub bad_packets: u64,
 }

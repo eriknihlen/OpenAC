@@ -1,6 +1,7 @@
 //! One negotiated connection: the handshake's tail (the connect response
 //! and its retries) plus the reliable transport.
 
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::time::Duration;
 
@@ -8,6 +9,7 @@ use crate::crypto::Isaac;
 use crate::packet::{
     ConnectRequest, PacketFlags, PacketHeader, encode, parse_packet, transport_disconnect,
 };
+use crate::transport::seq::overflow_compare;
 use crate::transport::{Admission, ReliableTransport, SendError, TransportStats};
 use crate::{GameMessageGroup, InboundMessage, NetTime};
 
@@ -23,6 +25,12 @@ pub const CONNECT_RESPONSE_RETRY: Duration = Duration::from_nanos(333_333_333);
 /// valid packet from the server. A server that dies, or drops the session
 /// without a word, is only ever seen as silence.
 pub const SERVER_SILENCE_TIMEOUT: Duration = Duration::from_secs(140);
+
+/// Sender ids run below this; a packet with a higher one is dropped.
+const MAX_SENDER_ID: u16 = 0x0100;
+
+/// The most body bytes a server packet may announce after its header.
+const MAX_BODY: usize = 0xFFE0;
 
 /// Where a datagram goes. The connect response and the keep-alive go to
 /// the port after the login port; everything else goes to the login port.
@@ -81,6 +89,8 @@ pub struct LinkSnapshot {
 pub struct Connection {
     transport: ReliableTransport,
     client_id: u16,
+    /// The id the server stamps on its packets (from its connect request).
+    server_id: u16,
     iteration: u16,
     connect_response: Vec<u8>,
     response_not_before: NetTime,
@@ -124,6 +134,7 @@ impl Connection {
                 request.server_time,
             ),
             client_id,
+            server_id: header.id,
             iteration,
             connect_response,
             response_not_before: now + CONNECT_RESPONSE_DELAY,
@@ -260,7 +271,42 @@ impl Connection {
         messages
     }
 
+    /// The header check every received packet passes first, before its
+    /// sequence or checksum is looked at. A sender id of 256 or more is
+    /// dropped and counted. From the server's id (an id of 0 never names a
+    /// connection) an older iteration is dropped, a newer one unless it is a
+    /// connect request, and a body over [`MAX_BODY`] bytes. From any other
+    /// id only an unnumbered packet passes; a numbered one is dropped and
+    /// counted. (The sender's address is not compared with the server's
+    /// yet: the connection is not told where a datagram came from.)
+    fn verify_header(&mut self, header: &PacketHeader) -> bool {
+        let stats = &mut self.transport.stats;
+        if header.id >= MAX_SENDER_ID {
+            stats.bad_packets += 1;
+            return false;
+        }
+        if self.server_id == 0 || header.id != self.server_id {
+            if header.sequence != 0 {
+                stats.bad_packets += 1;
+                return false;
+            }
+            return true;
+        }
+        match overflow_compare(header.iteration, self.iteration) {
+            Ordering::Less => return false,
+            Ordering::Greater if !header.flags.has(PacketFlags::CONNECT_REQUEST) => return false,
+            _ => {}
+        }
+        usize::from(header.data_size) <= MAX_BODY
+    }
+
     fn process(&mut self, now: NetTime, datagram: &[u8], messages: &mut Vec<InboundMessage>) {
+        let Some(header) = PacketHeader::from_bytes(datagram) else {
+            return;
+        };
+        if !self.verify_header(&header) {
+            return;
+        }
         let Ok(packet) = parse_packet(datagram) else {
             return;
         };
@@ -415,6 +461,10 @@ mod tests {
     const CLIENT_SEED: u32 = 0x0102_0304;
     const SERVER_SEED: u32 = 0xAABB_CCDD;
     const COOKIE: u64 = 0xFEED_FACE_CAFE_BABE;
+    /// The server stamps its own id, and the connection's iteration, on
+    /// every packet it sends, the connect request included.
+    const SERVER_ID: u16 = 0x000B;
+    const ITERATION: u16 = 7;
 
     fn connect_request(client_id: u32, iteration: u16, server_time: f64) -> Vec<u8> {
         let mut w = ac_bits::Writer::new();
@@ -426,6 +476,7 @@ mod tests {
         w.u32(0);
         let header = PacketHeader {
             flags: PacketFlags::CONNECT_REQUEST,
+            id: SERVER_ID,
             iteration,
             ..PacketHeader::default()
         };
@@ -435,8 +486,19 @@ mod tests {
     fn connected() -> Connection {
         let mut hs = Handshake::start(NetTime::ZERO, "acct", "pw", 1).unwrap();
         hs.poll_transmit().unwrap();
-        hs.handle_datagram(NetTime::ZERO, &connect_request(0x1234, 7, 12345.5))
+        hs.handle_datagram(NetTime::ZERO, &connect_request(0x1234, ITERATION, 12345.5))
             .unwrap()
+    }
+
+    /// A header as the server stamps it: its id and the iteration.
+    fn server_header(sequence: u32, flags: PacketFlags) -> PacketHeader {
+        PacketHeader {
+            sequence,
+            flags,
+            id: SERVER_ID,
+            iteration: ITERATION,
+            ..PacketHeader::default()
+        }
     }
 
     /// Builds sealed server packets the way the server does.
@@ -454,14 +516,20 @@ mod tests {
         }
 
         fn message(&mut self, sequence: u32, body: &[u8]) -> Vec<u8> {
+            self.message_with(
+                server_header(
+                    sequence,
+                    PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM,
+                ),
+                body,
+            )
+        }
+
+        /// A one-fragment message sealed under `header` as given.
+        fn message_with(&mut self, header: PacketHeader, body: &[u8]) -> Vec<u8> {
             let mut fragment = Vec::new();
             write_single_fragment(&mut fragment, self.fragment_sequence, 9, body).unwrap();
             self.fragment_sequence += 1;
-            let header = PacketHeader {
-                sequence,
-                flags: PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM,
-                ..PacketHeader::default()
-            };
             encode(header, &fragment, Some(&mut self.keystream)).unwrap()
         }
     }
@@ -556,15 +624,7 @@ mod tests {
         let mut conn = connected();
         let before = conn.snapshot();
         let time_sync = |keystream: Option<&mut Isaac>, flags: PacketFlags| {
-            encode(
-                PacketHeader {
-                    flags,
-                    ..PacketHeader::default()
-                },
-                &777.5f64.to_le_bytes(),
-                keystream,
-            )
-            .unwrap()
+            encode(server_header(0, flags), &777.5f64.to_le_bytes(), keystream).unwrap()
         };
         conn.handle_datagram(ms(1), &time_sync(None, PacketFlags::TIME_SYNC));
         assert_eq!(conn.server_time(), 777.5);
@@ -600,13 +660,12 @@ mod tests {
         body.extend_from_slice(&0.25f32.to_le_bytes());
         write_single_fragment(&mut body, 0, 9, b"\xE0\xF7\0\0echoed").unwrap();
         server.fragment_sequence += 1;
-        let header = PacketHeader {
-            sequence: 2,
-            flags: PacketFlags::ECHO_RESPONSE
+        let header = server_header(
+            2,
+            PacketFlags::ECHO_RESPONSE
                 | PacketFlags::BLOB_FRAGMENTS
                 | PacketFlags::ENCRYPTED_CHECKSUM,
-            ..PacketHeader::default()
-        };
+        );
         let datagram = encode(header, &body, Some(&mut server.keystream)).unwrap();
         let got = conn.handle_datagram(ms(1), &datagram);
         assert_eq!(got.len(), 1);
@@ -724,6 +783,152 @@ mod tests {
             assert_eq!(fragment.header.sequence, 2);
             assert_eq!((fragment.header.count, fragment.header.index), (2, index));
         }
+    }
+
+    /// True when the packet got past the header check: only an accepted
+    /// packet moves the last-packet time.
+    fn accepted(conn: &mut Connection, at: NetTime, datagram: &[u8]) -> bool {
+        conn.handle_datagram(at, datagram);
+        conn.last_packet_at() == at
+    }
+
+    /// A cleartext, unnumbered time sync under `header`.
+    fn time_sync_with(header: PacketHeader) -> Vec<u8> {
+        encode(header, &777.5f64.to_le_bytes(), None).unwrap()
+    }
+
+    // The game client's header check, first of all: a sender id of 256 or
+    // more is dropped and counted as a bad packet, before the sequence is
+    // looked at (no keystream word is spent on it).
+    #[test]
+    fn a_sender_id_of_256_or_more_is_dropped_and_counted() {
+        let mut conn = connected();
+        let mut server = Server::new();
+        let mut header = server_header(
+            2,
+            PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM,
+        );
+        header.id = 0x0100;
+        let foreign = server.message_with(header, b"\xE0\xF7\0\0foreign");
+        assert!(conn.handle_datagram(ms(1), &foreign).is_empty());
+        assert_eq!(conn.last_packet_at(), NetTime::ZERO);
+        let link = conn.snapshot();
+        assert_eq!(
+            link.highest_id_received,
+            crate::transport::INITIAL_WATERMARK
+        );
+        assert_eq!(link.stats.checksum_failures, 0);
+        assert_eq!(link.stats.bad_packets, 1);
+        // An unnumbered one is dropped the same way.
+        let mut header = server_header(0, PacketFlags::TIME_SYNC);
+        header.id = 0xFFFF;
+        assert!(!accepted(&mut conn, ms(2), &time_sync_with(header)));
+        assert_eq!(conn.server_time(), 12345.5);
+        assert_eq!(conn.stats().bad_packets, 2);
+        // 255 is in range: a sender with no connection, unnumbered, passes.
+        header.id = 0x00FF;
+        assert!(accepted(&mut conn, ms(3), &time_sync_with(header)));
+    }
+
+    // From a sender id with no connection the game client takes only
+    // unnumbered packets; a numbered one is dropped and counted. The id 0
+    // never names a connection.
+    #[test]
+    fn a_numbered_packet_from_a_sender_with_no_connection_is_dropped() {
+        let mut conn = connected();
+        let mut server = Server::new();
+        for id in [0x0000, 0x000C] {
+            let mut header = server_header(
+                2,
+                PacketFlags::BLOB_FRAGMENTS | PacketFlags::ENCRYPTED_CHECKSUM,
+            );
+            header.id = id;
+            let stray = server.message_with(header, b"\xE0\xF7\0\0stray");
+            assert!(conn.handle_datagram(ms(1), &stray).is_empty(), "id {id}");
+            server.keystream = Isaac::new(SERVER_SEED);
+            server.fragment_sequence = 0;
+        }
+        assert_eq!(conn.stats().bad_packets, 2);
+        assert_eq!(conn.stats().checksum_failures, 0);
+        assert_eq!(conn.snapshot().nak_set, 0);
+        // Unnumbered from such a sender: taken, whatever its iteration.
+        let mut header = server_header(0, PacketFlags::TIME_SYNC);
+        header.id = 0x000C;
+        header.iteration = 1;
+        assert!(accepted(&mut conn, ms(2), &time_sync_with(header)));
+        assert_eq!(conn.server_time(), 777.5);
+        // The server's own numbered packet still decodes with the first word.
+        assert_eq!(
+            conn.handle_datagram(ms(3), &server.message(2, b"\xE0\xF7\0\0ours"))
+                .len(),
+            1
+        );
+        assert_eq!(conn.stats().bad_packets, 2);
+    }
+
+    // From the server's id the game client drops an older iteration, and a
+    // newer one unless the packet is a connect request (a new connection);
+    // the comparison wraps at 16 bits. These drops are not counted.
+    #[test]
+    fn the_servers_packets_must_carry_its_iteration() {
+        let mut conn = connected();
+        let mut at = 0;
+        // A time sync, or a connect request, under the given iteration.
+        let mut accepted_at = |conn: &mut Connection, iteration: u16, connect: bool| {
+            at += 1;
+            let datagram = if connect {
+                connect_request(0x1234, iteration, 1.0)
+            } else {
+                let mut header = server_header(0, PacketFlags::TIME_SYNC);
+                header.iteration = iteration;
+                time_sync_with(header)
+            };
+            accepted(conn, ms(at), &datagram)
+        };
+        let sync = false;
+        let connect = true;
+        assert!(accepted_at(&mut conn, ITERATION, sync));
+        assert!(!accepted_at(&mut conn, ITERATION - 1, sync), "older");
+        assert!(!accepted_at(&mut conn, ITERATION + 1, sync), "newer");
+        assert!(!accepted_at(&mut conn, ITERATION - 1, connect), "older");
+        assert!(
+            accepted_at(&mut conn, ITERATION + 1, connect),
+            "a new connection"
+        );
+        // Up to 0x7FFF ahead is newer; exactly half the space ahead of 7
+        // is older.
+        assert!(!accepted_at(&mut conn, ITERATION + 0x7FFF, sync));
+        assert!(accepted_at(&mut conn, ITERATION + 0x7FFF, connect));
+        assert!(!accepted_at(&mut conn, ITERATION + 0x8000, connect));
+        assert_eq!(conn.stats().bad_packets, 0);
+    }
+
+    // The game client drops a packet from the server whose header says
+    // more than 65504 bytes follow (uncounted); 65504 is taken.
+    #[test]
+    fn the_servers_packets_carry_at_most_65504_body_bytes() {
+        let body_of = |len: usize| {
+            let mut body = Vec::new();
+            let mut sequence = 0;
+            while body.len() < len {
+                let payload = (len - body.len() - 16).min(448);
+                assert!(payload >= 4, "fragment too short");
+                let mut message = vec![0u8; payload];
+                message[..4].copy_from_slice(&[0xE0, 0xF7, 0, 0]);
+                write_single_fragment(&mut body, sequence, 9, &message).unwrap();
+                sequence += 1;
+            }
+            assert_eq!(body.len(), len);
+            body
+        };
+        let header = server_header(0, PacketFlags::BLOB_FRAGMENTS);
+        let mut conn = connected();
+        let too_long = encode(header, &body_of(0xFFE1), None).unwrap();
+        assert!(conn.handle_datagram(ms(1), &too_long).is_empty());
+        assert_eq!(conn.last_packet_at(), NetTime::ZERO);
+        let longest = encode(header, &body_of(0xFFE0), None).unwrap();
+        assert_eq!(conn.handle_datagram(ms(2), &longest).len(), 142);
+        assert_eq!(conn.stats().bad_packets, 0);
     }
 
     // The game client keeps the route to the port after the login port
