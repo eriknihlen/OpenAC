@@ -2,6 +2,8 @@
 //! messages: name, class, icon, item type, and the optional item fields
 //! selected by two flag words.
 
+use std::collections::HashSet;
+
 use ac_bits::Reader;
 
 use crate::{ProtoError, Result};
@@ -98,11 +100,12 @@ pub struct HouseGuest {
 /// A house's access list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HouseRestrictions {
-    /// Record version.
+    /// Record version; 0 for the oldest shape, which carries none.
     pub version: u32,
-    /// Access flags; non-zero means open to the public.
+    /// Access flags; non-zero means open to the public. The oldest shape
+    /// carries only the open bit.
     pub flags: u32,
-    /// Allegiance monarch with access.
+    /// Allegiance monarch with access; 0 in the oldest shape.
     pub monarch_id: u32,
     /// Guests, in wire order.
     pub guests: Vec<HouseGuest>,
@@ -115,33 +118,96 @@ impl HouseRestrictions {
         self.flags != 0
     }
 
+    /// Read one of the three shapes, chosen by the first word: with its high
+    /// half zero it is the open-to-public switch of the oldest shape (no
+    /// monarch, the old guest table); otherwise it is the version, the flags
+    /// and monarch follow, then the old guest table below
+    /// [`HouseRestrictions::CURRENT_VERSION`] and the current one from it on.
     pub(crate) fn read(r: &mut Reader<'_>) -> Result<Self> {
-        let version = r.u32()?;
-        let flags = r.u32()?;
-        let monarch_id = r.u32()?;
-        // The table header packs the entry count in the low 24 bits.
-        let count = r.u32()? & 0x00FF_FFFF;
-        if count as usize * 8 > r.remaining() {
-            return Err(ProtoError::CountExceedsPayload {
-                what: "house guests",
-                count,
+        let first = r.u32()?;
+        if first & 0xFFFF_0000 == 0 {
+            return Ok(Self {
+                version: 0,
+                flags: u32::from(first != 0),
+                monarch_id: 0,
+                guests: read_old_guests(r)?,
             });
         }
-        let guests = (0..count)
-            .map(|_| {
-                Ok(HouseGuest {
-                    guest_id: r.u32()?,
-                    permission: r.u32()?,
-                })
-            })
-            .collect::<Result<_>>()?;
+        let flags = r.u32()?;
+        let monarch_id = r.u32()?;
+        let guests = if first >= Self::CURRENT_VERSION {
+            read_guests(r)?
+        } else {
+            read_old_guests(r)?
+        };
         Ok(Self {
-            version,
+            version: first,
             flags,
             monarch_id,
             guests,
         })
     }
+
+    /// The version of the current shape, the one servers send today.
+    pub const CURRENT_VERSION: u32 = 0x1000_0002;
+}
+
+/// The current guest table: a header with the bucket size index in its top
+/// byte and the entry count in the low 24 bits, then (guest, permission)
+/// pairs.
+fn read_guests(r: &mut Reader<'_>) -> Result<Vec<HouseGuest>> {
+    let count = r.u32()? & 0x00FF_FFFF;
+    read_guest_pairs(r, count)
+}
+
+/// The old guest table: a header with the number of bucket bits in its top
+/// byte (at most 32) and the entry count in the low 24 bits, then (guest,
+/// permission) pairs. With no bucket bits only an empty table is valid, and
+/// a guest may appear only once.
+fn read_old_guests(r: &mut Reader<'_>) -> Result<Vec<HouseGuest>> {
+    let header = r.u32()?;
+    let bucket_bits = header >> 24;
+    if bucket_bits > 32 {
+        return Err(ProtoError::InvalidValue {
+            what: "old house guest table bucket bits",
+            value: bucket_bits,
+        });
+    }
+    let count = header & 0x00FF_FFFF;
+    if bucket_bits == 0 {
+        return if count == 0 {
+            Ok(Vec::new())
+        } else {
+            Err(ProtoError::Inconsistent {
+                what: "old house guest table without buckets",
+            })
+        };
+    }
+    let guests = read_guest_pairs(r, count)?;
+    let mut seen = HashSet::with_capacity(guests.len());
+    if !guests.iter().all(|g| seen.insert(g.guest_id)) {
+        return Err(ProtoError::Inconsistent {
+            what: "old house guest table repeats a guest",
+        });
+    }
+    Ok(guests)
+}
+
+fn read_guest_pairs(r: &mut Reader<'_>, count: u32) -> Result<Vec<HouseGuest>> {
+    if count as usize * 8 > r.remaining() {
+        return Err(ProtoError::CountExceedsPayload {
+            what: "house guests",
+            count,
+        });
+    }
+    (0..count)
+        .map(|_| {
+            Ok(HouseGuest {
+                guest_id: r.u32()?,
+                permission: r.u32()?,
+            })
+        })
+        .collect()
 }
 
 /// The public description. Every optional field is present exactly when
@@ -351,5 +417,171 @@ impl PublicWeenieDesc {
             cooldown_duration,
             pet_owner_id,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The three access-list shapes the game client accepts, worked from
+    //! its reader: a first word with a zero high half is the open switch of
+    //! the oldest shape; below version `0x1000_0002` the flags and monarch
+    //! follow, then the old table; from that version on the current table.
+
+    use ac_bits::Writer;
+
+    use super::*;
+    use crate::test_util::assert_every_prefix_fails;
+
+    fn read(bytes: &[u8]) -> Result<HouseRestrictions> {
+        HouseRestrictions::read(&mut Reader::new(bytes))
+    }
+
+    fn guests(pairs: &[(u32, u32)]) -> Vec<HouseGuest> {
+        pairs
+            .iter()
+            .map(|&(guest_id, permission)| HouseGuest {
+                guest_id,
+                permission,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn current_shape_reads_flags_monarch_and_table() {
+        let mut w = Writer::new();
+        w.u32(0x1000_0002);
+        w.u32(1);
+        w.u32(0x5000_0009);
+        w.u32(0x0300_0002); // bucket size index 3, two entries
+        w.u32(0x5000_0001);
+        w.u32(0);
+        w.u32(0x5000_0002);
+        w.u32(1);
+        let h = read(w.as_slice()).unwrap();
+        assert_eq!(
+            h,
+            HouseRestrictions {
+                version: 0x1000_0002,
+                flags: 1,
+                monarch_id: 0x5000_0009,
+                guests: guests(&[(0x5000_0001, 0), (0x5000_0002, 1)]),
+            }
+        );
+        assert_every_prefix_fails(w.as_slice(), read);
+    }
+
+    #[test]
+    fn oldest_shape_is_an_open_switch_then_the_old_table() {
+        let mut w = Writer::new();
+        w.u32(1); // open to the public
+        w.u32(0x0300_0001); // four buckets, one entry
+        w.u32(0x5000_0001);
+        w.u32(1);
+        let h = read(w.as_slice()).unwrap();
+        assert_eq!(
+            h,
+            HouseRestrictions {
+                version: 0,
+                flags: 1,
+                monarch_id: 0,
+                guests: guests(&[(0x5000_0001, 1)]),
+            }
+        );
+        assert!(h.open_to_public());
+        assert_every_prefix_fails(w.as_slice(), read);
+
+        // Any non-zero switch below the high half sets only the open bit.
+        let mut w = Writer::new();
+        w.u32(0xFFFF);
+        w.u32(0);
+        let h = read(w.as_slice()).unwrap();
+        assert_eq!((h.version, h.flags, h.guests.len()), (0, 1, 0));
+        let mut w = Writer::new();
+        w.u32(0);
+        w.u32(0);
+        assert_eq!(read(w.as_slice()).unwrap().flags, 0);
+    }
+
+    #[test]
+    fn older_version_reads_flags_and_monarch_then_the_old_table() {
+        let mut w = Writer::new();
+        w.u32(0x1000_0001);
+        w.u32(4);
+        w.u32(0x5000_0009);
+        w.u32(0x0100_0002); // one bucket, two entries
+        w.u32(0x5000_0001);
+        w.u32(0);
+        w.u32(0x5000_0002);
+        w.u32(1);
+        let h = read(w.as_slice()).unwrap();
+        assert_eq!(
+            h,
+            HouseRestrictions {
+                version: 0x1000_0001,
+                flags: 4,
+                monarch_id: 0x5000_0009,
+                guests: guests(&[(0x5000_0001, 0), (0x5000_0002, 1)]),
+            }
+        );
+        assert_every_prefix_fails(w.as_slice(), read);
+    }
+
+    #[test]
+    fn a_large_old_table_is_read_in_linear_time() {
+        const GUESTS: u32 = 100_000;
+        let table = |last: u32| {
+            let mut w = Writer::new();
+            w.u32(0x1000_0001);
+            w.u32(0);
+            w.u32(0);
+            w.u32(0x1000_0000 | GUESTS); // 16 bucket bits
+            for guest in 1..GUESTS {
+                w.u32(guest);
+                w.u32(0);
+            }
+            w.u32(last);
+            w.u32(0);
+            w.into_vec()
+        };
+        let start = std::time::Instant::now();
+        let h = read(&table(GUESTS)).unwrap();
+        assert_eq!(h.guests.len(), GUESTS as usize);
+        // A repeat as the very last guest is still found.
+        assert!(read(&table(1)).is_err());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn old_table_rejects_what_the_game_client_rejects() {
+        let old = |table: &[u32]| {
+            let mut w = Writer::new();
+            w.u32(0x0001_0000);
+            w.u32(0);
+            w.u32(0);
+            for &word in table {
+                w.u32(word);
+            }
+            read(w.as_slice())
+        };
+        // More than 32 bucket bits.
+        assert!(old(&[0x2100_0000]).is_err());
+        // No buckets: only an empty table is accepted.
+        assert_eq!(old(&[0x0000_0000]).unwrap().guests, []);
+        assert!(old(&[0x0000_0001, 0x5000_0001, 0]).is_err());
+        // A guest listed twice.
+        assert!(old(&[0x0100_0002, 0x5000_0001, 0, 0x5000_0001, 1]).is_err());
+        // The current table keeps a repeated guest.
+        let mut w = Writer::new();
+        w.u32(0x1000_0002);
+        w.u32(0);
+        w.u32(0);
+        for word in [0x0100_0002, 0x5000_0001, 0, 0x5000_0001, 1] {
+            w.u32(word);
+        }
+        assert_eq!(read(w.as_slice()).unwrap().guests.len(), 2);
     }
 }

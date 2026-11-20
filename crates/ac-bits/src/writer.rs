@@ -126,16 +126,27 @@ impl Writer {
         Ok(())
     }
 
-    /// Wire string from raw bytes: u16 length, the bytes, then zero padding
+    /// Wire string from raw bytes: u16 length (from 0xFFFF bytes on, the
+    /// marker `0xFFFF` and then a u32 length), the bytes, then zero padding
     /// so the record (length prefix included) is a multiple of 4 bytes.
     pub fn string16l_bytes(&mut self, text: &[u8]) -> Result<()> {
-        let len = u16::try_from(text.len()).map_err(|_| BitsError::ValueOutOfRange {
-            encoding: "string16l length",
-            value: text.len() as u64,
-        })?;
-        self.u16(len);
+        let prefix = match u16::try_from(text.len()) {
+            Ok(len) if len != 0xFFFF => {
+                self.u16(len);
+                2
+            }
+            _ => {
+                let len = u32::try_from(text.len()).map_err(|_| BitsError::ValueOutOfRange {
+                    encoding: "string16l length",
+                    value: text.len() as u64,
+                })?;
+                self.u16(0xFFFF);
+                self.u32(len);
+                6
+            }
+        };
         self.bytes(text);
-        self.pad((4 - ((2 + text.len()) & 3)) & 3);
+        self.pad((4 - ((prefix + text.len()) & 3)) & 3);
         Ok(())
     }
 
@@ -193,6 +204,32 @@ mod tests {
         let mut w = Writer::new();
         w.string16l("").unwrap();
         assert_eq!(w.as_slice(), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn string16l_long_form_from_0xffff_bytes() {
+        // From 0xFFFF bytes on the u16 length is the marker 0xFFFF and a u32
+        // length follows; the 6-byte prefix counts toward the padding.
+        for len in [0xFFFE_usize, 0xFFFF, 0x1_0000, 0x1_0001] {
+            let text = vec![b'x'; len];
+            let mut w = Writer::new();
+            w.string16l_bytes(&text).unwrap();
+            let out = w.as_slice();
+            let prefix = if len >= 0xFFFF {
+                assert_eq!(out[..2], [0xFF, 0xFF]);
+                assert_eq!(out[2..6], (len as u32).to_le_bytes());
+                6
+            } else {
+                assert_eq!(out[..2], (len as u16).to_le_bytes());
+                2
+            };
+            assert_eq!(out.len() % 4, 0);
+            assert_eq!(out.len(), (prefix + len).next_multiple_of(4));
+            assert!(out[prefix + len..].iter().all(|&b| b == 0));
+            let mut r = Reader::new(out);
+            assert_eq!(r.string16l_bytes(), Ok(&text[..]));
+            assert_eq!(r.remaining(), 0);
+        }
     }
 
     #[test]

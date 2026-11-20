@@ -4,13 +4,14 @@ use ac_bits::{Reader, Writer, cp1252};
 
 use crate::{GameActionType, Opcode, ProtoError, Result};
 
-/// A u16-length Windows-1252 string padded to 4 bytes from the record start.
+/// A u16-length Windows-1252 string (from 0xFFFF bytes on, the marker
+/// `0xFFFF` and a u32 length) padded to 4 bytes from the record start.
 /// Padding missing at the very end of the body is tolerated: the cursor
 /// stops at the end and any further read fails.
 pub(crate) fn read_string(r: &mut Reader<'_>) -> Result<String> {
-    let len = usize::from(r.u16()?);
+    let (len, prefix) = r.string16l_length()?;
     let text = cp1252::decode(r.bytes(len)?);
-    let pad = (4 - ((2 + len) & 3)) & 3;
+    let pad = (4 - ((prefix + len) & 3)) & 3;
     r.skip(pad.min(r.remaining()))?;
     Ok(text)
 }
@@ -88,6 +89,18 @@ mod tests {
         assert_eq!(r.remaining(), 0);
         // A body cut inside the text is still an error.
         assert!(read_string(&mut Reader::new(&[3, 0, b'a', b'b'])).is_err());
+    }
+
+    #[test]
+    fn read_string_long_form() {
+        // Length 0xFFFF marks a u32 length; 6 + 3 = 9 -> 3 padding.
+        let mut r = Reader::new(&[0xFF, 0xFF, 3, 0, 0, 0, b'a', b'b', b'c', 0, 0, 0, 7]);
+        assert_eq!(read_string(&mut r).as_deref(), Ok("abc"));
+        assert_eq!(r.remaining(), 1);
+        // Missing final padding is tolerated in the long form too.
+        let mut r = Reader::new(&[0xFF, 0xFF, 3, 0, 0, 0, b'a', b'b', b'c']);
+        assert_eq!(read_string(&mut r).as_deref(), Ok("abc"));
+        assert!(read_string(&mut Reader::new(&[0xFF, 0xFF, 3, 0])).is_err());
     }
 
     #[test]

@@ -22,8 +22,9 @@
 
 use std::collections::BTreeMap;
 
-use ac_bits::{Reader, cp1252};
+use ac_bits::Reader;
 
+use crate::wire::read_string;
 use crate::{Enchantment, GameEventType, Position, ProtoError, Result};
 
 macro_rules! flag_set {
@@ -376,17 +377,6 @@ fn read_table_header(r: &mut Reader<'_>) -> Result<u16> {
     let count = r.u16()?;
     r.u16()?;
     Ok(count)
-}
-
-/// A u16-length Windows-1252 string padded to 4 bytes, where padding
-/// missing at the end of the payload is tolerated: the cursor stops at the
-/// end and the next read fails or finds nothing left.
-fn read_string(r: &mut Reader<'_>) -> Result<String> {
-    let len = usize::from(r.u16()?);
-    let text = cp1252::decode(r.bytes(len)?);
-    let pad = (4 - ((2 + len) & 3)) & 3;
-    r.skip(pad.min(r.remaining()))?;
-    Ok(text)
 }
 
 fn read_property_tables(
@@ -1450,6 +1440,25 @@ mod tests {
         let d = parse(&w);
         assert_eq!(d.properties.strings[&1], "a");
         assert_eq!(d.vector_flags, DescriptionVectorFlags(0));
+    }
+
+    #[test]
+    fn string_property_long_length_form() {
+        // Length 0xFFFF marks a u32 length; 6 + 1 = 7 -> 1 padding byte.
+        let mut w = Writer::new();
+        words(&mut w, &[0x10, 0x52]);
+        w.u16(2);
+        w.u16(0);
+        w.u32(1);
+        w.u16(0xFFFF);
+        w.u32(1);
+        w.u8(b'a');
+        w.u8(0);
+        w.u32(2);
+        w.string16l("b").unwrap();
+        let d = parse(&w);
+        assert_eq!(d.properties.strings[&1], "a");
+        assert_eq!(d.properties.strings[&2], "b");
     }
 
     #[test]

@@ -545,7 +545,7 @@ mod tests {
         let mut w = Writer::new();
         w.u8(4);
         w.u32(0x7000_0001);
-        w.u32(2);
+        w.u32(0x1000_0002); // the current version
         w.u32(1);
         w.u32(0x5000_0009);
         w.u32(1);

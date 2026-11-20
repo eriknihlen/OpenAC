@@ -49,7 +49,7 @@ pub const RETAIL_CLIENT_VERSION: &str = "1802";
 /// Why a login request could not be built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LoginBuildError {
-    /// The account name does not fit a 16-bit length.
+    /// The account name does not fit a 32-bit length.
     #[error("account name of {0} characters is too long")]
     AccountTooLong(usize),
     /// The password is longer than the 255 characters the short form holds.
@@ -136,11 +136,13 @@ fn read_string32l(r: &mut Reader<'_>) -> Result<String, LoginParseError> {
 }
 
 fn read_string16l(r: &mut Reader<'_>, field: &'static str) -> Result<String, LoginParseError> {
-    let len = usize::from(r.u16().map_err(|_| LoginParseError::Truncated(field))?);
+    let (len, prefix) = r
+        .string16l_length()
+        .map_err(|_| LoginParseError::Truncated(field))?;
     let text = r
         .bytes(len)
         .map_err(|_| LoginParseError::Truncated(field))?;
-    let pad = (4 - ((2 + len) & 3)) & 3;
+    let pad = (4 - ((prefix + len) & 3)) & 3;
     let _ = r.skip(pad.min(r.remaining()));
     Ok(text.iter().map(|&b| char::from(b)).collect())
 }
@@ -153,7 +155,9 @@ pub fn build_login_request(
 ) -> Result<Vec<u8>, LoginBuildError> {
     let account = ascii(account);
     let password = ascii(password);
-    if account.len() > usize::from(u16::MAX) {
+    // From 0xFFFF bytes on the account takes the long length form; only a
+    // length beyond 32 bits cannot be written.
+    if u32::try_from(account.len()).is_err() {
         return Err(LoginBuildError::AccountTooLong(account.len()));
     }
     if password.len() > 255 {
@@ -161,7 +165,8 @@ pub fn build_login_request(
     }
 
     let mut w = Writer::with_capacity(128);
-    // Short strings cannot overflow their 16-bit length (checked above).
+    // The strings' lengths fit 32 bits (checked above), so writing them
+    // cannot fail.
     let _ = w.string16l_bytes(RETAIL_CLIENT_VERSION.as_bytes());
     let length_at = w.len();
     w.u32(0); // patched below
@@ -276,6 +281,21 @@ mod tests {
             build_login_request("a", &"p".repeat(256), 0).unwrap_err(),
             LoginBuildError::PasswordTooLong(256)
         );
+    }
+
+    #[test]
+    fn a_long_account_takes_the_long_length_form() {
+        // The game writes a string of 0xFFFF bytes or more as the marker
+        // 0xFFFF and a u32 length; the 6-byte prefix counts toward padding.
+        let account = "a".repeat(0x1_0001);
+        let bytes = build_login_request(&account, "pw", 7).unwrap();
+        let at = 8 + 4 + 12;
+        assert_eq!(bytes[at..at + 6], [0xFF, 0xFF, 0x01, 0x00, 0x01, 0x00]);
+        assert_eq!(bytes.len() % 4, 0);
+        let parsed = parse_login_request(&bytes).unwrap();
+        assert_eq!(parsed.account, account);
+        assert_eq!(parsed.login_as, "");
+        assert_eq!(parsed.password.as_deref(), Some("pw"));
     }
 
     #[test]

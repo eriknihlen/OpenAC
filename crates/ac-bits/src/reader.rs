@@ -165,12 +165,25 @@ impl<'a> Reader<'a> {
         Ok((((u32::from(b0 & 0x3F) << 8) | u32::from(b1)) << 16) | u32::from(low))
     }
 
-    /// Wire string: u16 length, the bytes, then zero padding so the whole
-    /// record (length prefix included) is a multiple of 4 bytes.
+    /// The length prefix of a wire string: a u16, or for 0xFFFF bytes and
+    /// more the marker `0xFFFF` and then a u32. Returns the text length and
+    /// the size of the prefix (2 or 6), which counts toward the padding.
+    pub fn string16l_length(&mut self) -> Result<(usize, usize)> {
+        let short = self.u16()?;
+        if short == 0xFFFF {
+            Ok((self.u32()? as usize, 6))
+        } else {
+            Ok((usize::from(short), 2))
+        }
+    }
+
+    /// Wire string: the length prefix ([`Reader::string16l_length`]), the
+    /// bytes, then zero padding so the whole record (length prefix
+    /// included) is a multiple of 4 bytes.
     pub fn string16l_bytes(&mut self) -> Result<&'a [u8]> {
-        let len = usize::from(self.u16()?);
+        let (len, prefix) = self.string16l_length()?;
         let text = self.bytes(len)?;
-        self.skip((4 - ((2 + len) & 3)) & 3)?;
+        self.skip((4 - ((prefix + len) & 3)) & 3)?;
         Ok(text)
     }
 
@@ -288,6 +301,20 @@ mod tests {
         // An empty string still pads its 2-byte prefix to 4.
         assert_eq!(r.string16l().as_deref(), Ok(""));
         assert_eq!(r.position(), 16);
+    }
+
+    #[test]
+    fn string16l_long_form_has_a_u32_length_after_the_marker() {
+        // Length 0xFFFF marks a u32 length; the 6-byte prefix counts toward
+        // the padding: 6 + 3 = 9 -> 3 padding.
+        let data = [0xFF, 0xFF, 3, 0, 0, 0, b'a', b'b', b'c', 0, 0, 0, 0xEE];
+        let mut r = Reader::new(&data);
+        assert_eq!(r.string16l().as_deref(), Ok("abc"));
+        assert_eq!(r.position(), 12);
+        // A long length beyond the input is an error, not a panic.
+        let mut r = Reader::new(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, b'a']);
+        assert!(r.string16l().is_err());
+        assert!(Reader::new(&[0xFF, 0xFF, 3, 0]).string16l().is_err());
     }
 
     #[test]

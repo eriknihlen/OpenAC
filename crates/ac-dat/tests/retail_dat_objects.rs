@@ -1622,16 +1622,19 @@ fn spell_tables_decode_to_the_golden_totals() {
 fn string_tables_decode_to_the_golden_totals() {
     let d = dats();
     let (mut entries, mut strings, mut vars, mut chars, mut isum) = (0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut flagged, mut names) = (0u64, 0u64);
     let mut first = None;
     let n = sweep::<StringTable>(&d.local, 0x2300_0000, 0x24FF_FFFF, |_, t| {
         entries += t.strings.len() as u64;
-        isum += u64::from(t.language);
+        isum += u64::from(t.version);
         for (key, s) in &t.strings {
             isum += u64::from(
                 key.wrapping_add(s.data_id)
                     .wrapping_add(u32::from(s.is_var_name_table_worth_packing)),
             );
             strings += s.strings.len() as u64;
+            flagged += u64::from(s.is_var_name_table_worth_packing);
+            names += s.var_names.len() as u64;
             vars += s.variables.len() as u64;
             isum += s.variables.iter().map(|&v| u64::from(v)).sum::<u64>();
             for text in &s.strings {
@@ -1647,8 +1650,9 @@ fn string_tables_decode_to_the_golden_totals() {
         (n, entries, strings, vars, chars, isum),
         (15, 6899, 7050, 151, 154_546, 1_079_444_735_016)
     );
+    assert_eq!((flagged, names), (0, 0), "flagged entries and their names");
     let t = first.unwrap();
-    assert_eq!((t.id, t.language, t.strings.len()), (0x2300_0001, 1, 502));
+    assert_eq!((t.id, t.version, t.strings.len()), (0x2300_0001, 1, 502));
     let (key, s) = &t.strings[0];
     assert_eq!(*key, 0x052B_A517);
     assert_eq!(
@@ -1657,7 +1661,8 @@ fn string_tables_decode_to_the_golden_totals() {
             data_id: 0,
             strings: vec!["Low".to_owned()],
             variables: vec![],
-            is_var_name_table_worth_packing: false
+            is_var_name_table_worth_packing: false,
+            var_names: vec![],
         }
     );
 }

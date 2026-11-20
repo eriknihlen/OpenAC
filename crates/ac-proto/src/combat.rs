@@ -115,6 +115,13 @@ impl UpdateHealth {
     }
 }
 
+/// The attack condition bits that end both hit notices: one 32-bit word,
+/// widened with its sign. A server that writes eight bytes leaves its high
+/// four unread, as the game client does.
+fn read_conditions(r: &mut Reader<'_>) -> Result<u64> {
+    Ok(i64::from(r.i32()?) as u64)
+}
+
 /// The player hit something ([`crate::GameEventType::ATTACKER_NOTIFICATION`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttackerNotification {
@@ -128,13 +135,13 @@ pub struct AttackerNotification {
     pub damage: u32,
     /// Non-zero for a critical hit.
     pub critical: u32,
-    /// Attack condition bits.
+    /// Attack condition bits, widened from one signed 32-bit word.
     pub attack_conditions: u64,
 }
 
 impl AttackerNotification {
     /// Parse the event payload: name, damage type, health fraction,
-    /// damage, critical word, condition bits.
+    /// damage, critical word, condition word.
     pub fn parse(payload: &[u8]) -> Result<Self> {
         let mut r = Reader::new(payload);
         Ok(Self {
@@ -143,7 +150,7 @@ impl AttackerNotification {
             health_percent: r.f64()?,
             damage: r.u32()?,
             critical: r.u32()?,
-            attack_conditions: r.u64()?,
+            attack_conditions: read_conditions(&mut r)?,
         })
     }
 }
@@ -163,13 +170,13 @@ pub struct DefenderNotification {
     pub hit_quadrant: u32,
     /// Non-zero for a critical hit.
     pub critical: u32,
-    /// Attack condition bits.
+    /// Attack condition bits, widened from one signed 32-bit word.
     pub attack_conditions: u64,
 }
 
 impl DefenderNotification {
     /// Parse the event payload: name, damage type, health fraction,
-    /// damage, hit quadrant, critical word, condition bits.
+    /// damage, hit quadrant, critical word, condition word.
     pub fn parse(payload: &[u8]) -> Result<Self> {
         let mut r = Reader::new(payload);
         Ok(Self {
@@ -179,7 +186,7 @@ impl DefenderNotification {
             damage: r.u32()?,
             hit_quadrant: r.u32()?,
             critical: r.u32()?,
-            attack_conditions: r.u64()?,
+            attack_conditions: read_conditions(&mut r)?,
         })
     }
 }
@@ -303,7 +310,11 @@ mod tests {
         assert_eq!(parsed.damage, 37);
         assert_eq!(parsed.critical, 1);
         assert_eq!(parsed.attack_conditions, 6);
-        assert_every_prefix_fails(env.payload, AttackerNotification::parse);
+        // The captured server sends the conditions as eight bytes; the game
+        // client reads the first four and leaves the rest unread.
+        let one_word = &env.payload[..env.payload.len() - 4];
+        assert_every_prefix_fails(one_word, AttackerNotification::parse);
+        assert_eq!(AttackerNotification::parse(one_word).as_ref(), Ok(&parsed));
     }
 
     #[test]
@@ -321,7 +332,34 @@ mod tests {
         assert_eq!(parsed.hit_quadrant, 1);
         assert_eq!(parsed.critical, 0);
         assert_eq!(parsed.attack_conditions, 8);
-        assert_every_prefix_fails(env.payload, DefenderNotification::parse);
+        let one_word = &env.payload[..env.payload.len() - 4];
+        assert_every_prefix_fails(one_word, DefenderNotification::parse);
+        assert_eq!(DefenderNotification::parse(one_word).as_ref(), Ok(&parsed));
+    }
+
+    #[test]
+    fn attack_conditions_are_one_signed_word() {
+        // The game client reads the conditions as a 32-bit word and widens
+        // it with its sign: a set top bit fills the high half.
+        let mut w = Writer::new();
+        w.string16l("Mite").unwrap();
+        w.u32(1);
+        w.f64(0.5);
+        w.u32(3);
+        w.u32(0);
+        w.u32(0x8000_0004);
+        let parsed = AttackerNotification::parse(w.as_slice()).unwrap();
+        assert_eq!(parsed.attack_conditions, 0xFFFF_FFFF_8000_0004);
+        let mut w = Writer::new();
+        w.string16l("Mite").unwrap();
+        w.u32(1);
+        w.f64(0.5);
+        w.u32(3);
+        w.u32(2);
+        w.u32(0);
+        w.u32(0x8000_0002);
+        let parsed = DefenderNotification::parse(w.as_slice()).unwrap();
+        assert_eq!(parsed.attack_conditions, 0xFFFF_FFFF_8000_0002);
     }
 
     #[test]
