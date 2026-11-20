@@ -32,6 +32,26 @@ dat_dir="${OPENAC_DAT_DIR:-$default_dat_dir}"
 if [ -f "$dat_dir/client_portal.dat" ]; then
     echo "Retail dats found in $dat_dir; running ignored tests too."
     cargo test --workspace -- --include-ignored
+    # A test that is not ignored must pass on a machine without the game: run the tests again
+    # with every OPENAC_* variable cleared (OPENAC_DAT_DIR and the tests' opt-ins) and the home
+    # folder, where the dats are looked for by default, pointed at an empty folder. The build is
+    # reused; only the environment differs. Without dats the run below is already such a run.
+    echo "Running the tests again without the retail dats."
+    empty_home="$PWD/target/no-game-data-home"
+    rm -rf "$empty_home"
+    mkdir -p "$empty_home"
+    (
+        real_home="${USERPROFILE:-$HOME}"
+        # cargo and rustup find their own folders under the home folder unless told where.
+        export CARGO_HOME="${CARGO_HOME:-$real_home/.cargo}"
+        export RUSTUP_HOME="${RUSTUP_HOME:-$real_home/.rustup}"
+        for name in $(env | sed -n 's/^\(OPENAC_[A-Za-z0-9_]*\)=.*/\1/p'); do
+            unset "$name"
+        done
+        export HOME="$empty_home"
+        export USERPROFILE="$empty_home"
+        cargo test --workspace
+    )
 else
     echo "No retail dats in $dat_dir; skipping the real-dat tests."
     cargo test --workspace

@@ -34,11 +34,41 @@ if ((rustup target list --installed) -contains 'wasm32-unknown-unknown') {
 $datDir = if ($env:OPENAC_DAT_DIR) { $env:OPENAC_DAT_DIR }
           elseif ($env:USERPROFILE) { Join-Path $env:USERPROFILE "Documents\Asheron's Call" }
           else { Join-Path $env:HOME "Documents/Asheron's Call" }
-if (Test-Path -LiteralPath (Join-Path $datDir 'client_portal.dat')) {
+$datsFound = Test-Path -LiteralPath (Join-Path $datDir 'client_portal.dat')
+if ($datsFound) {
     Write-Host "Retail dats found in $datDir; running ignored tests too."
     cargo test --workspace -- --include-ignored
 } else {
     Write-Host "No retail dats in $datDir; skipping the real-dat tests."
     cargo test --workspace
+}
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# A test that is not ignored must pass on a machine without the game: run the tests again with
+# every OPENAC_* variable cleared (OPENAC_DAT_DIR and the tests' opt-ins) and the home folder,
+# where the dats are looked for by default, pointed at an empty folder. The build is reused; only
+# the environment differs. Without dats the run above was already such a run.
+if ($datsFound) {
+    Write-Host "Running the tests again without the retail dats."
+    $names = @(Get-ChildItem Env: | Where-Object Name -like 'OPENAC_*' | ForEach-Object Name) +
+             @('USERPROFILE', 'HOME', 'CARGO_HOME', 'RUSTUP_HOME')
+    $saved = @{}
+    foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
+    $realHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+    $emptyHome = Join-Path (Get-Location) 'target\no-game-data-home'
+    try {
+        # cargo and rustup find their own folders under the home folder unless told where.
+        if (-not $env:CARGO_HOME) { $env:CARGO_HOME = Join-Path $realHome '.cargo' }
+        if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = Join-Path $realHome '.rustup' }
+        foreach ($name in $names) {
+            if ($name -like 'OPENAC_*') { [Environment]::SetEnvironmentVariable($name, $null) }
+        }
+        if (Test-Path -LiteralPath $emptyHome) { Remove-Item -LiteralPath $emptyHome -Recurse -Force }
+        New-Item -ItemType Directory -Path $emptyHome | Out-Null
+        $env:USERPROFILE = $emptyHome
+        $env:HOME = $emptyHome
+        cargo test --workspace
+    } finally {
+        foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
+    }
 }
 exit $LASTEXITCODE
