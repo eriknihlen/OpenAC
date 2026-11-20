@@ -2046,7 +2046,7 @@ fn known_server_cell(
             ui.add_space(4.0);
             if row.is_added {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    ui.label(RichText::new("Added ✓").size(12.0).color(hex("#8FD18F")));
+                    ui.label(RichText::new("Added ✔").size(12.0).color(hex("#8FD18F")));
                 });
             } else {
                 let label = RichText::new("Add").strong().color(theme::ON_GOLD);
@@ -2857,6 +2857,23 @@ fn consoles(app: &mut LauncherApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
     use ac_launcher_core::window::profile_editor::ProfileTextEditor;
+
+    /// The symbols the launcher writes (the header's Settings gear, the
+    /// tick on an added plugin, the plain-text password warning, a hidden
+    /// password's dots) need a symbol font; since egui 0.37 that is a
+    /// feature of its own, and without it they are empty boxes.
+    #[test]
+    fn the_symbols_the_launcher_writes_have_glyphs() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let font = egui::FontId::proportional(16.0);
+        let missing: Vec<char> = ['⚙', '✔', '⚠', '•', '…', '·']
+            .into_iter()
+            .filter(|symbol| !ctx.fonts_mut(|fonts| fonts.has_glyph(&font, *symbol)))
+            .collect();
+        assert!(missing.is_empty(), "no glyph for {missing:?}");
+    }
 
     /// Runs frames of the profile editor body in a headless egui context,
     /// feeding each frame its events.
