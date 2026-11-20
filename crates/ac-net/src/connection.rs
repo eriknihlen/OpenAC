@@ -280,12 +280,13 @@ impl Connection {
     /// counted. (The sender's address is not compared with the server's
     /// yet: the connection is not told where a datagram came from.)
     fn check_header(&mut self, header: &PacketHeader) -> bool {
+        let from_server = self.is_server(header.id);
         let stats = &mut self.transport.stats;
         if header.id >= MAX_SENDER_ID {
             stats.bad_packets += 1;
             return false;
         }
-        if self.server_id == 0 || header.id != self.server_id {
+        if !from_server {
             if header.sequence != 0 {
                 stats.bad_packets += 1;
                 return false;
@@ -300,6 +301,12 @@ impl Connection {
         usize::from(header.data_size) <= MAX_BODY
     }
 
+    /// Whether `id` names our connection: the server's id from its connect
+    /// request (an id of 0 never names one).
+    fn is_server(&self, id: u16) -> bool {
+        self.server_id != 0 && id == self.server_id
+    }
+
     fn process(&mut self, now: NetTime, datagram: &[u8], messages: &mut Vec<InboundMessage>) {
         let Some(header) = PacketHeader::from_bytes(datagram) else {
             return;
@@ -312,11 +319,24 @@ impl Connection {
         };
         let header = packet.header;
         let encrypted = header.flags.has(PacketFlags::ENCRYPTED_CHECKSUM);
+        let from_server = self.is_server(header.id);
         let t = &mut self.transport;
 
         if header.sequence == 0 {
             // Unsequenced packets never touch the keystream or the watermark.
             if encrypted || !packet.verify(None) {
+                return;
+            }
+            if !from_server {
+                // Another sender's packet (always unnumbered, by the header
+                // check) acts on that sender's own connection, which we do
+                // not have: its acks, requests, rejects and fragments change
+                // nothing here, and it is not the server's traffic. Only its
+                // time sync reaches further: the clock is the client's own.
+                if header.flags.has(PacketFlags::TIME_SYNC) && packet.optional.time_sync > 0.0 {
+                    self.server_time = packet.optional.time_sync;
+                    t.note_server_time(packet.optional.time_sync, now);
+                }
                 return;
             }
         } else {
@@ -825,9 +845,12 @@ mod tests {
         assert!(!accepted(&mut conn, ms(2), &time_sync_with(header)));
         assert_eq!(conn.server_time(), 12345.5);
         assert_eq!(conn.stats().bad_packets, 2);
-        // 255 is in range: a sender with no connection, unnumbered, passes.
+        // 255 is in range: a sender with no connection, unnumbered, passes
+        // (its time sync sets the clock).
         header.id = 0x00FF;
-        assert!(accepted(&mut conn, ms(3), &time_sync_with(header)));
+        conn.handle_datagram(ms(3), &time_sync_with(header));
+        assert_eq!(conn.server_time(), 777.5);
+        assert_eq!(conn.stats().bad_packets, 2);
     }
 
     // From a sender id with no connection the game client takes only
@@ -855,7 +878,7 @@ mod tests {
         let mut header = server_header(0, PacketFlags::TIME_SYNC);
         header.id = 0x000C;
         header.iteration = 1;
-        assert!(accepted(&mut conn, ms(2), &time_sync_with(header)));
+        conn.handle_datagram(ms(2), &time_sync_with(header));
         assert_eq!(conn.server_time(), 777.5);
         // The server's own numbered packet still decodes with the first word.
         assert_eq!(
@@ -864,6 +887,69 @@ mod tests {
             1
         );
         assert_eq!(conn.stats().bad_packets, 2);
+    }
+
+    // An unnumbered packet from a sender id other than the server's acts on
+    // that sender's own connection, which does not exist: the game client
+    // applies only its time sync (the clock is global). Its ack, resend
+    // request, reject and disconnect leave our connection alone; it neither
+    // confirms the handshake nor counts as the server's traffic.
+    #[test]
+    fn another_senders_unnumbered_packet_only_sets_the_clock() {
+        let other = |flags: PacketFlags, body: &[u8]| {
+            let mut header = server_header(0, flags);
+            header.id = 0x000C;
+            encode(header, body, None).unwrap()
+        };
+        let mut conn = connected();
+        conn.tick(ms(200));
+        drain(&mut conn);
+        conn.handle_datagram(
+            ms(210),
+            &other(PacketFlags::TIME_SYNC, &777.5f64.to_le_bytes()),
+        );
+        assert_eq!(conn.server_time(), 777.5);
+        assert!(!conn.is_handshake_confirmed());
+        assert_eq!(conn.last_packet_at(), NetTime::ZERO);
+
+        // Confirmed by the server, with our sequence 2 out and unacked.
+        let mut server = Server::new();
+        conn.handle_datagram(ms(250), &server.message(2, &[0xE0, 0xF7, 0, 0]));
+        conn.send_message(ms(260), &[0x58, 0xF6, 0, 0], GameMessageGroup::UiQueue)
+            .unwrap();
+        drain(&mut conn);
+        let before = conn.snapshot();
+        assert_eq!(before.highest_id_sent, 2);
+
+        // Resend request for 2, reject of 3, ack of 2, then the clock.
+        let mut body = Vec::new();
+        for word in [1u32, 2, 1, 3, 2] {
+            body.extend_from_slice(&word.to_le_bytes());
+        }
+        body.extend_from_slice(&888.25f64.to_le_bytes());
+        let flags = PacketFlags::REQUEST_RETRANSMIT
+            | PacketFlags::REJECT_RETRANSMIT
+            | PacketFlags::ACK_SEQUENCE
+            | PacketFlags::TIME_SYNC;
+        assert!(
+            conn.handle_datagram(ms(300), &other(flags, &body))
+                .is_empty()
+        );
+        conn.handle_datagram(ms(301), &other(PacketFlags::DISCONNECT, &[]));
+        conn.handle_datagram(ms(302), &other(PacketFlags::NET_ERROR_DISCONNECT, &[]));
+        assert_eq!(conn.server_time(), 888.25);
+        let after = conn.snapshot();
+        assert_eq!(after.ack_watermark, before.ack_watermark);
+        assert_eq!(after.pending_resends, 0);
+        assert_eq!(after.stats.nak_requests_received, 0);
+        assert_eq!(after.stats.rejects_received, 0);
+        assert_eq!(after.stats.acks_consumed, before.stats.acks_consumed);
+        assert_eq!(after.nak_set, before.nak_set);
+        assert_eq!(conn.last_packet_at(), ms(250));
+        assert!(!conn.is_closed() && !conn.is_lost());
+        // No resend goes out for it either.
+        conn.tick(ms(400));
+        assert_eq!(conn.stats().resends_sent, 0);
     }
 
     // From the server's id the game client drops an older iteration, and a
