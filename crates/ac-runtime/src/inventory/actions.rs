@@ -20,8 +20,8 @@ use ac_proto::inventory::{
     build_use, build_use_with_target,
 };
 use ac_proto::trade::{
-    TradeAcceptance, build_accept_trade, build_add_to_trade, build_close_trade_negotiations,
-    build_decline_trade, build_open_trade_negotiations, build_reset_trade,
+    build_accept_trade, build_add_to_trade, build_close_trade_negotiations, build_decline_trade,
+    build_open_trade_negotiations, build_reset_trade,
 };
 use ac_proto::vendor::{ItemAmount, build_buy, build_sell};
 
@@ -193,22 +193,12 @@ impl Inventory {
                 self.trade.view().open && ctx.send(|seq| build_add_to_trade(seq, item, 0))
             }
             C::AcceptTrade => {
-                let trade = self.trade.view().clone();
-                trade.open
-                    && !trade.self_accepted
-                    && ctx.send(|seq| {
-                        build_accept_trade(
-                            seq,
-                            &TradeAcceptance {
-                                partner_guid: trade.partner_guid,
-                                trade_stamp: 0.0,
-                                trade_status: 0,
-                                initiator_guid: trade.partner_guid,
-                                initiator_accepts: true,
-                                partner_accepts: trade.partner_accepted,
-                            },
-                        )
-                    })
+                let view = self.trade.view();
+                if !view.open || view.self_accepted {
+                    return false;
+                }
+                let acceptance = self.trade.acceptance();
+                ctx.send(|seq| build_accept_trade(seq, &acceptance))
             }
             C::DeclineTrade => self.trade.view().open && ctx.send(build_decline_trade),
             C::ResetTrade => self.trade.view().open && ctx.send(build_reset_trade),

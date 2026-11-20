@@ -997,7 +997,8 @@ fn the_trade_vendor_social_and_journal_panels_mount_feed_and_answer_from_the_dat
     assert!(ui.host().root.is_window_visible(JOURNAL_WINDOW));
     assert!(!ui.host().root.is_window_visible(SOCIAL_WINDOW));
 
-    // A trade opening shows the trade window; its closing hides it.
+    // A trade opening shows the trade window; its ending empties it but
+    // leaves it up for the player to close.
     let trade = |open: bool, revision| TradeView {
         open,
         partner_guid: PARTNER,
@@ -1014,7 +1015,7 @@ fn the_trade_vendor_social_and_journal_panels_mount_feed_and_answer_from_the_dat
         Box::new(trade(false, 2)),
     )));
     ui.feed(&mut scene);
-    assert!(!ui.host().root.is_window_visible(TRADE_WINDOW));
+    assert!(ui.host().root.is_window_visible(TRADE_WINDOW));
 
     // A shop opening shows the vendor window with its listing.
     let listing = VendorShopItem {
@@ -1066,7 +1067,9 @@ fn the_trade_vendor_social_and_journal_panels_mount_feed_and_answer_from_the_dat
     assert!(none.is_empty());
 
     // Leaving the world and entering again: the social panel's
-    // declarations are made again.
+    // declarations are made again, and the emptied trade window left up
+    // goes with the world (the game's in-game windows do not outlive it).
+    assert!(ui.host().root.is_window_visible(TRADE_WINDOW));
     assert!(ui.run_hotkey(Hotkey::Social(SocialPage::Fellowship)));
     ui.drain();
     ui.feed(&mut scene);
@@ -1074,11 +1077,13 @@ fn the_trade_vendor_social_and_journal_panels_mount_feed_and_answer_from_the_dat
         Box::new(social(false)),
     )));
     ui.feed(&mut scene);
+    assert!(!ui.host().root.is_window_visible(TRADE_WINDOW));
     ui.drain();
     scene.apply(PresentationEvent::Interface(InterfaceEvent::Social(
         Box::new(social(true)),
     )));
     ui.feed(&mut scene);
+    assert!(!ui.host().root.is_window_visible(TRADE_WINDOW));
     let commands = ui.drain();
     assert!(
         commands.iter().any(|c| matches!(

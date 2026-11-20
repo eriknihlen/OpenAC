@@ -121,6 +121,83 @@ fn enter_world_waits_for_server_ready() {
     assert_eq!(opcodes(&mut flow), [(0xF657, Queue::Ui)]);
 }
 
+/// The character's description (a game event with no payload read here).
+fn player_description() -> Vec<u8> {
+    words(&[0xF7B0, PLAYER, 1, 0x0013])
+}
+
+// The game client gives the world 110 s from asking for the character to
+// the character's description, then ends as when the server dies.
+#[test]
+fn the_enter_world_timeout_is_110_seconds() {
+    assert_eq!(ENTER_WORLD_TIMEOUT, Duration::from_secs(110));
+}
+
+#[test]
+fn waiting_for_server_ready_has_no_timeout() {
+    let mut flow = connected();
+    flow.enter_world(Duration::ZERO, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    flow.tick(ENTER_WORLD_TIMEOUT * 2);
+    assert_eq!(flow.phase(), Phase::EnteringWorld);
+}
+
+#[test]
+fn the_enter_world_timeout_runs_from_the_character_request_to_its_description() {
+    let ready = Duration::from_secs(5);
+    let mut flow = connected();
+    flow.enter_world(Duration::ZERO, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    flow.handle_message(ready, &words(&[0xF7DF]));
+    flow.drain_events().for_each(drop);
+    flow.tick(ready + ENTER_WORLD_TIMEOUT - Duration::from_millis(1));
+    assert_eq!(flow.phase(), Phase::InWorld);
+    flow.tick(ready + ENTER_WORLD_TIMEOUT);
+    assert_eq!(flow.phase(), Phase::Failed);
+    assert!(
+        flow.drain_events()
+            .any(|e| e == SessionEvent::Failed(SessionError::EnterWorldTimeout))
+    );
+}
+
+#[test]
+fn the_characters_description_ends_the_enter_world_timeout() {
+    let mut flow = connected();
+    flow.enter_world(Duration::ZERO, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DF]));
+    flow.handle_message(Duration::from_secs(1), &player_description());
+    flow.tick(ENTER_WORLD_TIMEOUT * 2);
+    assert_eq!(flow.phase(), Phase::InWorld);
+}
+
+#[test]
+fn entering_again_after_a_return_to_selection_starts_the_timeout_anew() {
+    let mut flow = connected();
+    flow.enter_world(Duration::ZERO, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DF]));
+    flow.handle_message(Duration::from_secs(1), &player_description());
+    let back = Duration::from_secs(200);
+    flow.request_return_to_selection(back).unwrap();
+    flow.handle_message(back, &words(&[0xF653]));
+    assert_eq!(flow.phase(), Phase::InCharacterSelect);
+    flow.enter_world(back, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    let ready = back + Duration::from_secs(3);
+    flow.handle_message(ready, &words(&[0xF7DF]));
+    assert_eq!(flow.phase(), Phase::InWorld);
+    flow.drain_events().for_each(drop);
+    flow.tick(ready + ENTER_WORLD_TIMEOUT - Duration::from_millis(1));
+    assert_eq!(flow.phase(), Phase::InWorld);
+    flow.tick(ready + ENTER_WORLD_TIMEOUT);
+    assert_eq!(flow.phase(), Phase::Failed);
+    assert!(
+        flow.drain_events()
+            .any(|e| e == SessionEvent::Failed(SessionError::EnterWorldTimeout))
+    );
+}
+
 #[test]
 fn greyed_out_characters_are_skipped() {
     let mut flow = SessionFlow::new(Duration::ZERO);
