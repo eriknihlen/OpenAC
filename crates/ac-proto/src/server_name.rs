@@ -1,5 +1,6 @@
-use ac_bits::{Reader, cp1252};
+use ac_bits::Reader;
 
+use crate::wire::read_string;
 use crate::{Opcode, Result, expect_opcode};
 
 /// The world's name and population, sent by the server during login
@@ -23,8 +24,7 @@ impl ServerName {
         let max_connections = r.i32()?;
         // The name is the last field, so its alignment padding is not
         // required to be present.
-        let len = usize::from(r.u16()?);
-        let world_name = cp1252::decode(r.bytes(len)?);
+        let world_name = read_string(&mut r)?;
         Ok(Self {
             current_connections,
             max_connections,
@@ -95,6 +95,19 @@ mod tests {
         let mut bytes = body(0, 0, "Frostfell");
         bytes.pop(); // "Frostfell" is 2 + 9 bytes, so one padding byte
         assert_eq!(ServerName::parse(&bytes).unwrap().world_name, "Frostfell");
+    }
+
+    #[test]
+    fn long_length_form_world_name() {
+        // Length 0xFFFF marks a u32 length.
+        let mut w = Writer::new();
+        w.u32(Opcode::ServerName.value());
+        w.i32(1);
+        w.i32(2);
+        w.u16(0xFFFF);
+        w.u32(3);
+        w.bytes(b"abc");
+        assert_eq!(ServerName::parse(w.as_slice()).unwrap().world_name, "abc");
     }
 
     #[test]
