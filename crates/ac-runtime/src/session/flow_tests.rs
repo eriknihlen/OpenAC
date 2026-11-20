@@ -172,6 +172,33 @@ fn the_characters_description_ends_the_enter_world_timeout() {
 }
 
 #[test]
+fn entering_again_after_a_return_to_selection_starts_the_timeout_anew() {
+    let mut flow = connected();
+    flow.enter_world(Duration::ZERO, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    flow.handle_message(Duration::ZERO, &words(&[0xF7DF]));
+    flow.handle_message(Duration::from_secs(1), &player_description());
+    let back = Duration::from_secs(200);
+    flow.request_return_to_selection(back).unwrap();
+    flow.handle_message(back, &words(&[0xF653]));
+    assert_eq!(flow.phase(), Phase::InCharacterSelect);
+    flow.enter_world(back, &CharacterSelector::FirstAvailable)
+        .unwrap();
+    let ready = back + Duration::from_secs(3);
+    flow.handle_message(ready, &words(&[0xF7DF]));
+    assert_eq!(flow.phase(), Phase::InWorld);
+    flow.drain_events().for_each(drop);
+    flow.tick(ready + ENTER_WORLD_TIMEOUT - Duration::from_millis(1));
+    assert_eq!(flow.phase(), Phase::InWorld);
+    flow.tick(ready + ENTER_WORLD_TIMEOUT);
+    assert_eq!(flow.phase(), Phase::Failed);
+    assert!(
+        flow.drain_events()
+            .any(|e| e == SessionEvent::Failed(SessionError::EnterWorldTimeout))
+    );
+}
+
+#[test]
 fn greyed_out_characters_are_skipped() {
     let mut flow = SessionFlow::new(Duration::ZERO);
     flow.handle_message(
