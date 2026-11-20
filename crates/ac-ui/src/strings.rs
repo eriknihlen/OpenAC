@@ -234,10 +234,11 @@ mod tests {
             strings: fragments.iter().map(|s| (*s).to_owned()).collect(),
             variables: variables.to_vec(),
             is_var_name_table_worth_packing: false,
+            var_names: Vec::new(),
         };
         let table = StringTable {
             id: TABLE_ID,
-            language: 1,
+            version: 1,
             strings: vec![(compute_hash(key), entry)],
         };
         StringResolver::new(move |id| (id == TABLE_ID).then(|| table.clone()))
@@ -250,10 +251,11 @@ mod tests {
             strings: vec!["Hello".to_owned()],
             variables: Vec::new(),
             is_var_name_table_worth_packing: false,
+            var_names: Vec::new(),
         };
         let table = StringTable {
             id: TABLE_ID,
-            language: 1,
+            version: 1,
             strings: vec![(compute_hash("Hi"), entry)],
         };
         let present = std::rc::Rc::new(std::cell::Cell::new(false));
