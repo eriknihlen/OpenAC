@@ -364,39 +364,10 @@ fn graph() -> &'static Graph {
     GRAPH.get_or_init(Graph::load)
 }
 
-/// Rules the tree breaks today, each a (crate, forbidden crate, why) the
-/// tests accept until it is fixed. Each must still hold: a fixed one is
-/// dropped from this list.
-const KNOWN_EXCEPTIONS: [(&str, &str, &str); 2] = [
-    (
-        "ac-render",
-        "ac-plugin",
-        "ac-render asks for the runtime's `host` feature (the session runner), which brings the plugin host",
-    ),
-    (
-        "ac-render",
-        "wasmtime",
-        "ac-render asks for the runtime's `host` feature (the session runner), which brings the plugin host",
-    ),
-];
-
 fn assert_reaches_none(graph: &Graph, roots: &[&str], forbidden: &[&str]) {
     let mut failures = Vec::new();
     for root in roots {
-        for name in forbidden {
-            let excepted = KNOWN_EXCEPTIONS
-                .iter()
-                .any(|(from, to, _)| from == root && to == name);
-            let found = graph.reaches(root, &[name]);
-            if excepted {
-                assert!(
-                    !found.is_empty(),
-                    "{root} no longer reaches {name}: drop it from KNOWN_EXCEPTIONS"
-                );
-            } else {
-                failures.extend(found);
-            }
-        }
+        failures.extend(graph.reaches(root, forbidden));
     }
     assert!(
         failures.is_empty(),
@@ -477,9 +448,7 @@ fn only_the_presentation_crates_reach_a_device() {
 }
 
 /// Plugins are loaded by the session, never by the window: the window's
-/// crates do not reach the plugin host through anything they use (the
-/// renderer does today, through the runtime's `host` feature: see
-/// [`KNOWN_EXCEPTIONS`]; its own code does not, `crate_graph.rs`).
+/// crates do not reach the plugin host through anything they use.
 #[test]
 fn the_window_crates_do_not_reach_the_plugin_host() {
     let graph = graph();
