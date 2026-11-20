@@ -21,7 +21,7 @@ pub fn newest(a: u32, b: u32) -> u32 {
 /// Exactly half the space apart, the larger counts as the older (unlike a
 /// signed difference, which is not symmetric there).
 #[must_use]
-pub fn overflow_compare(a: u16, b: u16) -> Ordering {
+pub fn compare_stamps(a: u16, b: u16) -> Ordering {
     if a == b {
         return Ordering::Equal;
     }
@@ -56,15 +56,15 @@ mod tests {
 
     // The game client's 16-bit stamp comparison (connection iterations).
     #[test]
-    fn overflow_compare_wraps_and_is_symmetric_at_half_the_space() {
-        assert_eq!(overflow_compare(7, 7), Ordering::Equal);
-        assert_eq!(overflow_compare(8, 7), Ordering::Greater);
-        assert_eq!(overflow_compare(6, 7), Ordering::Less);
-        assert_eq!(overflow_compare(0, 0xFFFF), Ordering::Greater);
-        assert_eq!(overflow_compare(0xFFFF, 0), Ordering::Less);
-        assert_eq!(overflow_compare(0x8006, 7), Ordering::Greater);
+    fn compare_stamps_wraps_and_is_symmetric_at_half_the_space() {
+        assert_eq!(compare_stamps(7, 7), Ordering::Equal);
+        assert_eq!(compare_stamps(8, 7), Ordering::Greater);
+        assert_eq!(compare_stamps(6, 7), Ordering::Less);
+        assert_eq!(compare_stamps(0, 0xFFFF), Ordering::Greater);
+        assert_eq!(compare_stamps(0xFFFF, 0), Ordering::Less);
+        assert_eq!(compare_stamps(0x8006, 7), Ordering::Greater);
         // Exactly 0x8000 apart: the larger is older, the smaller newer.
-        assert_eq!(overflow_compare(0x8007, 7), Ordering::Less);
-        assert_eq!(overflow_compare(7, 0x8007), Ordering::Greater);
+        assert_eq!(compare_stamps(0x8007, 7), Ordering::Less);
+        assert_eq!(compare_stamps(7, 0x8007), Ordering::Greater);
     }
 }

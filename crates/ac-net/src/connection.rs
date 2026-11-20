@@ -9,7 +9,7 @@ use crate::crypto::Isaac;
 use crate::packet::{
     ConnectRequest, PacketFlags, PacketHeader, encode, parse_packet, transport_disconnect,
 };
-use crate::transport::seq::overflow_compare;
+use crate::transport::seq::compare_stamps;
 use crate::transport::{Admission, ReliableTransport, SendError, TransportStats};
 use crate::{GameMessageGroup, InboundMessage, NetTime};
 
@@ -279,7 +279,7 @@ impl Connection {
     /// id only an unnumbered packet passes; a numbered one is dropped and
     /// counted. (The sender's address is not compared with the server's
     /// yet: the connection is not told where a datagram came from.)
-    fn verify_header(&mut self, header: &PacketHeader) -> bool {
+    fn check_header(&mut self, header: &PacketHeader) -> bool {
         let stats = &mut self.transport.stats;
         if header.id >= MAX_SENDER_ID {
             stats.bad_packets += 1;
@@ -292,7 +292,7 @@ impl Connection {
             }
             return true;
         }
-        match overflow_compare(header.iteration, self.iteration) {
+        match compare_stamps(header.iteration, self.iteration) {
             Ordering::Less => return false,
             Ordering::Greater if !header.flags.has(PacketFlags::CONNECT_REQUEST) => return false,
             _ => {}
@@ -304,7 +304,7 @@ impl Connection {
         let Some(header) = PacketHeader::from_bytes(datagram) else {
             return;
         };
-        if !self.verify_header(&header) {
+        if !self.check_header(&header) {
             return;
         }
         let Ok(packet) = parse_packet(datagram) else {
