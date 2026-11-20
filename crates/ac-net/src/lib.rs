@@ -6,7 +6,9 @@
 //!
 //! The life of a connection:
 //!
-//! 1. [`Handshake::start`] builds the login request; send what
+//! 1. [`Handshake::start`] builds the login request; call
+//!    [`Handshake::tick`] every few milliseconds (it resends the request
+//!    until answered, then gives up: [`Handshake::is_timed_out`]), send what
 //!    [`Handshake::poll_transmit`] yields and offer every received datagram
 //!    to [`Handshake::handle_datagram`] until it returns a [`Connection`].
 //! 2. On the [`Connection`]: feed every datagram to
@@ -43,7 +45,7 @@ pub use connection::{
 };
 pub use driver::{DriverCounters, DriverError, DriverOptions, UdpDriver};
 pub use group::GameMessageGroup;
-pub use handshake::Handshake;
+pub use handshake::{Handshake, LOGIN_REQUEST_LIMIT, LOGIN_RESEND_INTERVAL};
 pub use lossy::{InvalidDropPercent, LossCounters, LossDirection, LossOptions, LossyFilter};
 pub use time::NetTime;
 pub use transport::{

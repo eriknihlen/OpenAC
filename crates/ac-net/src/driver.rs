@@ -264,8 +264,9 @@ impl UdpDriver {
         }
     }
 
-    /// Log in: send the login request and wait up to `timeout` for the
-    /// server's connect request.
+    /// Log in: send the login request, again on the handshake's schedule,
+    /// until the server's connect request arrives, the handshake gives up,
+    /// or `timeout` passes, whichever comes first.
     pub fn connect(
         &mut self,
         account: &str,
@@ -304,14 +305,25 @@ impl UdpDriver {
         Ok(handshake)
     }
 
-    /// Wait up to `wait` for one datagram and hand it to `handshake`: the
-    /// connection once the server's connect request arrived, else `None`.
+    /// Send the login requests `handshake` has due, then wait up to `wait`
+    /// (no longer than until its next resend) for one datagram and hand it
+    /// over: the connection once the server's connect request arrived, else
+    /// `None`. Fails with [`DriverError::Timeout`] once the handshake has
+    /// given up.
     pub fn poll_connect(
         &mut self,
         handshake: &mut Handshake,
         wait: Duration,
     ) -> Result<Option<Connection>, DriverError> {
-        let Some(datagram) = self.recv(wait)? else {
+        handshake.tick(self.now());
+        while let Some(t) = handshake.poll_transmit() {
+            self.send(&t)?;
+        }
+        if handshake.is_timed_out() {
+            return Err(DriverError::Timeout("the connect request"));
+        }
+        let until_resend = handshake.next_deadline().since(self.now());
+        let Some(datagram) = self.recv(wait.min(until_resend))? else {
             return Ok(None);
         };
         Ok(handshake.handle_datagram(self.now(), &datagram))
@@ -505,6 +517,40 @@ mod tests {
         assert_eq!(disconnect.header.id, 0x1234);
         assert_eq!(disconnect.header.iteration, 7);
         assert!(driver.counters().sent >= 2);
+    }
+
+    // The game client sends the login request again after two seconds
+    // without an answer, so a lost first request does not fail the login.
+    #[test]
+    fn a_lost_login_request_is_sent_again() {
+        let (server, _connect, server_addr) = stand_in_ports();
+        let flow = thread::spawn(move || {
+            let mut buf = [0u8; 2048];
+            let is_login = |datagram: &[u8], _| {
+                decode_with_keystream(datagram, None)
+                    .is_ok_and(|p| p.header.flags.has(PacketFlags::LOGIN_REQUEST))
+            };
+            // The first request is "lost": never answered.
+            let (len, client) = recv_wanted(&server, &mut buf, is_login);
+            let first = buf[..len].to_vec();
+            let at = Instant::now();
+            let (len, again_from) = recv_wanted(&server, &mut buf, is_login);
+            let waited = at.elapsed();
+            let second = buf[..len].to_vec();
+            server
+                .send_to(&connect_request(0x1234, 7, 1.0), again_from)
+                .unwrap();
+            (first, second, client == again_from, waited)
+        });
+
+        let mut driver = UdpDriver::bind(&DriverOptions::new(server_addr)).unwrap();
+        let connection = driver.connect("a", "b", Duration::from_secs(4)).unwrap();
+        assert_eq!(connection.client_id(), 0x1234);
+
+        let (first, second, same_client, waited) = flow.join().unwrap();
+        assert_eq!(first, second, "the same request again");
+        assert!(same_client);
+        assert!(waited >= Duration::from_millis(1_900), "{waited:?}");
     }
 
     #[test]

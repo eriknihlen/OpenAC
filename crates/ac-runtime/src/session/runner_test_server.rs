@@ -5,10 +5,10 @@
 //!
 //! A stand-in never reads with a socket receive timeout. On Windows a UDP
 //! read whose timeout fires just as a datagram arrives can lose that
-//! datagram (`ac-net/tests/udp_loss.rs`), and the client sends its
-//! login request once: a stand-in that lost it never answered, and the
-//! session's first connection ended at its connect wait. The ports are
-//! non-blocking and polled instead, which loses nothing.
+//! datagram (`ac-net/tests/udp_loss.rs`): a stand-in that lost the login
+//! request answered only the client's next one, two seconds later, and one
+//! that lost a later datagram broke its test. The ports are non-blocking
+//! and polled instead, which loses nothing.
 //!
 //! A stand-in's ports are bound on every address, below the range the
 //! system hands out to clients. On Windows a port bound only on the

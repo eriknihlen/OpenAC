@@ -785,7 +785,7 @@ fn a_window_sees_the_connecting_screen_and_its_cancel_ends_the_attempt() {
     handle.join();
     assert!(summary.error.is_none(), "{:?}", summary.error);
     assert!(
-        ended_after < LOGIN_TIMEOUT / 2,
+        ended_after < Duration::from_secs(5),
         "the cancel took {ended_after:?}"
     );
 }

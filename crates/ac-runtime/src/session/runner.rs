@@ -62,9 +62,6 @@ use crate::world::{PlayerView, WorldSnapshot};
 /// acks, NAKs and resends go out on time.
 const PUMP_WAIT: Duration = Duration::from_millis(10);
 
-/// How long the server has to answer the login request.
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
-
 /// How long a reconnect waits between closing the old connection and
 /// opening the new one: the server releases an account about two seconds
 /// after its character logs off.
@@ -636,7 +633,7 @@ fn run(
             direct_launch: direct_launch(config, false, false),
             chargen: Arc::clone(&chargen),
         };
-        let attempt = connecting.connect(&mut driver, config, commands, LOGIN_TIMEOUT);
+        let attempt = connecting.connect(&mut driver, config, commands);
         let end = match attempt {
             Ok(ConnectAttempt::Shutdown) => {
                 lifecycle.report(Lifecycle::stopped(generation.next()));
@@ -2451,21 +2448,20 @@ struct Connecting {
 }
 
 impl Connecting {
-    /// Log in: the login request goes out, then the network is polled in
-    /// short waits, the host's requests heard between them, until the
-    /// server answers, the host asks the session to end, or `timeout`.
+    /// Log in: the login request goes out, and again on the handshake's
+    /// schedule, while the network is polled in short waits, the host's
+    /// requests heard between them, until the server answers, the host asks
+    /// the session to end, or the handshake gives up.
     fn connect(
         &mut self,
         driver: &mut UdpDriver,
         config: &SessionConfig,
         commands: &Receiver<SessionCommand>,
-        timeout: Duration,
     ) -> Result<ConnectAttempt, DriverError> {
         if let Some(window) = &self.window {
             self.present(&window.to, ConnectionStatus::Connecting, None, true);
         }
         let mut handshake = driver.begin_connect(&config.account, &config.password)?;
-        let deadline = Instant::now() + timeout;
         loop {
             loop {
                 match commands.try_recv() {
@@ -2485,13 +2481,7 @@ impl Connecting {
                     Err(TryRecvError::Empty) => break,
                 }
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(DriverError::Timeout("the connect request"));
-            }
-            if let Some(connection) =
-                driver.poll_connect(&mut handshake, remaining.min(CONNECT_POLL))?
-            {
+            if let Some(connection) = driver.poll_connect(&mut handshake, CONNECT_POLL)? {
                 return Ok(ConnectAttempt::Connected(Box::new(connection)));
             }
         }
