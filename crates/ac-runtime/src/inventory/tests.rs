@@ -1427,6 +1427,62 @@ fn trade_staging_marks_the_players_item() {
     );
 }
 
+/// An accept as the game client sends it: the partner, the stamp the
+/// window opened with, status 2 (a registered trade), whether the player
+/// opened it (1/0), the player's acceptance (set by accepting), the
+/// partner's, then each side's items (a count, then each item's id and a
+/// zero word).
+fn accept_body(
+    sequence: u32,
+    stamp: f64,
+    initiator: u32,
+    partner_accepted: u32,
+    self_items: &[u32],
+    partner_items: &[u32],
+) -> Vec<u8> {
+    let mut words = vec![0xF7B1, sequence, 0x01FA, OTHER_PLAYER];
+    let stamp = stamp.to_bits();
+    #[allow(clippy::cast_possible_truncation)]
+    words.extend([stamp as u32, (stamp >> 32) as u32]);
+    words.extend([2, initiator, 1, partner_accepted]);
+    for list in [self_items, partner_items] {
+        words.push(u32::try_from(list.len()).unwrap());
+        for &item in list {
+            words.extend([item, 0]);
+        }
+    }
+    words.iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
+fn register_trade(f: &mut Fixture, initiator: u32, stamp: f64) {
+    let stamp = stamp.to_bits();
+    #[allow(clippy::cast_possible_truncation)]
+    f.server(
+        GameEventType::REGISTER_TRADE,
+        &[initiator, OTHER_PLAYER, stamp as u32, (stamp >> 32) as u32],
+    );
+}
+
+#[test]
+fn accepting_sends_the_trade_as_it_was_registered_and_staged() {
+    let mut f = Fixture::new();
+    // The player opened it: the initiator flag is 1.
+    register_trade(&mut f, PLAYER, 1234.5);
+    f.server(GameEventType::ADD_TO_TRADE, &[GEM, SIDE_SELF, 0]);
+    f.server(GameEventType::ADD_TO_TRADE, &[LOOSE, SIDE_PARTNER, 0]);
+    f.server(GameEventType::ACCEPT_TRADE, &[OTHER_PLAYER]);
+    f.sent();
+    assert!(f.run(ItemCommand::AcceptTrade));
+    assert_eq!(f.sent(), [accept_body(1, 1234.5, 1, 1, &[GEM], &[LOOSE])]);
+
+    // The partner opened it: the flag is 0, and nothing is staged yet.
+    let mut f = Fixture::new();
+    register_trade(&mut f, OTHER_PLAYER, -2.25);
+    f.sent();
+    assert!(f.run(ItemCommand::AcceptTrade));
+    assert_eq!(f.sent(), [accept_body(1, -2.25, 0, 0, &[], &[])]);
+}
+
 #[test]
 fn the_partners_trade_items_reach_the_destruction_queue() {
     // RuntimeTradeState.PartnerItemAdded / PartnerItemsReleased (OpenAC

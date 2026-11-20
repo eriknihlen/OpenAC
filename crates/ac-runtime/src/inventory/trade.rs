@@ -1,7 +1,10 @@
 //! The secure-trade window: who the partner is, what each side staged, who
 //! accepted. The server drives it; this keeps what it said.
 
-use ac_proto::trade::{AddToTrade, RegisterTrade, RemoveFromTrade, TradeFailure};
+use ac_proto::trade::{
+    AddToTrade, RegisterTrade, RemoveFromTrade, TRADE_STATUS_REGISTERED, TradeAcceptance,
+    TradeFailure,
+};
 
 /// Which side of the window an item was staged on (the wire's side word).
 pub const SIDE_SELF: u32 = 1;
@@ -42,6 +45,11 @@ pub struct TradeView {
 #[derive(Debug, Default)]
 pub struct TradeState {
     view: TradeView,
+    /// The stamp the trade was registered with; an accept sends it back.
+    stamp: f64,
+    /// The player opened the trade (the registered initiator is the
+    /// player).
+    player_initiated: bool,
 }
 
 /// A trade-state mark to set on an item record: (guid, 1 staged / 0 not).
@@ -64,6 +72,8 @@ impl TradeState {
     /// two named players is not this one; staged items and acceptances
     /// from an earlier trade are dropped.
     pub fn apply_register(&mut self, update: &RegisterTrade, self_guid: u32) {
+        self.stamp = update.stamp;
+        self.player_initiated = update.initiator == self_guid;
         let v = &mut self.view;
         v.open = true;
         v.partner_guid = if update.initiator != self_guid && update.initiator != 0 {
@@ -78,6 +88,25 @@ impl TradeState {
         v.last_failure_item = 0;
         v.last_failure_reason = 0;
         v.revision += 1;
+    }
+
+    /// The trade the player accepts, as an accept sends it: the partner,
+    /// the registered stamp and status, whether the player opened it, the
+    /// player's acceptance (accepting sets it), the partner's, and both
+    /// sides' items.
+    #[must_use]
+    pub fn acceptance(&self) -> TradeAcceptance {
+        let v = &self.view;
+        TradeAcceptance {
+            partner_guid: v.partner_guid,
+            trade_stamp: self.stamp,
+            trade_status: TRADE_STATUS_REGISTERED,
+            player_initiated: self.player_initiated,
+            self_accepts: true,
+            partner_accepts: v.partner_accepted,
+            self_items: v.self_items.clone(),
+            partner_items: v.partner_items.clone(),
+        }
     }
 
     /// Either side closed the window: everything goes.
@@ -211,6 +240,8 @@ impl TradeState {
             revision,
             ..TradeView::default()
         };
+        self.stamp = 0.0;
+        self.player_initiated = false;
         marks
     }
 
@@ -237,7 +268,7 @@ mod tests {
             &RegisterTrade {
                 initiator: PARTNER,
                 partner: PARTNER,
-                stamp: 0,
+                stamp: 0.0,
             },
             SELF,
         );
