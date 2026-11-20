@@ -39,4 +39,7 @@ pub struct TransportStats {
     /// Numbered packets sent carrying the time-sync and echo pair (first
     /// sends; resends count in `resends_sent`).
     pub time_pairs_sent: u64,
+    /// Keep-alives sent to the server's connect port (not in
+    /// `packets_sent`: they bypass the reliable transport).
+    pub keep_alives_sent: u64,
 }

@@ -23,6 +23,7 @@ pub use scheduler::{ACK_GATE, MAX_NAK_IDS, NAK_GATE};
 pub use stats::TransportStats;
 
 use crate::crypto::Isaac;
+use crate::packet::keep_alive;
 use crate::{FragmentAssembler, NetTime};
 use clock::IntervalClock;
 use inbound::InboundSequenceTracker;
@@ -53,6 +54,8 @@ pub(crate) struct ReliableTransport {
     server_time: f64,
     server_time_at: NetTime,
     out: VecDeque<Vec<u8>>,
+    /// Keep-alives for the connect port, sent beside the transport.
+    keep_alives: VecDeque<Vec<u8>>,
 }
 
 impl ReliableTransport {
@@ -82,6 +85,7 @@ impl ReliableTransport {
             client_id,
             iteration,
             out: VecDeque::new(),
+            keep_alives: VecDeque::new(),
         }
     }
 
@@ -124,14 +128,22 @@ impl ReliableTransport {
     /// decision, requested resends (then the cache prune), the time-sync
     /// pair when the interval clock reaches a time-sync point (once
     /// `confirmed`: the server has accepted the connection, so a numbered
-    /// packet may go), and every five seconds the partial-message eviction.
+    /// packet may go), the keep-alive when it reaches a keep-alive point,
+    /// and every five seconds the partial-message eviction.
     ///
     /// A due ack joins a time pair waiting to go (the held one, or the
     /// one this sweep's time-sync point brings) and sends it at once, as
     /// one numbered packet; with no pair to join it goes alone, in the
     /// clear. A NAK always goes alone.
     pub fn sweep(&mut self, now: NetTime, confirmed: bool) {
-        let pair_point = self.clock.update(now) && confirmed;
+        let points = self.clock.update(now);
+        let pair_point = points.time_sync && confirmed;
+        if points.keep_alive {
+            // Unnumbered and in the clear: it costs no sequence and no
+            // keystream word, and is never cached or resent.
+            self.keep_alives.push_back(keep_alive());
+            self.stats.keep_alives_sent += 1;
+        }
         self.now = self.now.max(now);
         self.loss.sweep(now, &self.stats);
         let control = ControlHeader {
@@ -193,6 +205,11 @@ impl ReliableTransport {
     /// Take the next datagram the transport wants sent.
     pub fn pop_outgoing(&mut self) -> Option<Vec<u8>> {
         self.out.pop_front()
+    }
+
+    /// Take the next keep-alive, for the server's connect port.
+    pub fn pop_keep_alive(&mut self) -> Option<Vec<u8>> {
+        self.keep_alives.pop_front()
     }
 }
 

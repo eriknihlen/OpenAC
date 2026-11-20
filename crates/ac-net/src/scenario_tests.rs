@@ -171,6 +171,10 @@ fn a_quiet_session_stays_alive_on_cumulative_acks() {
     );
     let acks = h.conn().stats().acks_sent;
     assert!(acks >= 40, "only {acks} acks in 120 s");
+    // One keep-alive to the connect port, at 110 s; the session on the
+    // login port never sees it.
+    assert_eq!(h.keep_alives, 1);
+    assert_eq!(h.conn().stats().keep_alives_sent, 1);
     assert_eq!(h.server.crc_drops, 0);
     assert_eq!(h.server.state_drops, 0);
     assert_eq!(h.server.duplicate_drops, 0);

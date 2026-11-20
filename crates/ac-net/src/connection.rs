@@ -24,13 +24,14 @@ pub const CONNECT_RESPONSE_RETRY: Duration = Duration::from_nanos(333_333_333);
 /// without a word, is only ever seen as silence.
 pub const SERVER_SILENCE_TIMEOUT: Duration = Duration::from_secs(140);
 
-/// Where a datagram goes. The connect response goes to the port after the
-/// login port; everything else goes to the login port.
+/// Where a datagram goes. The connect response and the keep-alive go to
+/// the port after the login port; everything else goes to the login port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Destination {
     /// The server's login port.
     Login,
-    /// The login port plus one.
+    /// The login port plus one (the connect response, and every 110 s
+    /// the keep-alive).
     Connect,
 }
 
@@ -396,6 +397,12 @@ impl Connection {
                 datagram,
             });
         }
+        while let Some(datagram) = self.transport.pop_keep_alive() {
+            self.outbox.push_back(Transmit {
+                destination: Destination::Connect,
+                datagram,
+            });
+        }
     }
 }
 
@@ -716,6 +723,47 @@ mod tests {
             let fragment = packet.fragments().next().unwrap();
             assert_eq!(fragment.header.sequence, 2);
             assert_eq!((fragment.header.count, fragment.header.index), (2, index));
+        }
+    }
+
+    // The game client keeps the route to the port after the login port
+    // open: every 220 half-second intervals (110 s) it sends that port a
+    // lone command section, unnumbered and in the clear, with no client id,
+    // time or iteration: the command word 1 and a zero word.
+    #[test]
+    fn a_keep_alive_goes_to_the_connect_port_every_110_s() {
+        let mut conn = connected();
+        conn.tick(ms(200));
+        let mut server = Server::new();
+        conn.handle_datagram(ms(250), &server.message(2, &[0xE0, 0xF7, 0, 0]));
+        drain(&mut conn);
+        let mut keep_alives = Vec::new();
+        let mut next_sequence = 3;
+        for half_second in 1..=460u64 {
+            let now = ms(500 * half_second);
+            if half_second % 100 == 0 {
+                conn.handle_datagram(now, &server.message(next_sequence, &[0xE0, 0xF7, 0, 0]));
+                next_sequence += 1;
+            }
+            conn.tick(now);
+            for t in drain(&mut conn) {
+                if t.destination == Destination::Connect {
+                    keep_alives.push((now, t.datagram));
+                }
+            }
+        }
+        // Interval 1 at the connect request: 221 at 110 s, 441 at 220 s.
+        let at: Vec<NetTime> = keep_alives.iter().map(|(at, _)| *at).collect();
+        assert_eq!(at, vec![ms(110_000), ms(220_000)]);
+        for (_, datagram) in &keep_alives {
+            let packet = decode_with_keystream(datagram, None).unwrap();
+            let h = packet.header;
+            assert_eq!(h.sequence, 0);
+            assert_eq!(h.flags, PacketFlags::CICMD_COMMAND);
+            assert_eq!((h.id, h.time, h.iteration), (0, 0, 0));
+            assert_eq!(h.data_size, 8);
+            assert_eq!(packet.body, &[1, 0, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(datagram.len(), PacketHeader::SIZE + 8);
         }
     }
 
