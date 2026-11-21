@@ -1953,6 +1953,8 @@ impl Inventory {
         let mut reservation = self.transactions.begin_use_request_reservation(&mut tx);
         let sent = send(ctx);
         if sent {
+            // The listing that follows is this request's, not a use's.
+            self.vendor_use = 0;
             self.transactions.mark_use_dispatched(&mut reservation);
         } else {
             self.transactions

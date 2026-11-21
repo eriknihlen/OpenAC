@@ -29,6 +29,8 @@ pub struct TradeWatch {
     self_items: HashSet<u32>,
     partner_items: HashSet<u32>,
     vendor: u32,
+    /// The inventory owner's count of uses of the open vendor, last seen.
+    vendor_reopens: u64,
     /// The plugin buy list: (listing, count).
     buy_list: Vec<(u32, i32)>,
     /// The plugin sell list.
@@ -52,11 +54,15 @@ impl TradeWatch {
 /// vendor observer): a partner swap is a close then an open; an accepted
 /// partner and newly offered items once each; a vendor opening clears the
 /// plugin's lists, closing clears them and drops a pending transaction;
-/// a shop request's answer ends the pending transaction.
+/// using the vendor already open opens it again, keeping the lists and
+/// the pending transaction (the listing the server sends after a purchase
+/// or a sale opens nothing); a shop request's answer ends the pending
+/// transaction.
 pub fn follow(state: &mut SessionState) -> Vec<Event> {
     let player = state.world.player_guid().unwrap_or(0);
     let view = state.inventory.trade().clone();
     let vendor = state.inventory.vendor().vendor_id();
+    let reopens = state.inventory.vendor_reopens();
     let completions = *state.inventory.completions();
     let watch = &mut state.plugin_services.trade;
     let mut out = Vec::new();
@@ -107,7 +113,10 @@ pub fn follow(state: &mut SessionState) -> Vec<Event> {
             out.push(Event::Vendor(VendorEvent::Opened(vendor)));
         }
         watch.vendor = vendor;
+    } else if vendor != 0 && reopens != watch.vendor_reopens {
+        out.push(Event::Vendor(VendorEvent::Opened(vendor)));
     }
+    watch.vendor_reopens = reopens;
     if completions.request_revision != watch.request_revision {
         watch.request_revision = completions.request_revision;
         if completions.request_kind == Some(InventoryRequestKind::Shop)

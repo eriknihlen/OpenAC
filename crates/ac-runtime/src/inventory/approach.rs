@@ -269,6 +269,7 @@ impl Inventory {
         }
         self.transactions.mark_use_dispatched(&mut reservation);
         self.interaction.note_use_dispatched(object, 0);
+        self.vendor_use = object;
         self.arm_landscape_container_request(object, ctx);
         true
     }

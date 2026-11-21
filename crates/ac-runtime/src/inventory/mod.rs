@@ -626,6 +626,14 @@ pub struct Inventory {
     interaction: Interaction,
     wield: wield::AutoWield,
     vendor: VendorState,
+    /// The object the last use sent was of, until a vendor's listing or a
+    /// purchase or sale answers it: what tells the listing that answers a
+    /// use of the open vendor from the one the server sends after every
+    /// purchase and sale.
+    vendor_use: u32,
+    /// How many times the open vendor was used again and answered with its
+    /// listing.
+    vendor_reopens: u64,
     /// The open vendor's listing in the item table.
     shop_items: ShopItems,
     /// The open vendor's buy and sell lists.
@@ -840,6 +848,15 @@ impl Inventory {
     #[must_use]
     pub fn vendor(&self) -> &VendorState {
         &self.vendor
+    }
+
+    /// How many times the vendor whose window is open was used again and
+    /// answered with its listing (OpenAC `RuntimeVendorAutomation`'s
+    /// refreshed vendor). The listing the server sends after a purchase or
+    /// a sale does not count: nobody came to the vendor.
+    #[must_use]
+    pub fn vendor_reopens(&self) -> u64 {
+        self.vendor_reopens
     }
 
     /// The open vendor's listing in the item table.
@@ -1426,6 +1443,15 @@ impl Inventory {
         tx: &mut Vec<TransactionEvent>,
     ) {
         use ac_core::items::VendorTransitionKind as K;
+        match transition.kind {
+            // The listing of the vendor already open answers a use of it.
+            K::Refreshed if self.vendor_use != 0 && self.vendor_use == transition.vendor_id => {
+                self.vendor_use = 0;
+                self.vendor_reopens += 1;
+            }
+            K::Refreshed => {}
+            K::Opened | K::Closed | K::Reset => self.vendor_use = 0,
+        }
         self.transactions.observe_vendor_transition(transition, tx);
         // A vendor's window shows its items, so none of them go.
         world.note_destruction_queue(QueueNote::VendorListed(
@@ -1652,6 +1678,7 @@ impl Inventory {
         self.interaction.reset_session();
         self.wield = wield::AutoWield::default();
         self.vendor.reset();
+        self.vendor_use = 0;
         self.lists.restart(&self.vendor, world);
         self.shop_items.follow(&self.vendor, world);
         self.use_radii.clear();
