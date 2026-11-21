@@ -12,6 +12,33 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.16 (2026-11-21)
+
+- Logging in no longer fails on one lost packet: the client asks the
+  server again every 2 seconds, for up to 40 seconds, as the original
+  client did. Before, it asked once and gave up after 10 seconds.
+- Entering the world waits up to 110 seconds before giving up, as the
+  original client did.
+- When your trade partner cancels, the trade window stays open, emptied,
+  until you close it, as in the original client. The accept message now
+  carries what the original sends.
+- Trees and rocks that stand at an angle now lean the way the original
+  client draws them, and you bump into them where you see them.
+- "Automatic degrades" now really lowers or raises the detail with your
+  frame rate. Before, it hardly ever moved.
+- The client sends a keep-alive every 110 seconds, as the original did, and
+  ignores stray packets that do not belong to its connection.
+- Using a vendor whose window is already open tells plugins the vendor
+  opened again, so an auto-vendor run (MossTank) can start again without
+  walking away first. Code by Johan Lundberg.
+- A few rare server messages are now read correctly: older house guest
+  lists, and very long text.
+- Launcher: the Settings gear draws again (code by David Smith), the
+  "Added" tick on plugins draws, and a rare false "A client update is in
+  progress" is fixed.
+- Many smaller bug fixes and behavior corrections to match the original
+  client.
+
 ## OpenAC (Rust) 0.2.15 (2026-11-19)
 
 - The character you just logged off stays highlighted on the character
