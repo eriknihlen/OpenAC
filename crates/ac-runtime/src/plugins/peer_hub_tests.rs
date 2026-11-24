@@ -724,3 +724,73 @@ fn a_peers_record_follows_its_changes_and_goes_stale_when_they_stop() {
     bot.dispose(&mut bot_registry);
     reader.dispose(&mut reader_registry);
 }
+
+// A change made while nobody asked for this client's state goes out as soon
+// as somebody asks again, not only at the next keep-alive: what is compared
+// is what the hub last got, not the last record this client saw.
+#[test]
+fn a_change_made_while_nobody_asked_goes_out_once_somebody_asks() {
+    let folder = Folder::new("unasked");
+    let endpoint = endpoint_for(&folder.0);
+    serve(&endpoint);
+    let mut bot_registry = PeerRegistry::in_memory(&folder.0, instance(1));
+    let mut bot = PeerTransport::new(endpoint.clone(), instance(1), no_start());
+    let start = now_ms();
+    let mut hurt = client(1, "bot", "world", &[]);
+    hurt.current_health = 15;
+    bot.update_self(hurt.clone(), &mut bot_registry, start);
+    bot.subscribe(COMMANDS, &mut bot_registry).unwrap();
+    let health = |registry: &mut PeerRegistry| {
+        registry
+            .remote_clients(3, now_ms())
+            .first()
+            .map(|c| c.current_health)
+    };
+    // A reader asks, and gets the record as it is.
+    let mut first_registry = PeerRegistry::in_memory(&folder.0, instance(2));
+    let mut first = PeerTransport::new(endpoint.clone(), instance(2), no_start());
+    first.update_self(client(2, "first", "world", &[]), &mut first_registry, start);
+    first.subscribe(CLIENT_STATE, &mut first_registry).unwrap();
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        first.pump(&mut first_registry, now_ms());
+        bot.needs_state() && health(&mut first_registry) == Some(15)
+    });
+    bot.update_self(hurt.clone(), &mut bot_registry, start + 100);
+    // The reader goes: nobody asks, and the bot heals meanwhile.
+    first.dispose(&mut first_registry);
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        !bot.needs_state()
+    });
+    let healed = NetworkClient {
+        current_health: 100,
+        ..hurt
+    };
+    bot.update_self(healed.clone(), &mut bot_registry, start + 1_000);
+    // Another reader asks; well inside the keep-alive the bot tells it
+    // again what it is now.
+    let mut second_registry = PeerRegistry::in_memory(&folder.0, instance(3));
+    let mut second = PeerTransport::new(endpoint, instance(3), no_start());
+    second.update_self(
+        client(3, "second", "world", &[]),
+        &mut second_registry,
+        start,
+    );
+    second
+        .subscribe(CLIENT_STATE, &mut second_registry)
+        .unwrap();
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        second.pump(&mut second_registry, now_ms());
+        bot.needs_state() && health(&mut second_registry).is_some()
+    });
+    bot.update_self(healed, &mut bot_registry, start + 2_000);
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        second.pump(&mut second_registry, now_ms());
+        health(&mut second_registry) == Some(100)
+    });
+    bot.dispose(&mut bot_registry);
+    second.dispose(&mut second_registry);
+}

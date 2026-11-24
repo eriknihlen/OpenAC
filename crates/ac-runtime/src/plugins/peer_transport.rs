@@ -38,6 +38,16 @@ const LONGEST_BACKOFF_SECONDS: u64 = 30;
 /// client that holds still stays listed even when a tick or two runs late.
 /// It is this protocol's own choice: one small message per client every
 /// few seconds.
+///
+/// Every client on a computer needs this version, and the hub must have
+/// been restarted with it (it exits once every client is closed). A client
+/// from before the keep-alive sends its state only when it changes, so a
+/// reader here drops it, and the casts it sent, after 15 s of holding
+/// still. A hub from before asks a client for its state only when that
+/// client subscribes to state itself, so a client taking part in lines or
+/// casts only is never asked and goes stale the same way; a client that
+/// subscribes to state is asked and kept alive by either hub while another
+/// client in its world subscribes to state too.
 const STATE_KEEPALIVE_MS: i64 = STALE_AFTER_MS / 3;
 
 /// Starts the hub process.

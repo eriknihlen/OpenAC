@@ -1145,6 +1145,9 @@ impl PeerRegistry {
             // A pushed client is kept until the hub says it left, and is as
             // old as the last update this client received from it: one
             // whose updates stopped goes stale like a note nobody rewrites.
+            // A live client keeps its record young by sending it again now
+            // and then; one from before that keep-alive, holding still,
+            // goes stale here too.
             return self
                 .pushed
                 .iter()

@@ -170,7 +170,9 @@ impl Hub {
     /// part in, of what it takes part in itself; and its state whenever
     /// another there reads state, whatever it takes part in itself (the
     /// hub hands its record to those readers, so it must keep it current).
-    /// Sent when it changes.
+    /// Sent when it changes. A hub from before this rule keeps asking the
+    /// old way until it exits; see the keep-alive in the client's transport
+    /// for what that means for mixed versions.
     fn update_demand(&mut self) {
         let mut changed = Vec::new();
         for &client in &self.registered {

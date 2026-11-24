@@ -351,7 +351,8 @@ fn report(state: &mut SessionState) {
 /// One plugin tick (OpenAC `OnPeerTick`), returning the lines others
 /// broadcast here whose stagger is up (oldest first) for the session to
 /// submit. With the hub: what it pushed is taken in, and while somebody
-/// wants this client's state it is sent every 0.3 s. Without: the lines
+/// wants this client's state it is looked at every 0.3 s and sent when it
+/// changed, or unchanged every 5 s as a keep-alive. Without: the lines
 /// are taken in on their poll and the note is rewritten on the heartbeat,
 /// or sooner for a cast or line waiting.
 pub fn tick(
