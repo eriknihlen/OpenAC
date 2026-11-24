@@ -6,7 +6,9 @@
 //! those sharing casts, a broadcast line to those receiving lines and
 //! wearing one of its labels, each with its own stagger, and an
 //! acknowledgement back to the sender. It tells each client what the others
-//! want from it (its demand), so a client publishes nothing nobody reads.
+//! want from it (its demand), so a client publishes nothing nobody reads;
+//! a client whose state somebody reads is asked to keep it current, and
+//! sends it again now and then while it holds still.
 //!
 //! [`Hub`] is the routing, with no I/O; [`serve`] runs it on the local
 //! endpoint, a reader and a writer thread per connection.
@@ -165,17 +167,25 @@ impl Hub {
     }
 
     /// What each client must publish: what the others in its world take
-    /// part in, of what it takes part in itself; sent when it changes.
+    /// part in, of what it takes part in itself; and its state whenever
+    /// another there reads state, whatever it takes part in itself (the
+    /// hub hands its record to those readers, so it must keep it current).
+    /// Sent when it changes.
     fn update_demand(&mut self) {
         let mut changed = Vec::new();
         for &client in &self.registered {
-            let mut demand = 0;
+            let mut wanted = 0;
+            let mut state_read = false;
             for &other in &self.registered {
                 if other != client && self.same_world(client, other) {
-                    demand |= self.capabilities(other);
+                    wanted |= self.capabilities(other);
+                    state_read |= self.needs_state(other);
                 }
             }
-            demand &= self.capabilities(client);
+            let mut demand = wanted & self.capabilities(client);
+            if state_read {
+                demand |= CLIENT_STATE;
+            }
             if self
                 .connections
                 .get(&client)

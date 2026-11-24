@@ -24,7 +24,7 @@ use ac_plugin_net::local::{LocalEndpoint, LocalStream};
 use super::peer_wire::{
     self, ALL_CAPABILITIES, CASTS, CLIENT_STATE, COMMANDS, PeerOutbox, SEND_COMMANDS, WireMessage,
 };
-use super::peers::{InstanceId, PeerRegistry};
+use super::peers::{InstanceId, PeerRegistry, STALE_AFTER_MS};
 
 /// How long a broadcast waits for the hub's acknowledgement, milliseconds.
 const ACKNOWLEDGEMENT_MS: i64 = 15_000;
@@ -32,6 +32,13 @@ const ACKNOWLEDGEMENT_MS: i64 = 15_000;
 const REMEMBERED_COMMANDS: usize = 256;
 /// The longest pause between connection attempts, seconds.
 const LONGEST_BACKOFF_SECONDS: u64 = 30;
+/// How often this client's state goes to the hub again unchanged while
+/// somebody wants it, milliseconds. A reader stops believing a record it
+/// has not heard for [`STALE_AFTER_MS`]; this is a third of that, so a
+/// client that holds still stays listed even when a tick or two runs late.
+/// It is this protocol's own choice: one small message per client every
+/// few seconds.
+const STATE_KEEPALIVE_MS: i64 = STALE_AFTER_MS / 3;
 
 /// Starts the hub process.
 pub type StartHub = Arc<dyn Fn() -> io::Result<()> + Send + Sync>;
@@ -92,6 +99,10 @@ pub struct PeerTransport {
     worker: Option<Worker>,
     outbox: Option<Arc<PeerOutbox>>,
     me: Option<NetworkClient>,
+    /// The record the hub last got from this client (registered or sent as
+    /// state), and when it was last sent as state.
+    sent: Option<NetworkClient>,
+    state_sent_ms: Option<i64>,
     ready: bool,
     disposed: bool,
     received: HashSet<InstanceId>,
@@ -304,6 +315,8 @@ impl PeerTransport {
             worker: None,
             outbox: None,
             me: None,
+            sent: None,
+            state_sent_ms: None,
             ready: false,
             disposed: false,
             received: HashSet::new(),
@@ -447,6 +460,7 @@ impl PeerTransport {
 
     fn queue_register(&mut self, me: NetworkClient) {
         self.ready = false;
+        self.sent = Some(me.clone());
         let message = WireMessage {
             id: self.instance,
             client: me,
@@ -466,9 +480,11 @@ impl PeerTransport {
     }
 
     /// This client's record now (OpenAC `UpdateSelf`): registered again
-    /// when who or where it is or its labels changed, else its state sent
-    /// when somebody wants it.
-    pub fn update_self(&mut self, me: NetworkClient, registry: &mut PeerRegistry) {
+    /// when who or where it is or its labels changed; else, while somebody
+    /// wants its state, sent when it differs from what the hub last got,
+    /// and sent again unchanged every [`STATE_KEEPALIVE_MS`] so a reader
+    /// can tell a client holding still from one that stopped.
+    pub fn update_self(&mut self, me: NetworkClient, registry: &mut PeerRegistry, now_ms: i64) {
         if self.disposed {
             return;
         }
@@ -482,12 +498,18 @@ impl PeerTransport {
                     .zip(&me.tags)
                     .any(|(a, b)| !a.eq_ignore_ascii_case(b))
         });
-        let changed = self.me.as_ref().is_none_or(|old| {
+        // Against what the hub last got, not the last record seen: a
+        // change made while nobody wanted state still goes out once
+        // somebody does.
+        let changed = self.sent.as_ref().is_none_or(|old| {
             NetworkClient {
                 tags: me.tags.clone(),
                 ..old.clone()
             } != me
         });
+        let keepalive_due = self
+            .state_sent_ms
+            .is_none_or(|last| now_ms < last || now_ms - last >= STATE_KEEPALIVE_MS);
         if let Some(previous) = &self.me
             && (previous.player_id != me.player_id || previous.world_name != me.world_name)
         {
@@ -496,7 +518,9 @@ impl PeerTransport {
         self.me = Some(me.clone());
         if self.outbox.is_some() && identity_changed {
             self.queue_register(me);
-        } else if self.outbox.is_some() && changed && self.needs_state() {
+        } else if self.outbox.is_some() && self.needs_state() && (changed || keepalive_due) {
+            self.sent = Some(me.clone());
+            self.state_sent_ms = Some(now_ms);
             let message = WireMessage {
                 id: self.instance,
                 client: me,
@@ -678,7 +702,7 @@ impl PeerTransport {
             "state" => registry.push_client(message.id, &message.client, now_ms),
             "remove" => registry.remove_pushed_client(message.id),
             "cast" => {
-                registry.push_client(message.id, &message.client, now_ms);
+                registry.push_cast_from(message.id, &message.client, now_ms);
                 registry.push_cast(message.id, &message.cast, message.created_unix_ms);
             }
             "command" => {

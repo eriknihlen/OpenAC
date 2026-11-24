@@ -949,7 +949,7 @@ impl PeerRegistry {
     /// while a copy of the same character was listed starts at the end of
     /// its rings, because the copy already carried what they hold.
     fn read_notes(&mut self, now_ms: i64) -> Vec<(PathBuf, Document)> {
-        let mut notes = self.read_folder(now_ms);
+        let mut notes = self.read_folder();
         if self.remote_peers.is_empty() {
             return notes;
         }
@@ -1013,7 +1013,8 @@ impl PeerRegistry {
     /// The hub says who another client is now (OpenAC `PushClient`): its
     /// note is replaced, keeping the casts it already carried. Ignored for
     /// this client, no character, a position that is not a number, or a
-    /// 257th client.
+    /// 257th client. The note is stamped `now_ms`, when this update
+    /// arrived: it ages from there until the next one.
     pub fn push_client(&mut self, instance: InstanceId, client: &NetworkClient, now_ms: i64) {
         let p = &client.position;
         let writable = p.east_west.is_finite()
@@ -1042,6 +1043,16 @@ impl PeerRegistry {
         match at {
             Some(at) => self.pushed[at].1 = document,
             None => self.pushed.push((instance, document)),
+        }
+    }
+
+    /// The caster of a cast the hub forwarded. The record a forwarded cast
+    /// carries is the hub's copy of its caster, no newer than the last
+    /// state this client received from it, so it only introduces a client
+    /// not heard of yet; a known one keeps its record and its age.
+    pub fn push_cast_from(&mut self, instance: InstanceId, client: &NetworkClient, now_ms: i64) {
+        if !self.pushed.iter().any(|(i, _)| *i == instance) {
+            self.push_client(instance, client, now_ms);
         }
     }
 
@@ -1129,17 +1140,15 @@ impl PeerRegistry {
     }
 
     /// Every other client's note that is present and well shaped.
-    fn read_folder(&self, now_ms: i64) -> Vec<(PathBuf, Document)> {
+    fn read_folder(&self) -> Vec<(PathBuf, Document)> {
         if self.memory_only {
-            // A pushed client is present until the hub says it left.
+            // A pushed client is kept until the hub says it left, and is as
+            // old as the last update this client received from it: one
+            // whose updates stopped goes stale like a note nobody rewrites.
             return self
                 .pushed
                 .iter()
-                .map(|(instance, document)| {
-                    let mut document = document.clone();
-                    document.updated_unix_ms = now_ms;
-                    (pushed_path(*instance), document)
-                })
+                .map(|(instance, document)| (pushed_path(*instance), document.clone()))
                 .collect();
         }
         let Ok(entries) = fs::read_dir(&self.directory) else {

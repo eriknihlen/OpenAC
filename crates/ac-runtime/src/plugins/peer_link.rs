@@ -315,7 +315,7 @@ fn publish(
         return;
     };
     match (client, link.transport.as_mut()) {
-        (Some(client), Some(transport)) => transport.update_self(client, registry),
+        (Some(client), Some(transport)) => transport.update_self(client, registry, now_ms),
         (Some(client), None) => {
             registry.publish(&client, now_ms);
         }
@@ -760,7 +760,7 @@ impl PluginBinding<'_> {
             else {
                 return false;
             };
-            transport.update_self(me, registry);
+            transport.update_self(me, registry, now);
             return transport.send_command(&line, normalize_peer_tags(&tags), delay, now, registry);
         }
         if self

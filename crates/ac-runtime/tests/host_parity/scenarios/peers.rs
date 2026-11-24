@@ -218,7 +218,8 @@ impl Neighbour {
             client_id,
             ..note.clone()
         };
-        self.transport.update_self(note.clone(), &mut self.registry);
+        self.transport
+            .update_self(note.clone(), &mut self.registry, now_ms());
         self.until(arm, "the neighbour registered", |n, arm| {
             (!n.registry
                 .remote_clients(note.player_id, now_ms())
@@ -267,7 +268,8 @@ impl Neighbour {
                 name: "Delivered".to_owned(),
                 ..note
             };
-            self.transport.update_self(delivered, &mut self.registry);
+            self.transport
+                .update_self(delivered, &mut self.registry, now_ms());
             self.until(arm, "the lines arrived", |_, arm| {
                 arm.call::<calls::PeersClients>(&())
                     .iter()
