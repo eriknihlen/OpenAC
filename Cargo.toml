@@ -140,7 +140,7 @@ serde_json = { version = "1.0.154", default-features = false, features = ["std"]
 # the plugin is parked). `parallel-compilation` compiles a module on all cores (rayon);
 # `reexport-wasmparser` reads the plugin's custom sections. No `cache` (zstd), `profiling`
 # (ittapi), `debug-builtins`, component model, GC or `wat`. wasmtime 49 and up need Rust 1.96.
-wasmtime = { version = "=48.0.9", default-features = false, features = ["runtime", "cranelift", "std", "async", "parallel-compilation", "reexport-wasmparser"] }
+wasmtime = { version = "=48.0.10", default-features = false, features = ["runtime", "cranelift", "std", "async", "parallel-compilation", "reexport-wasmparser"] }
 # Regular expressions with look-around and back-references for the plugin compatibility kit
 # (openac-plugin-compat), which translates .NET patterns to its syntax. Pure Rust (regex-automata,
 # regex-syntax, bit-set, and memchr/aho-corasick through `perf`), no build scripts, builds for
