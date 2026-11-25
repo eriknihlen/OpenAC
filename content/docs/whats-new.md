@@ -12,6 +12,15 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.17 (2026-11-25)
+
+- Bots on the same computer that share their health with each other (for
+  a healer bot such as MossTank's helper) no longer see a stuck value. A
+  reading older than 15 seconds is dropped, and every client keeps sending
+  its health while another wants it. Update every client on a computer,
+  then close them all once, so the shared hub restarts with the new rules.
+- Library updates.
+
 ## OpenAC (Rust) 0.2.16 (2026-11-21)
 
 - Logging in no longer fails on one lost packet: the client asks the
