@@ -956,9 +956,14 @@ impl SessionState {
         self.login_release_teleport = None;
     }
 
-    /// The login complete the flow held went out: the client log hears it
-    /// when a teleport's arrival released it.
-    pub fn held_login_complete_sent(&mut self) {
+    /// The login complete `flow` holds goes out (nothing when it holds
+    /// none), and the client log hears it when a teleport's arrival
+    /// released it.
+    pub(crate) fn send_held_login_complete(&mut self, flow: &mut super::SessionFlow) {
+        if !flow.login_complete_held() {
+            return;
+        }
+        flow.send_held_login_complete();
         if let Some((teleport, cell)) = self.login_release_teleport.take() {
             self.host_events.push(HostEvent::Diagnostic(format!(
                 "login complete sent: the login's own, released by teleport {teleport} \
@@ -4185,20 +4190,44 @@ mod tests {
     }
 
     #[test]
-    fn the_players_vital_updates_reach_the_client_log_taken_or_refused() {
+    fn the_players_vital_updates_reach_the_client_log_while_dead_or_refused() {
         let (mut state, mut outbox) = in_portal_space(false, 1);
-        describe_health(&mut state, 0);
+        describe_health(&mut state, 147);
         state.drain_host_events();
+        // Alive: a taken update is no line.
+        state.apply(&health_current(9, 120), &mut outbox, true, CLOCKS);
+        assert!(diagnostics(&mut state).is_empty());
+        state.apply(&health_current(10, 0), &mut outbox, true, CLOCKS);
         state.apply(&health_current(18, 147), &mut outbox, true, CLOCKS);
         state.apply(&health_current(17, 140), &mut outbox, true, CLOCKS);
+        state.apply(&health_current(19, 150), &mut outbox, true, CLOCKS);
         assert_eq!(
             diagnostics(&mut state),
             [
+                "vital: health 0 (id 2) seq 10: taken; health now 0",
                 "vital: health 147 (id 2) seq 18: taken; health now 147",
                 "vital: health 140 (id 2) seq 17: refused, sequence 17 vs held 18; \
                  health now 147",
             ]
         );
+    }
+
+    #[test]
+    fn a_death_with_no_arrival_warns_once_on_the_session_clock() {
+        let (mut state, mut outbox) = in_portal_space(false, 1);
+        describe_health(&mut state, 147);
+        state.apply(&health_current(10, 0), &mut outbox, true, at_session(20));
+        state.drain_host_events();
+        state.tick(&mut outbox, true, at_session(79));
+        assert!(diagnostics(&mut state).is_empty(), "not yet 60 s");
+        state.tick(&mut outbox, true, at_session(80));
+        assert_eq!(
+            diagnostics(&mut state),
+            ["still dead 60 s after dying with no teleport arrival \
+                 (last health update: s=20.000, 0, taken)"]
+        );
+        state.tick(&mut outbox, true, at_session(200));
+        assert!(diagnostics(&mut state).is_empty(), "once");
     }
 
     #[test]
@@ -4274,13 +4303,56 @@ mod tests {
                  went; that one is released and ends the teleport"
             ]
         );
-        state.held_login_complete_sent();
+        // The flow holds the login's login complete (no window: until the
+        // entry is done); the runner sends it through the state.
+        let mut flow = held_login_flow();
+        state.send_held_login_complete(&mut flow);
+        let sent: Vec<Vec<u8>> = flow.drain_outgoing().map(|o| o.body).collect();
+        assert_eq!(sent.first(), Some(&build_login_complete()));
         assert_eq!(
             diagnostics(&mut state),
             ["login complete sent: the login's own, released by teleport 1 at 0x7D640020"]
         );
-        state.held_login_complete_sent();
-        assert!(diagnostics(&mut state).is_empty(), "once");
+        state.send_held_login_complete(&mut flow);
+        assert_eq!(flow.drain_outgoing().count(), 0, "sent once");
+        assert!(diagnostics(&mut state).is_empty(), "logged once");
+    }
+
+    /// A flow in the world whose login complete waits for the character's
+    /// entry (no window, a world to simulate).
+    fn held_login_flow() -> super::super::SessionFlow {
+        let words =
+            |words: &[u32]| -> Vec<u8> { words.iter().flat_map(|w| w.to_le_bytes()).collect() };
+        let mut list = ac_bits::Writer::new();
+        list.u32(0xF658);
+        list.u32(0);
+        list.u32(1);
+        list.u32(ENTERING);
+        list.string16l("+Entering").unwrap();
+        list.u32(0);
+        list.u32(0);
+        list.i32(11);
+        list.string16l("TestAccount").unwrap();
+        list.u32(1);
+        list.u32(1);
+        let mut flow = super::super::SessionFlow::new(Duration::ZERO);
+        flow.handle_message(Duration::ZERO, &words(&[0xF7E5]));
+        flow.handle_message(Duration::ZERO, &list.into_vec());
+        flow.handle_message(Duration::ZERO, &words(&[0xF7EA]));
+        flow.enter_world(
+            Duration::ZERO,
+            &super::super::CharacterSelector::FirstAvailable,
+        )
+        .unwrap();
+        flow.handle_message(Duration::ZERO, &words(&[0xF7DF]));
+        flow.set_login_awaits_entry(true);
+        flow.handle_message(
+            Duration::ZERO,
+            &words(&[0xF745, ENTERING, 0x11, 0, 0, 0, 0, 0, 0, 0]),
+        );
+        flow.drain_outgoing().for_each(drop);
+        assert!(flow.login_complete_held());
+        flow
     }
 
     /// A window that does not draw the world (no dats) does not hold the
