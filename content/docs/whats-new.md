@@ -12,6 +12,14 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.18 (2026-11-25)
+
+- The plugin engine is updated to wasmtime 48.0.10, keeping our fix for
+  the Windows memory leak in plugin calls.
+- Plugin text patterns (regular expressions) use fancy-regex 0.20, which
+  fixes several wrong matches in rare patterns and accepts long
+  look-behinds, as .NET does.
+
 ## OpenAC (Rust) 0.2.17 (2026-11-25)
 
 - Bots on the same computer that share their health with each other (for
