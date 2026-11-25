@@ -1589,6 +1589,37 @@ fn an_endless_loop_is_stopped_at_its_deadline() {
     );
 }
 
+/// The client's time on the disk is not the plugin's, up to its allowance
+/// (five call deadlines): a plugin writing a file in an endless loop is
+/// still stopped, but later than a plain loop, its deadline moved on by
+/// the writes.
+#[test]
+fn an_endless_write_loop_is_stopped_after_its_disk_allowance() {
+    let root = Root::new("crash-write-loop");
+    install(&root.0, "misbehave");
+    let mut options = options(&[&root.0], Some(&["openac.misbehave"]));
+    options.storage.plugin_data = Some(root.0.join("data"));
+    let mut plugins = PluginSession::new(short_engine(), options);
+    let mut api = FakeSession::default();
+    plugins.start(&mut api);
+    plugins.take_reports();
+    let started = std::time::Instant::now();
+    assert!(plugins.handle_line("/crash write-loop", &mut api));
+    let took = started.elapsed();
+    let error = failed(&plugins.take_reports(), "openac.misbehave").unwrap();
+    assert!(
+        error.starts_with(
+            "plugin 'openac.misbehave' stopped: ran for more than 1 s in one call (it looks \
+             stuck) in event command; last imports: storage_write \u{d7}"
+        ),
+        "{error}"
+    );
+    assert!(
+        took >= TEST_DEADLINE * 2 && took < TEST_DEADLINE * 30,
+        "{took:?}"
+    );
+}
+
 /// A misbehaving plugin on `engine` with its slow log at `slow_log`, and a
 /// client whose clock runs (the `slow` chat line works by it).
 fn chat_misbehave(
@@ -3101,7 +3132,7 @@ fn a_slow_call_warns_and_goes_on() {
     assert_eq!(logged.len(), 1, "{logged:?}");
     let expected = format!(
         "plugin 'openac.misbehave' was slow in event chat line: {} ms (it keeps running; it is \
-         stopped past 10 s); last imports: {SLOW_IMPORTS}",
+         stopped past 10 s not counting the client's disk); last imports: {SLOW_IMPORTS}",
         took.as_millis()
     );
     assert!(logged[0].starts_with(&expected), "{}", logged[0]);

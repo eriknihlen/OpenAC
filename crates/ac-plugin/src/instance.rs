@@ -30,7 +30,9 @@ use wasmtime::{
 };
 
 use crate::engine::{PluginEngine, PluginModule};
-use crate::watchdog::{Entry, EpochCount, ImportTally, TimeLimits, duration_words, epochs};
+use crate::watchdog::{
+    Entry, EpochCount, ImportTally, TimeLimits, duration_words, epochs, waits_on_files,
+};
 
 /// The largest request a plugin may pass to one import, bytes.
 const MAX_REQUEST: usize = 16 << 20;
@@ -72,7 +74,8 @@ struct Exchange {
     pending: Option<(Import, Vec<u8>)>,
     reply: Option<Vec<u8>>,
     /// The call's deadline again, in epochs from now, when the import lent
-    /// time to another plugin: the stub sets it before the plugin goes on.
+    /// time to another plugin or waited on the disk: the stub sets it
+    /// before the plugin goes on.
     deadline: Option<u64>,
 }
 
@@ -292,7 +295,9 @@ fn link(linker: &mut Linker<StoreData>, import: Import) -> wasmtime::Result<()> 
 /// One call's clock: when it started, its deadline, and the time it lent
 /// other plugins ([`Handled::lent`]), which is not its own. The deadline
 /// is kept in the watchdog's epochs, as the store counts it; the wall
-/// times are for the reports.
+/// times are for the reports. The client's waits on the disk move the
+/// deadline on too ([`crate::watchdog::waits_on_files`]), up to an
+/// allowance, but stay the call's own time in the reports (they are lag).
 #[derive(Debug, Clone)]
 struct CallClock {
     started: Instant,
@@ -303,10 +308,16 @@ struct CallClock {
     /// Its deadline, in epochs from its start.
     deadline_epochs: u64,
     lent_epochs: u64,
+    /// The epochs the client spent on the disk for the call that moved its
+    /// deadline on, so far.
+    file_wait_epochs: u64,
+    /// The most [`Self::file_wait_epochs`] may reach.
+    file_wait_allowance: u64,
 }
 
 impl CallClock {
-    fn start(deadline: Duration, counted: &EpochCount) -> Self {
+    /// `deadline` from now; disk waits may move it on by `file_wait` in all.
+    fn start(deadline: Duration, file_wait: Duration, counted: &EpochCount) -> Self {
         Self {
             started: Instant::now(),
             lent: Duration::ZERO,
@@ -314,15 +325,34 @@ impl CallClock {
             started_epoch: counted.now(),
             deadline_epochs: epochs(deadline),
             lent_epochs: 0,
+            file_wait_epochs: 0,
+            file_wait_allowance: if file_wait.is_zero() {
+                0
+            } else {
+                epochs(file_wait)
+            },
         }
     }
 
+    /// Counts `waited` epochs the client spent on the disk for the call,
+    /// as far as the allowance goes; whether that moved the deadline on.
+    fn waited_on_files(&mut self, waited: u64) -> bool {
+        let granted = waited.min(
+            self.file_wait_allowance
+                .saturating_sub(self.file_wait_epochs),
+        );
+        self.file_wait_epochs = self.file_wait_epochs.saturating_add(granted);
+        granted > 0
+    }
+
     /// The call's deadline in epochs from now: its own deadline from its
-    /// start, moved on by every epoch it lent another plugin.
+    /// start, moved on by every epoch it lent another plugin and by the
+    /// client's waits on the disk for it.
     fn remaining_epochs(&self) -> u64 {
         let passed = self.epochs.now().saturating_sub(self.started_epoch);
         self.deadline_epochs
             .saturating_add(self.lent_epochs)
+            .saturating_add(self.file_wait_epochs)
             .saturating_sub(passed)
     }
 
@@ -334,8 +364,9 @@ impl CallClock {
 
 /// Drives one call into the plugin to its end: each time it waits on an
 /// import, `handler` carries the import out and the call goes on with the
-/// reply. Time the import lent another plugin moves the call's deadline
-/// on by as much, counted in the watchdog's epochs ([`CallClock`]). `Err` is the handler's own failure (the
+/// reply. Time the import lent another plugin, or spent waiting on the disk
+/// (up to the call's allowance), moves the call's deadline on by as much,
+/// counted in the watchdog's epochs ([`CallClock`]). `Err` is the handler's own failure (the
 /// call is abandoned); `Ok` holds what the engine returned.
 fn drive<R>(
     call: impl Future<Output = wasmtime::Result<R>>,
@@ -354,13 +385,26 @@ fn drive<R>(
             return Err("a plugin call stopped without a request".to_owned());
         };
         let started = Instant::now();
+        let started_epoch = clock.epochs.now();
         let handled = handler(import, &request)?;
         tally.record(import, started.elapsed().saturating_sub(handled.lent));
+        let mut moved = false;
+        if waits_on_files(import) {
+            let waited = clock
+                .epochs
+                .now()
+                .saturating_sub(started_epoch)
+                .saturating_sub(handled.lent_epochs);
+            moved = clock.waited_on_files(waited);
+        }
         let mut exchange = lock(exchange);
         exchange.reply = Some(handled.reply);
         clock.lent += handled.lent;
         if handled.lent_epochs > 0 {
             clock.lent_epochs = clock.lent_epochs.saturating_add(handled.lent_epochs);
+            moved = true;
+        }
+        if moved {
             exchange.deadline = Some(clock.remaining_epochs());
         }
     }
@@ -413,7 +457,7 @@ impl Instance {
             linker.instantiate_async(&mut store, module.module()),
             &exchange,
             &mut tally,
-            &mut CallClock::start(start_deadline, &counted),
+            &mut CallClock::start(start_deadline, limits.file_wait_allowance(), &counted),
             &mut no_imports_yet,
         )?;
         let instance = started.map_err(|error| {
@@ -615,7 +659,7 @@ impl Instance {
         *lock(&self.exchange) = Exchange::default();
         self.tally.clear();
         self.stuck = false;
-        let mut clock = CallClock::start(deadline, &self.epochs);
+        let mut clock = CallClock::start(deadline, self.limits.file_wait_allowance(), &self.epochs);
         let result = drive(
             func.call_async(&mut self.store, params),
             &self.exchange,
@@ -727,7 +771,18 @@ mod tests {
     /// left it (none when the import lent no time).
     struct AsksOnce {
         exchange: Arc<Mutex<Exchange>>,
+        import: Import,
         asked: bool,
+    }
+
+    impl AsksOnce {
+        fn new(exchange: &Arc<Mutex<Exchange>>, import: Import) -> Self {
+            Self {
+                exchange: Arc::clone(exchange),
+                import,
+                asked: false,
+            }
+        }
     }
 
     impl Future for AsksOnce {
@@ -738,7 +793,7 @@ mod tests {
                 return Poll::Ready(Ok(lock(&self.exchange).deadline.take()));
             }
             self.asked = true;
-            lock(&self.exchange).pending = Some((Import::HostClock, Vec::new()));
+            lock(&self.exchange).pending = Some((self.import, Vec::new()));
             Poll::Pending
         }
     }
@@ -753,7 +808,7 @@ mod tests {
         let deadline = Duration::from_millis(100);
         let counted = EpochCount::default();
         let exchange = Arc::new(Mutex::new(Exchange::default()));
-        let mut clock = CallClock::start(deadline, &counted);
+        let mut clock = CallClock::start(deadline, Duration::ZERO, &counted);
         // The process stands still past the deadline; the watchdog counts
         // three epochs of it.
         std::thread::sleep(deadline + Duration::from_millis(50));
@@ -766,10 +821,7 @@ mod tests {
             })
         };
         let left = drive(
-            AsksOnce {
-                exchange: Arc::clone(&exchange),
-                asked: false,
-            },
+            AsksOnce::new(&exchange, Import::HostClock),
             &exchange,
             &mut ImportTally::default(),
             &mut clock,
@@ -778,5 +830,152 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(left, Some(epochs(deadline) + 4 - 3));
+    }
+
+    /// A call that asks one import `left` times, then ends with the last
+    /// deadline the imports left it (none when none moved it).
+    struct AsksTimes {
+        exchange: Arc<Mutex<Exchange>>,
+        import: Import,
+        left: usize,
+        deadline: Option<u64>,
+    }
+
+    impl Future for AsksTimes {
+        type Output = wasmtime::Result<Option<u64>>;
+
+        fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            let moved = lock(&self.exchange).deadline.take();
+            if moved.is_some() {
+                self.deadline = moved;
+            }
+            if self.left == 0 {
+                return Poll::Ready(Ok(self.deadline));
+            }
+            self.left -= 1;
+            lock(&self.exchange).pending = Some((self.import, Vec::new()));
+            Poll::Pending
+        }
+    }
+
+    /// Runs a call that asks `import` once for each of `waits`, the
+    /// watchdog counting that many epochs while the client carries it out;
+    /// the deadline it is left with, in epochs from then (none when it was
+    /// not moved).
+    fn deadline_after_each(
+        import: Import,
+        waits: &[u32],
+        deadline: Duration,
+        allowance: Duration,
+    ) -> Option<u64> {
+        let counted = EpochCount::default();
+        let exchange = Arc::new(Mutex::new(Exchange::default()));
+        let mut clock = CallClock::start(deadline, allowance, &counted);
+        let mut next = waits.iter();
+        let mut handler = |_: Import, _: &[u8]| {
+            counted.advance(*next.next().unwrap());
+            Ok(Handled::from(Vec::new()))
+        };
+        drive(
+            AsksTimes {
+                exchange: Arc::clone(&exchange),
+                import,
+                left: waits.len(),
+                deadline: None,
+            },
+            &exchange,
+            &mut ImportTally::default(),
+            &mut clock,
+            &mut handler,
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    /// [`deadline_after_each`] for one import.
+    fn deadline_after(
+        import: Import,
+        waited: u32,
+        deadline: Duration,
+        allowance: Duration,
+    ) -> Option<u64> {
+        deadline_after_each(import, &[waited], deadline, allowance)
+    }
+
+    /// The allowance is for the whole entry call: waits that each fit it
+    /// but together pass it move the deadline on only as far as it goes.
+    #[test]
+    fn the_disk_allowance_is_shared_by_the_calls_imports() {
+        let deadline = Duration::from_secs(1);
+        let allowance = Duration::from_millis(200);
+        // 21 epochs of allowance: the first write takes 15 of them, the
+        // second the 6 left, the third none, so the deadline the second
+        // set (after 30 epochs) stands.
+        let left = deadline_after_each(Import::StorageWrite, &[15, 15, 15], deadline, allowance);
+        assert_eq!(left, Some(epochs(deadline) + epochs(allowance) - 30));
+    }
+
+    /// A write that waits on a slow disk is the client's time: the call
+    /// keeps the whole deadline it had before the write.
+    #[test]
+    fn a_wait_on_the_disk_moves_the_deadline_on() {
+        let deadline = Duration::from_secs(1);
+        let left = deadline_after(Import::StorageWrite, 70, deadline, Duration::from_secs(5));
+        assert_eq!(left, Some(epochs(deadline)));
+    }
+
+    /// Any other function's time still counts against the call: its
+    /// deadline stays where it was set at the start.
+    #[test]
+    fn a_wait_on_anything_else_counts_against_the_call() {
+        let deadline = Duration::from_secs(1);
+        let left = deadline_after(Import::HostClock, 70, deadline, Duration::from_secs(5));
+        assert_eq!(left, None);
+    }
+
+    /// The disk moves one call's deadline on by at most its allowance, so a
+    /// plugin writing in an endless loop is still stopped.
+    #[test]
+    fn waits_on_the_disk_move_the_deadline_on_at_most_the_allowance() {
+        let deadline = Duration::from_secs(1);
+        let allowance = Duration::from_millis(200);
+        let left = deadline_after(Import::StorageRead, 70, deadline, allowance);
+        assert_eq!(left, Some(epochs(deadline) + epochs(allowance) - 70));
+    }
+
+    /// Every storage function that reaches the disk (all but
+    /// `storage_describe`, which only names a folder) and the data-file
+    /// listing wait on the disk; nothing else in the client is counted as
+    /// one.
+    #[test]
+    fn the_disk_waits_are_the_storage_functions_and_the_data_file_listing() {
+        let waits: Vec<&str> = Import::ALL
+            .iter()
+            .filter(|import| crate::watchdog::waits_on_files(**import))
+            .map(|import| import.name())
+            .collect();
+        assert_eq!(
+            waits,
+            [
+                "storage_read",
+                "storage_read_text",
+                "storage_write",
+                "storage_list",
+                "storage_delete",
+                "storage_ensure_folder",
+                "storage_lock",
+                "storage_unlock",
+                "resources_list_data_files",
+            ]
+        );
+    }
+
+    /// The real limits: a tick's disk waits may move it on by 50 s.
+    #[test]
+    fn a_call_may_wait_on_the_disk_five_call_deadlines() {
+        assert_eq!(
+            TimeLimits::default().file_wait_allowance(),
+            Duration::from_secs(50)
+        );
     }
 }

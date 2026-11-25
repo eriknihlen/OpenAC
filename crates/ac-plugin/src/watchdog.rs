@@ -26,6 +26,19 @@
 //! that it is out of time), so a plugin asking in a loop cannot hold its
 //! session however fast each answer is.
 //!
+//! Time the client spends on the disk for a plugin (the storage functions,
+//! [`waits_on_files`]) is the client's too: it moves the call's deadline on
+//! as a lend does, so a slow disk (a backup running beside the client) does
+//! not get a plugin stopped as stuck. One entry call's disk waits move it
+//! on by at most [`TimeLimits::file_wait_allowance`] in all, so a plugin
+//! writing in an endless loop is still stopped. The wait still counts as
+//! the call's own in the slow-call reports: it is lag all the same. With a
+//! slow disk the session can wait longer on one entry call than without
+//! one: an answer another plugin gives may itself wait on the disk, so the
+//! last answer before the lend ceiling can run past it by that much. A
+//! storage function that waits [`SLOW_FILE_WAIT`] or more is logged with
+//! the key it read or wrote.
+//!
 //! Every report names the entry call ([`Entry`]) and the client functions
 //! it called on the way ([`ImportTally`]): the fault of a stuck plugin, the
 //! slow-call warning, and the opt-in slow log
@@ -67,6 +80,36 @@ pub const EPOCH_TICK: Duration = Duration::from_millis(10);
 /// The most one wake of the [`Ticker`] counts, however long it slept: what
 /// a debugger stop or a computer's sleep adds to a running call's clock.
 pub const EPOCH_STEP_MAX: Duration = Duration::from_millis(100);
+
+/// How many call deadlines one entry call's waits on the disk may move its
+/// deadline on, in all ([`TimeLimits::file_wait_allowance`]): 50 s at the
+/// real limits, so a tick on a stalled disk is stopped after a minute.
+pub const FILE_WAIT_CALLS: u32 = 5;
+
+/// A storage function that keeps its plugin waiting this long or longer is
+/// logged with the key it read or wrote; the call goes on.
+pub const SLOW_FILE_WAIT: Duration = Duration::from_secs(1);
+
+/// Whether `import` waits on the disk: the storage functions and the
+/// data-file listing read and write the plugin's files on the session's
+/// thread. The time one takes moves the calling plugin's deadline on (up to
+/// [`TimeLimits::file_wait_allowance`] per entry call).
+pub(crate) fn waits_on_files(import: Import) -> bool {
+    matches!(
+        import,
+        Import::StorageRead
+            | Import::StorageReadText
+            | Import::StorageWrite
+            | Import::StorageList
+            | Import::StorageDelete
+            | Import::StorageEnsureFolder
+            | Import::StorageLock
+            // Unlocking closes the lock file, which the system may hold up
+            // on a stalled disk.
+            | Import::StorageUnlock
+            | Import::ResourcesListDataFiles
+    )
+}
 
 /// The environment variable that turns the slow log on: the threshold in
 /// milliseconds (`content/docs/launch-options.md`).
@@ -113,6 +156,13 @@ impl TimeLimits {
             Entry::Start | Entry::Stop => self.start,
             Entry::Tick | Entry::Event(_) | Entry::Callback(_) => self.call,
         }
+    }
+
+    /// The most one entry call's waits on the disk may move its deadline
+    /// on, in all: [`FILE_WAIT_CALLS`] call deadlines.
+    #[must_use]
+    pub fn file_wait_allowance(&self) -> Duration {
+        self.call.saturating_mul(FILE_WAIT_CALLS)
     }
 }
 

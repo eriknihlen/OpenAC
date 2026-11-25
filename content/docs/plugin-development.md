@@ -842,7 +842,11 @@ plugin unloaded. Starting and stopping get 30 s. When a call asks another
 plugin something (a loot classifier, a command's completions), the answer
 runs as that plugin's own callback under these limits, and the asking
 call's clock stops meanwhile: a slow or stuck answer counts against the
-plugin that gave it, never the one that asked. Memory is capped by
+plugin that gave it, never the one that asked. Time the client spends on
+the disk for the storage functions (and the data-file listing) moves the
+call's deadline on as well, up to 50 s per call, so a slow disk does not
+stop a plugin; it still counts toward the 100 ms report, and a storage
+function that waits 1 s or more is logged with its key. Memory is capped by
 `limits.memoryMiB`. What a plugin saves through storage lands in
 `plugins/<id>/files/` inside its own folder, which installs, updates and
 removal of its code never touch.

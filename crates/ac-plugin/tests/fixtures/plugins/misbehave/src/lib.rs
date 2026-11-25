@@ -4,6 +4,9 @@
 //! - setting `panic-on-enable`: `enable` panics.
 //! - `/crash panic`: panics.
 //! - `/crash loop`: never returns (stopped at the call's deadline).
+//! - `/crash write-loop`: writes one stored file again and again, never
+//!   returning (the client's disk time moves its deadline on, up to the
+//!   allowance, so it is stopped later than a plain loop).
 //! - `/crash oom`: allocates until memory runs out.
 //! - `/crash say`: submits a chat line (needs the `chat` permission).
 //! - `/crash filter`: installs a chat filter that panics when asked.
@@ -16,6 +19,7 @@
 //!   client's clock says [`SLOW_MS`] have passed (a slow call that
 //!   finishes).
 
+use openac_plugin::storage::{StoragePlace, StorageRoot};
 use openac_plugin::{Callback, CallbackAnswer, Event, Host, Plugin, StartInfo};
 
 #[derive(Default)]
@@ -82,6 +86,12 @@ impl Plugin for Misbehave {
                 let mut spins: u64 = 0;
                 loop {
                     spins = std::hint::black_box(spins.wrapping_add(1));
+                }
+            }
+            "write-loop" => {
+                let place = StoragePlace::global(StorageRoot::PluginData);
+                loop {
+                    let _ = host.storage_write_text(&place, "loop.txt", "again");
                 }
             }
             "oom" => loop {

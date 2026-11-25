@@ -22,7 +22,8 @@ use ac_plugin_abi::services::{
 };
 use ac_plugin_abi::storage::{StorageKey, StoragePlace, StorageWrite};
 use ac_plugin_abi::{
-    ChatPost, CommandCall, CommandCompletion, CommandDef, DecodeError, Import, LogRequest, Wire,
+    ApiVersion, ChatPost, CommandCall, CommandCompletion, CommandDef, DecodeError, Import,
+    LogLevel, LogRequest, Wire,
 };
 
 use crate::api::{Caller, SessionApi};
@@ -36,6 +37,7 @@ use crate::session::Loaded;
 use crate::settings::PluginSessionSettings;
 use crate::status::StatusBoard;
 use crate::storage::{self as files, StorageRoots, StorageService};
+use crate::watchdog::{SLOW_FILE_WAIT, waits_on_files};
 
 /// What the plugin host keeps for the session's plugins.
 #[derive(Debug, Default)]
@@ -246,7 +248,8 @@ pub(crate) fn handle_import(
         directory,
     };
     let services = &mut *cx.services;
-    Ok(match import {
+    let on_files = waits_on_files(import).then(Instant::now);
+    let reply = match import {
         Import::AbiReplyRead | Import::AbiPanic => {
             return Err(format!("{} reached the client", import.name()));
         }
@@ -608,7 +611,49 @@ pub(crate) fn handle_import(
             };
             return cx.api.call(caller, game, request);
         }
-    })
+    };
+    if let Some(started) = on_files {
+        let waited = started.elapsed();
+        if waited >= SLOW_FILE_WAIT {
+            cx.api.log(
+                id,
+                LogLevel::Warn,
+                &slow_file_wait(id, import, request, version, waited),
+            );
+        }
+    }
+    Ok(reply)
+}
+
+/// The log line of a storage function that kept plugin `id` waiting on the
+/// disk `waited`: the function and the key it read or wrote, so a slow disk
+/// says which file.
+fn slow_file_wait(
+    id: &str,
+    import: Import,
+    request: &[u8],
+    version: ApiVersion,
+    waited: Duration,
+) -> String {
+    let what = match import {
+        Import::StorageWrite => StorageWrite::from_bytes_at(request, version)
+            .map(|write| format!(" '{}' ({} bytes)", write.key, write.bytes.len()))
+            .ok(),
+        Import::StorageUnlock => None,
+        Import::ResourcesListDataFiles => String::from_bytes_at(request, version)
+            .map(|folder| format!(" '{folder}'"))
+            .ok(),
+        _ => StorageKey::from_bytes_at(request, version)
+            .map(|key| format!(" '{}'", key.key))
+            .ok(),
+    };
+    format!(
+        "plugin '{id}' waited {:.1} s on the disk in {}{} (the client's time: it moves the \
+         plugin's deadline on)",
+        waited.as_secs_f64(),
+        import.name(),
+        what.unwrap_or_default()
+    )
 }
 
 /// Asks the plugin owning classifier `scoped_id` the question `make`
@@ -757,5 +802,64 @@ fn put(target: &mut Loaded, cx: &mut Context<'_>, callback: &Callback) -> Asked 
                 stuck: instance.was_stuck(),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ac_plugin_abi::API_CURRENT;
+    use ac_plugin_abi::storage::StorageRoot;
+
+    /// A slow storage function is logged with the key it read or wrote, so
+    /// the log says which file the disk was slow on.
+    #[test]
+    fn a_slow_wait_on_the_disk_names_the_function_and_the_key() {
+        let place = StoragePlace::global(StorageRoot::PluginData);
+        let write = StorageWrite {
+            place: place.clone(),
+            key: "state/loot.json".to_owned(),
+            bytes: vec![0; 42],
+        }
+        .to_bytes_at(API_CURRENT);
+        assert_eq!(
+            slow_file_wait(
+                "acdream.mosstank",
+                Import::StorageWrite,
+                &write,
+                API_CURRENT,
+                Duration::from_millis(12_340)
+            ),
+            "plugin 'acdream.mosstank' waited 12.3 s on the disk in storage_write \
+             'state/loot.json' (42 bytes) (the client's time: it moves the plugin's deadline \
+             on)"
+        );
+        let read = StorageKey {
+            place: place.clone(),
+            key: "settings.json".to_owned(),
+        }
+        .to_bytes_at(API_CURRENT);
+        assert_eq!(
+            slow_file_wait(
+                "acdream.mosstank",
+                Import::StorageReadText,
+                &read,
+                API_CURRENT,
+                Duration::from_secs(2)
+            ),
+            "plugin 'acdream.mosstank' waited 2.0 s on the disk in storage_read_text \
+             'settings.json' (the client's time: it moves the plugin's deadline on)"
+        );
+        assert_eq!(
+            slow_file_wait(
+                "acdream.mosstank",
+                Import::StorageUnlock,
+                &7u32.to_bytes_at(API_CURRENT),
+                API_CURRENT,
+                Duration::from_secs(1)
+            ),
+            "plugin 'acdream.mosstank' waited 1.0 s on the disk in storage_unlock (the \
+             client's time: it moves the plugin's deadline on)"
+        );
     }
 }

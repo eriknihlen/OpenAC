@@ -88,7 +88,7 @@ impl SlowCalls {
                 LogLevel::Warn,
                 &format!(
                     "plugin '{id}' was slow in {}: {} ms (it keeps running; it is stopped past \
-                     {}); last imports: {}",
+                     {} not counting the client's disk); last imports: {}",
                     slow.entry,
                     slow.time.as_millis(),
                     duration_words(slow.deadline),
