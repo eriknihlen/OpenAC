@@ -20,7 +20,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
 name = "ac-audio"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-dat",
  "cpal",
@@ -32,18 +32,18 @@ dependencies = [
 
 [[package]]
 name = "ac-bits"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "ac-clock"
-version = "0.2.16"
+version = "0.2.17"
 
 [[package]]
 name = "ac-core"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "glam",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "ac-dat"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "ac-host"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-host-core",
  "thiserror 2.0.21",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "ac-host-core"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "ac-launcher-core"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-host-core",
  "ac-plugin-icon",
@@ -88,7 +88,7 @@ dependencies = [
  "ac-plugin-version",
  "ctrlc",
  "miniz_oxide 0.9.1",
- "nix 0.32.0",
+ "nix",
  "roxmltree",
  "sha2 0.11.1",
  "thiserror 2.0.21",
@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "ac-launcher-net"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-host-core",
  "ac-launcher-core",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "ac-motion"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-dat",
  "glam",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "ac-nav"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-core",
  "ac-dat",
@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "ac-net"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "thiserror 2.0.21",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "ac-physics"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-core",
  "ac-dat",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "ac-dat",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-abi"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-plugin-ui",
  "ac-plugin-version",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-icon"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "miniz_oxide 0.9.1",
  "thiserror 2.0.21",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-manifest"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-host-core",
  "ac-plugin-version",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-net"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-plugin-abi",
  "ac-proxy",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-ui"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-plugin-icon",
  "fontdue",
@@ -211,11 +211,11 @@ dependencies = [
 
 [[package]]
 name = "ac-plugin-version"
-version = "0.2.16"
+version = "0.2.17"
 
 [[package]]
 name = "ac-proto"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "thiserror 2.0.21",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "ac-proxy"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "sha2 0.11.1",
  "windows-sys 0.61.2",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "ac-remote"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-host-core",
  "ac-remote-wire",
@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "ac-remote-wire"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-clock",
  "ac-core",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "ac-render"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-audio",
  "ac-bits",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "ac-runtime"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "ac-clock",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "ac-ui"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-clock",
  "ac-core",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "ac-ui-web"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "ac-clock",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "ac-ui-window"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-clock",
  "ac-core",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "ac-vfx"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -388,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "actool"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "ac-dat",
@@ -1139,12 +1139,12 @@ dependencies = [
 
 [[package]]
 name = "ctrlc"
-version = "3.5.2"
+version = "3.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
+checksum = "11247e6c4f83c2b15748f4873805483deaa2bbc855e773817c07a9f987f55c62"
 dependencies = [
  "dispatch2",
- "nix 0.31.4",
+ "nix",
  "windows-sys 0.61.2",
 ]
 
@@ -2155,18 +2155,6 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.31.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bc81ce8148d3b4f3274da811f11cdd824ae661ee4ef732cdb229825cf5be7f7"
-dependencies = [
- "bitflags 2.13.2",
- "cfg-if",
- "cfg_aliases",
- "libc",
-]
-
-[[package]]
-name = "nix"
 version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77730ed34f01f4990cb2ea67fec715ecebc6fab9a6396cf83c5529b13f581bdc"
@@ -2626,7 +2614,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openac"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-bits",
  "ac-core",
@@ -2640,13 +2628,13 @@ dependencies = [
  "ac-runtime",
  "ac-ui",
  "ctrlc",
- "nix 0.32.0",
+ "nix",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "openac-launcher"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-host-core",
  "ac-launcher-core",
@@ -2663,7 +2651,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-plugin-abi",
  "ac-plugin-ui",
@@ -2674,7 +2662,7 @@ dependencies = [
 
 [[package]]
 name = "openac-plugin-compat"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "fancy-regex",
  "regex-automata",
@@ -2855,7 +2843,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plugincheck"
-version = "0.2.16"
+version = "0.2.17"
 dependencies = [
  "ac-host",
  "ac-launcher-core",
@@ -3120,9 +3108,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.18"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
+checksum = "41d60ef07df457506a0a1a2073112eb4aae5733dbd2813c3da77d1b0fd441158"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -3131,9 +3119,9 @@ dependencies = [
 
 [[package]]
 name = "regex-syntax"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 
 [[package]]
 name = "renderdoc-sys"

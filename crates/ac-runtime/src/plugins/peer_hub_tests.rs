@@ -15,7 +15,7 @@ use ac_plugin_net::local::LocalEndpoint;
 use super::peer_hub::{ConnectionId, Hub};
 use super::peer_transport::{PeerTransport, StartHub, endpoint_for};
 use super::peer_wire::{CASTS, CLIENT_STATE, COMMANDS, PeerOutbox, SEND_COMMANDS, WireMessage};
-use super::peers::{InstanceId, PeerRegistry};
+use super::peers::{InstanceId, PeerRegistry, STALE_AFTER_MS};
 
 const NOW: i64 = 1_790_000_000_000;
 
@@ -388,7 +388,11 @@ fn casts_arrive_through_memory_without_any_peer_files() {
     let mut leases = Vec::new();
     for i in 0..2 {
         let player = u32::try_from(i + 1).unwrap();
-        transports[i].update_self(client(player, names[i], "world", &[]), &mut registries[i]);
+        transports[i].update_self(
+            client(player, names[i], "world", &[]),
+            &mut registries[i],
+            now_ms(),
+        );
         leases.push(transports[i].subscribe(CASTS, &mut registries[i]).unwrap());
     }
     // Registered, each seeing the other, and the listener's demand for
@@ -449,7 +453,7 @@ fn no_subscription_never_starts_the_transport_and_leases_combine() {
     });
     let mut registry = PeerRegistry::in_memory(&folder.0, instance(1));
     let mut transport = PeerTransport::new(endpoint_for(&folder.0), instance(1), start);
-    transport.update_self(client(1, "one", "world", &[]), &mut registry);
+    transport.update_self(client(1, "one", "world", &[]), &mut registry, now_ms());
     assert!(!transport.is_active());
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(starts.load(Ordering::SeqCst), 0);
@@ -480,7 +484,7 @@ fn a_missing_hub_is_started_and_then_used() {
     });
     let mut registry = PeerRegistry::in_memory(&folder.0, instance(1));
     let mut transport = PeerTransport::new(endpoint, instance(1), start);
-    transport.update_self(client(1, "one", "world", &[]), &mut registry);
+    transport.update_self(client(1, "one", "world", &[]), &mut registry, now_ms());
     transport.subscribe(CLIENT_STATE, &mut registry).unwrap();
     until(|| {
         transport.pump(&mut registry, now_ms());
@@ -504,11 +508,16 @@ fn a_broadcast_reaches_the_labelled_receiver_through_the_hub() {
     receiver.update_self(
         client(2, "two", "world", &["healer"]),
         &mut receiver_registry,
+        now_ms(),
     );
     receiver
         .subscribe(COMMANDS, &mut receiver_registry)
         .unwrap();
-    sender.update_self(client(1, "one", "world", &[]), &mut sender_registry);
+    sender.update_self(
+        client(1, "one", "world", &[]),
+        &mut sender_registry,
+        now_ms(),
+    );
     sender
         .subscribe(CLIENT_STATE, &mut sender_registry)
         .unwrap();
@@ -591,4 +600,197 @@ fn a_plugin_gives_back_its_peer_lease_and_the_rest_go_when_it_unloads() {
     assert!(active(&state));
     with_binding(&mut state, &mut outbox, |b| b.released("test.plugin"));
     assert!(!active(&state));
+}
+
+// A client that takes part only in lines is still asked for its state
+// while another client in its world reads state, and what it then sends
+// reaches that reader; nobody reading state, nobody asks.
+#[test]
+fn a_client_is_asked_for_its_state_while_any_other_reads_state() {
+    let mut f = Fixture::new();
+    let bot = f.connect(1, "bot", "world", COMMANDS, &[]);
+    assert!(f.drain(bot).is_empty(), "alone: no demand");
+    let healer = f.connect(2, "healer", "world", CLIENT_STATE | CASTS, &[]);
+    let demand = f.read_kind(bot, "demand");
+    assert_eq!(demand.capabilities, CLIENT_STATE);
+    let mut hurt = client(1, "bot", "world", &[]);
+    hurt.current_health = 15;
+    f.hub
+        .handle(
+            bot,
+            WireMessage {
+                id: instance(1),
+                client: hurt,
+                ..WireMessage::of("state")
+            },
+            NOW,
+        )
+        .unwrap();
+    assert_eq!(f.read_kind(healer, "state").client.current_health, 15);
+    // A client in another world reads nothing of it.
+    let elsewhere = f.connect(3, "elsewhere", "other", CLIENT_STATE, &[]);
+    assert!(
+        f.drain(elsewhere).iter().all(|m| m.kind != "state"),
+        "no state crosses worlds"
+    );
+    // The reader leaves: nobody asks for the bot's state any more.
+    f.hub.close(healer);
+    assert_eq!(
+        f.drain(bot)
+            .iter()
+            .rfind(|m| m.kind == "demand")
+            .unwrap()
+            .capabilities,
+        0
+    );
+}
+
+// The case that froze a healer's view of a peer for hours: a client taking
+// part only in lines, its health changing and then holding still, seen by
+// a client that reads state. Its record follows the change, is kept fresh
+// while it holds still, and stops being listed once its updates stop.
+#[test]
+fn a_peers_record_follows_its_changes_and_goes_stale_when_they_stop() {
+    let folder = Folder::new("keepalive");
+    let endpoint = endpoint_for(&folder.0);
+    serve(&endpoint);
+    let mut bot_registry = PeerRegistry::in_memory(&folder.0, instance(1));
+    let mut reader_registry = PeerRegistry::in_memory(&folder.0, instance(2));
+    let mut bot = PeerTransport::new(endpoint.clone(), instance(1), no_start());
+    let mut reader = PeerTransport::new(endpoint, instance(2), no_start());
+    let start = now_ms();
+    let mut hurt = client(1, "bot", "world", &[]);
+    hurt.current_health = 15;
+    bot.update_self(hurt.clone(), &mut bot_registry, start);
+    bot.subscribe(COMMANDS, &mut bot_registry).unwrap();
+    reader.update_self(
+        client(2, "reader", "world", &[]),
+        &mut reader_registry,
+        start,
+    );
+    reader
+        .subscribe(CLIENT_STATE | CASTS, &mut reader_registry)
+        .unwrap();
+    let health = |registry: &mut PeerRegistry, at: i64| {
+        registry
+            .remote_clients(2, at)
+            .first()
+            .map(|c| c.current_health)
+    };
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        reader.pump(&mut reader_registry, now_ms());
+        bot.is_connected()
+            && bot.needs_state()
+            && health(&mut reader_registry, now_ms()) == Some(15)
+    });
+    // Healed: the change reaches the reader.
+    let healed = NetworkClient {
+        current_health: 100,
+        ..hurt
+    };
+    bot.update_self(healed.clone(), &mut bot_registry, start);
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        reader.pump(&mut reader_registry, now_ms());
+        health(&mut reader_registry, now_ms()) == Some(100)
+    });
+    // Holding still for longer than the staleness window, the record is
+    // sent again now and then and the reader keeps listing it. The
+    // clocks are the test's: each step is a second.
+    let mut received_at = now_ms();
+    for second in 1..=40 {
+        let at = received_at + second * 1_000;
+        bot.update_self(healed.clone(), &mut bot_registry, at);
+        let mut listed = false;
+        let deadline = Instant::now() + Duration::from_millis(200);
+        while Instant::now() < deadline && !listed {
+            bot.pump(&mut bot_registry, at);
+            reader.pump(&mut reader_registry, at);
+            listed = health(&mut reader_registry, at) == Some(100);
+            if !listed {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        assert!(listed, "listed {second} s into holding still");
+    }
+    received_at += 40_000;
+    // Its updates stop: past the window it is no longer listed.
+    reader.pump(&mut reader_registry, received_at);
+    assert_eq!(
+        health(&mut reader_registry, received_at + STALE_AFTER_MS + 1),
+        None
+    );
+    bot.dispose(&mut bot_registry);
+    reader.dispose(&mut reader_registry);
+}
+
+// A change made while nobody asked for this client's state goes out as soon
+// as somebody asks again, not only at the next keep-alive: what is compared
+// is what the hub last got, not the last record this client saw.
+#[test]
+fn a_change_made_while_nobody_asked_goes_out_once_somebody_asks() {
+    let folder = Folder::new("unasked");
+    let endpoint = endpoint_for(&folder.0);
+    serve(&endpoint);
+    let mut bot_registry = PeerRegistry::in_memory(&folder.0, instance(1));
+    let mut bot = PeerTransport::new(endpoint.clone(), instance(1), no_start());
+    let start = now_ms();
+    let mut hurt = client(1, "bot", "world", &[]);
+    hurt.current_health = 15;
+    bot.update_self(hurt.clone(), &mut bot_registry, start);
+    bot.subscribe(COMMANDS, &mut bot_registry).unwrap();
+    let health = |registry: &mut PeerRegistry| {
+        registry
+            .remote_clients(3, now_ms())
+            .first()
+            .map(|c| c.current_health)
+    };
+    // A reader asks, and gets the record as it is.
+    let mut first_registry = PeerRegistry::in_memory(&folder.0, instance(2));
+    let mut first = PeerTransport::new(endpoint.clone(), instance(2), no_start());
+    first.update_self(client(2, "first", "world", &[]), &mut first_registry, start);
+    first.subscribe(CLIENT_STATE, &mut first_registry).unwrap();
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        first.pump(&mut first_registry, now_ms());
+        bot.needs_state() && health(&mut first_registry) == Some(15)
+    });
+    bot.update_self(hurt.clone(), &mut bot_registry, start + 100);
+    // The reader goes: nobody asks, and the bot heals meanwhile.
+    first.dispose(&mut first_registry);
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        !bot.needs_state()
+    });
+    let healed = NetworkClient {
+        current_health: 100,
+        ..hurt
+    };
+    bot.update_self(healed.clone(), &mut bot_registry, start + 1_000);
+    // Another reader asks; well inside the keep-alive the bot tells it
+    // again what it is now.
+    let mut second_registry = PeerRegistry::in_memory(&folder.0, instance(3));
+    let mut second = PeerTransport::new(endpoint, instance(3), no_start());
+    second.update_self(
+        client(3, "second", "world", &[]),
+        &mut second_registry,
+        start,
+    );
+    second
+        .subscribe(CLIENT_STATE, &mut second_registry)
+        .unwrap();
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        second.pump(&mut second_registry, now_ms());
+        bot.needs_state() && health(&mut second_registry).is_some()
+    });
+    bot.update_self(healed, &mut bot_registry, start + 2_000);
+    until(|| {
+        bot.pump(&mut bot_registry, now_ms());
+        second.pump(&mut second_registry, now_ms());
+        health(&mut second_registry) == Some(100)
+    });
+    bot.dispose(&mut bot_registry);
+    second.dispose(&mut second_registry);
 }

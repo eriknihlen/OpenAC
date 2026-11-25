@@ -315,7 +315,7 @@ fn publish(
         return;
     };
     match (client, link.transport.as_mut()) {
-        (Some(client), Some(transport)) => transport.update_self(client, registry),
+        (Some(client), Some(transport)) => transport.update_self(client, registry, now_ms),
         (Some(client), None) => {
             registry.publish(&client, now_ms);
         }
@@ -351,7 +351,8 @@ fn report(state: &mut SessionState) {
 /// One plugin tick (OpenAC `OnPeerTick`), returning the lines others
 /// broadcast here whose stagger is up (oldest first) for the session to
 /// submit. With the hub: what it pushed is taken in, and while somebody
-/// wants this client's state it is sent every 0.3 s. Without: the lines
+/// wants this client's state it is looked at every 0.3 s and sent when it
+/// changed, or unchanged every 5 s as a keep-alive. Without: the lines
 /// are taken in on their poll and the note is rewritten on the heartbeat,
 /// or sooner for a cast or line waiting.
 pub fn tick(
@@ -760,7 +761,7 @@ impl PluginBinding<'_> {
             else {
                 return false;
             };
-            transport.update_self(me, registry);
+            transport.update_self(me, registry, now);
             return transport.send_command(&line, normalize_peer_tags(&tags), delay, now, registry);
         }
         if self
