@@ -146,7 +146,7 @@ wasmtime = { version = "=48.0.9", default-features = false, features = ["runtime
 # regex-syntax, bit-set, and memchr/aho-corasick through `perf`), no build scripts, builds for
 # wasm32-unknown-unknown. Its backtracking step limit stands in for .NET's match timeout.
 # These are its default features, spelled out.
-fancy-regex = { version = "0.19.2", default-features = false, features = ["std", "unicode", "perf", "variable-lookbehinds"] }
+fancy-regex = { version = "0.20.2", default-features = false, features = ["std", "unicode", "perf", "variable-lookbehinds"] }
 # The reverse automaton fancy-regex builds for a variable-length look-behind takes no size limit,
 # so openac-plugin-compat builds the same automaton once with one first. The version fancy-regex
 # already uses; these features are a subset of the ones it turns on, so nothing new is built.
