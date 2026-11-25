@@ -592,3 +592,107 @@ fn a_relay_reads_this_clients_announcements_and_imports_peers_from_elsewhere() {
         assert!(call::<calls::PeersOwnCasts>(b, &0).is_empty());
     });
 }
+
+/// A registry kept in memory, the way a session with the hub keeps it.
+fn in_memory(root: &Path, which: u32) -> PeerRegistry {
+    let mut bytes = [0u8; 16];
+    bytes[..4].copy_from_slice(&which.to_be_bytes());
+    PeerRegistry::in_memory(root, InstanceId(bytes))
+}
+
+fn instance_of(which: u32) -> InstanceId {
+    let mut bytes = [0u8; 16];
+    bytes[..4].copy_from_slice(&which.to_be_bytes());
+    InstanceId(bytes)
+}
+
+// A client the hub pushed is as old as its last update: reading it does not
+// make it new, so one that stops being updated drops out after the
+// staleness window, and comes back with its next update.
+#[test]
+fn a_pushed_client_ages_from_its_last_update_not_from_the_read() {
+    let root = Root::new("pushed-age");
+    let mut reader = in_memory(&root.0, 0x1111_1111);
+    let peer = instance_of(0x2222_2222);
+    let mut low = client(0x2222_2222, 20, "Beta", &[]);
+    low.current_health = 15;
+    reader.push_client(peer, &low, NOON);
+    // Read often meanwhile, as a plugin does every tick.
+    for second in 0..=10 {
+        let listed = reader.remote_clients(10, NOON + second * 1_000);
+        assert_eq!(listed.len(), 1, "listed {second} s after its update");
+    }
+    assert!(
+        reader
+            .remote_clients(10, NOON + STALE_AFTER_MS + 1)
+            .is_empty(),
+        "no update for longer than the window: it speaks for nobody"
+    );
+    let mut healed = low.clone();
+    healed.current_health = 100;
+    reader.push_client(peer, &healed, NOON + 20_000);
+    let listed = reader.remote_clients(10, NOON + 20_000 + STALE_AFTER_MS);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].current_health, 100);
+}
+
+// A cast forwarded by the hub carries the hub's copy of its caster's
+// record, not a new one: it does not make that record any younger.
+#[test]
+fn a_forwarded_cast_does_not_refresh_its_casters_record() {
+    let root = Root::new("pushed-cast-age");
+    let mut reader = in_memory(&root.0, 0x1111_1111);
+    let peer = instance_of(0x2222_2222);
+    let caster = client(0x2222_2222, 20, "Beta", &[]);
+    reader.push_client(peer, &caster, NOON);
+    reader.push_cast_from(peer, &caster, NOON + 10_000);
+    assert!(
+        reader
+            .remote_clients(10, NOON + STALE_AFTER_MS + 1)
+            .is_empty()
+    );
+    // A caster this client has not heard of yet is taken in as of now.
+    let newcomer = instance_of(0x3333_3333);
+    reader.push_cast_from(
+        newcomer,
+        &client(0x3333_3333, 30, "Gamma", &[]),
+        NOON + 10_000,
+    );
+    let listed = reader.remote_clients(10, NOON + STALE_AFTER_MS + 1);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "Gamma");
+}
+
+// A stale record the hub pushed no longer hides a fresh copy of the same
+// character a plugin imported from elsewhere.
+#[test]
+fn a_stale_pushed_client_does_not_hide_a_fresh_import() {
+    let root = Root::new("pushed-shadow");
+    let mut reader = in_memory(&root.0, 0x1111_1111);
+    let mut low = client(0x2222_2222, 20, "Beta", &[]);
+    low.current_health = 15;
+    reader.push_client(instance_of(0x2222_2222), &low, NOON);
+    let later = NOON + STALE_AFTER_MS + 1;
+    let mut imported = low.clone();
+    imported.current_health = 100;
+    assert!(reader.import_remote_client(&imported, 10, later));
+    let listed = reader.remote_clients(10, later);
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].is_remote);
+    assert_eq!(listed[0].current_health, 100);
+}
+
+// An imported peer is as old as its last import: one a plugin stops
+// refreshing drops out after the staleness window.
+#[test]
+fn an_imported_peer_ages_from_its_last_import() {
+    let root = Root::new("import-age");
+    let mut reader = in_memory(&root.0, 0x1111_1111);
+    assert!(reader.import_remote_client(&client(0, 20, "Beta", &[]), 10, NOON));
+    assert_eq!(reader.remote_clients(10, NOON + STALE_AFTER_MS).len(), 1);
+    assert!(
+        reader
+            .remote_clients(10, NOON + STALE_AFTER_MS + 1)
+            .is_empty()
+    );
+}
