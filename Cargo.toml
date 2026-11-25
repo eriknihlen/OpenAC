@@ -194,8 +194,11 @@ opt-level = 2
 # moved its closure out of the box but freed the box only at its end, which a
 # fiber start function never reaches. Every call into a plugin runs on a new
 # fiber, so each call leaked 24 to 40 bytes: about 40 MB an hour for a bot with
-# two plugins. The copy is 48.0.9 with that one change in `src/windows.rs`
-# (the box is freed as the closure is moved out); drop the patch once a
-# wasmtime release carries the fix. `plugin_call_heap` in ac-plugin guards it.
+# two plugins. The copy is 48.0.10 with that one change in `src/windows.rs`
+# (the box is freed as the closure is moved out). Its version must be the
+# wasmtime version above, or cargo skips the patch: move the copy with every
+# wasmtime bump. Reported upstream as bytecodealliance/wasmtime#15455; drop
+# the patch once a wasmtime release carries the fix. `plugin_call_heap` in
+# ac-plugin guards it.
 [patch.crates-io]
 wasmtime-internal-fiber = { path = "vendor/wasmtime-internal-fiber" }
