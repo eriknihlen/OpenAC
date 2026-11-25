@@ -800,12 +800,12 @@ mod tests {
             DotNetRegex::new(r"\w{1000}", RegexOptions::NONE),
             Err(RegexError::Unsupported(_))
         ));
-        // And a variable-length look-behind is not checked against any cap.
+        // And a variable-length look-behind is not checked against any cap:
+        // even a long one compiles, as in .NET.
         assert!(DotNetRegex::new(r"(?<=\w{0,50})Ring", RegexOptions::NONE).is_ok());
-        assert!(matches!(
-            DotNetRegex::new(r"(?<!\w{0,400})Ring", RegexOptions::NONE),
-            Err(RegexError::Unsupported(_))
-        ));
+        let long = DotNetRegex::new(r"(?<=\w{0,400})Ring", RegexOptions::NONE)
+            .expect("a long look-behind compiles");
+        assert_eq!(long.is_match("Signet Ring"), Ok(true));
     }
 
     #[test]
