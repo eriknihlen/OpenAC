@@ -435,6 +435,79 @@ fn the_players_vitals_skip_a_late_update() {
 }
 
 #[test]
+fn the_players_own_vital_updates_and_refusals_are_noted_with_why() {
+    // Every vital update of the player's own is noted, taken or not, with
+    // the value it carried; another kind only when refused; another
+    // object's never. What is taken does not change.
+    let vital_current = |sequence, current| {
+        Inbound::PrivateUpdateVitalCurrent(ac_proto::PrivateUpdateVitalCurrent {
+            sequence,
+            vital: 2,
+            current,
+        })
+    };
+    let own_int = |sequence| {
+        Inbound::PrivateUpdatePropertyInt(ac_proto::PrivateUpdatePropertyInt {
+            sequence,
+            property: 25,
+            value: 7,
+        })
+    };
+    let note = |sequence, value, outcome| QualityNote {
+        kind: QualityKind::Vital,
+        property: 2,
+        sequence,
+        value: Some(value),
+        outcome,
+    };
+    let mut world = World::new();
+    // No player yet: the private form names nobody.
+    world.apply(&vital_current(1, 10));
+    assert!(world.refused_last_update());
+    assert_eq!(
+        world.take_quality_notes(),
+        [note(1, 10, QualityOutcome::NoPlayer)]
+    );
+    // The player is known but has no item record.
+    world.set_player(PLAYER);
+    world.apply(&vital_current(2, 20));
+    assert_eq!(
+        world.take_quality_notes(),
+        [note(2, 20, QualityOutcome::NotInItems)]
+    );
+    world.apply(&create(
+        PLAYER,
+        stamps(1, 1),
+        Some(position(0xA9B4_0031, 1.0)),
+    ));
+    world.apply(&vital_current(18, 147));
+    world.apply(&vital_current(17, 140));
+    assert!(world.refused_last_update());
+    world.apply(&own_int(9));
+    world.apply(&own_int(8));
+    assert_eq!(
+        world.take_quality_notes(),
+        [
+            note(18, 147, QualityOutcome::Taken),
+            note(17, 140, QualityOutcome::Older { held: 18 }),
+            QualityNote {
+                kind: QualityKind::Int,
+                property: 25,
+                sequence: 8,
+                value: None,
+                outcome: QualityOutcome::Older { held: 9 },
+            },
+        ]
+    );
+    // Another object's refusal is not the player's.
+    world.apply(&named(DOOR, 1, "Door"));
+    world.apply(&int_update(5, 18, 1));
+    world.apply(&int_update(4, 18, 1));
+    assert!(world.refused_last_update());
+    assert!(world.take_quality_notes().is_empty());
+}
+
+#[test]
 fn a_new_incarnation_or_a_resent_description_starts_the_counters_afresh() {
     // The counters belong to the object's record: a newer incarnation, an
     // object described again (update-object) or a record removed starts

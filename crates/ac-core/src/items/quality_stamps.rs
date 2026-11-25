@@ -118,6 +118,13 @@ impl QualityStamps {
     pub fn rejected(&self) -> u64 {
         self.rejected
     }
+
+    /// The sequence last taken for `property` of `kind`, if any was (a
+    /// refusal names it beside the sequence it refused).
+    #[must_use]
+    pub fn held(&self, kind: QualityKind, property: u32) -> Option<u8> {
+        self.held.get(&(property | kind.tag())).copied()
+    }
 }
 
 #[cfg(test)]
@@ -172,5 +179,16 @@ mod tests {
         // 51 is newer than the held 50 (not than the refused 40 alone).
         assert!(stamps.update(QualityKind::Bool, 1, 51));
         assert!(!stamps.update(QualityKind::Bool, 1, 50));
+    }
+
+    #[test]
+    fn the_held_sequence_is_the_last_one_taken_for_its_kind_and_property() {
+        let mut stamps = QualityStamps::new();
+        assert_eq!(stamps.held(QualityKind::Vital, 2), None);
+        stamps.update(QualityKind::Vital, 2, 18);
+        stamps.update(QualityKind::Vital, 2, 17);
+        assert_eq!(stamps.held(QualityKind::Vital, 2), Some(18));
+        // Another kind with the same id has its own.
+        assert_eq!(stamps.held(QualityKind::Int, 2), None);
     }
 }

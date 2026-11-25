@@ -183,6 +183,12 @@ pub struct SessionState {
     self_cast_watch: SelfCastWatch,
     /// When positions the server does not answer report the trail.
     answer_watch: AnswerWatch,
+    /// What the client log hears of the player's vital updates and death
+    /// teleports.
+    vital_watch: super::vital_watch::VitalWatch,
+    /// The teleport (its sequence and destination cell) whose arrival
+    /// released the login complete held for the login, until that one goes.
+    login_release_teleport: Option<(u16, u32)>,
 }
 
 impl SessionState {
@@ -230,6 +236,8 @@ impl SessionState {
             position_trail: PositionTrail::default(),
             self_cast_watch: SelfCastWatch::default(),
             answer_watch: AnswerWatch::default(),
+            vital_watch: super::vital_watch::VitalWatch::default(),
+            login_release_teleport: None,
         }
     }
 
@@ -280,6 +288,7 @@ impl SessionState {
         .then(|| self.player_stamps())
         .flatten();
         self.world.apply(message);
+        self.follow_quality_notes();
         self.note_received_position(message, player_stamps);
         self.follow_transit(message);
         self.movement
@@ -424,6 +433,32 @@ impl SessionState {
                     trail: self.position_trail.snapshot(self.session_now),
                 })));
         }
+    }
+
+    /// What the world did with the player's own vital updates (and refused
+    /// updates) of the message just applied goes to the client log.
+    fn follow_quality_notes(&mut self) {
+        for note in self.world.take_quality_notes() {
+            let vital_now = ac_core::player::vital_id_to_kind(note.property)
+                .filter(|_| note.kind == ac_core::items::QualityKind::Vital)
+                .and_then(|kind| self.own_vital(kind));
+            let health_now = self.own_vital(ac_core::player::VitalKind::Health);
+            if let Some(line) =
+                self.vital_watch
+                    .note(&note, vital_now, health_now, self.session_now)
+            {
+                self.host_events.push(HostEvent::Diagnostic(line));
+            }
+        }
+    }
+
+    /// The current value of the player's own `kind` as the client holds
+    /// it (`None` before its full record).
+    fn own_vital(&self, kind: ac_core::player::VitalKind) -> Option<u32> {
+        self.world
+            .player()
+            .and_then(|player| player.numbers().get(kind))
+            .map(|vital| vital.current)
     }
 
     /// The local player's counters as the world has them now.
@@ -719,11 +754,28 @@ impl SessionState {
             if std::mem::take(&mut self.login_release_on_arrival) {
                 // The login complete a window held at login goes out now.
                 self.login_release = true;
+                self.login_release_teleport = Some((teleport_sequence, destination_cell));
+                self.host_events.push(HostEvent::Diagnostic(format!(
+                    "login complete: teleport {teleport_sequence} arrived at \
+                     0x{destination_cell:08X} before the login's own went; that one is \
+                     released and ends the teleport"
+                )));
             } else {
                 // Login complete carries sequence 0 and does not use the
                 // counter.
                 outbox.send(build_login_complete(), Queue::Ui);
+                self.host_events.push(HostEvent::Diagnostic(format!(
+                    "login complete sent: teleport {teleport_sequence} arrived at \
+                     0x{destination_cell:08X}"
+                )));
             }
+            let health = self.own_vital(ac_core::player::VitalKind::Health);
+            self.vital_watch.arrived(
+                self.session_now,
+                teleport_sequence,
+                destination_cell,
+                health,
+            );
             self.portal_events.push(PortalSpaceEvent::Arrived {
                 teleport_sequence,
                 destination_cell,
@@ -901,6 +953,18 @@ impl SessionState {
     pub fn login_complete_not_held(&mut self) {
         self.login_release = false;
         self.login_release_on_arrival = false;
+        self.login_release_teleport = None;
+    }
+
+    /// The login complete the flow held went out: the client log hears it
+    /// when a teleport's arrival released it.
+    pub fn held_login_complete_sent(&mut self) {
+        if let Some((teleport, cell)) = self.login_release_teleport.take() {
+            self.host_events.push(HostEvent::Diagnostic(format!(
+                "login complete sent: the login's own, released by teleport {teleport} \
+                 at 0x{cell:08X}"
+            )));
+        }
     }
 
     /// The attached window showed the login destination (its presentation
@@ -1066,6 +1130,8 @@ impl SessionState {
         self.login_entry = LoginEntry::Idle;
         self.login_release = false;
         self.login_release_on_arrival = false;
+        self.login_release_teleport = None;
+        self.vital_watch = super::vital_watch::VitalWatch::default();
         self.portal_events.clear();
         self.last_tick = None;
         self.forward();
@@ -1338,6 +1404,10 @@ impl SessionState {
         self.gameplay.follow_selected_object(selected, &mut ctx);
         self.gameplay.tick(&mut ctx);
         self.follow_combat(outbox, in_world, clocks);
+        let health = self.own_vital(ac_core::player::VitalKind::Health);
+        if let Some(line) = self.vital_watch.tick(clocks.session, health) {
+            self.host_events.push(HostEvent::Diagnostic(line));
+        }
         self.forward();
     }
 
@@ -4071,6 +4141,146 @@ mod tests {
         );
         assert_eq!(bodies(&mut outbox), [build_login_complete()]);
         assert!(!state.take_login_release());
+    }
+
+    /// The client log's lines (diagnostics) the session queued, oldest
+    /// first.
+    fn diagnostics(state: &mut SessionState) -> Vec<String> {
+        state
+            .drain_host_events()
+            .into_iter()
+            .filter_map(|event| match event {
+                HostEvent::Diagnostic(line) => Some(line),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The player's numbers, with `health` as the current health.
+    fn describe_health(state: &mut SessionState, health: u32) {
+        let mut description = crate::world::tests::empty_description();
+        description.attributes.push(ac_proto::AttributeEntry {
+            id: 7,
+            ranks: 10,
+            start: 190,
+            xp: 0,
+            current: Some(health),
+        });
+        state.world.apply_player_description(&description);
+    }
+
+    fn health_current(sequence: u8, current: u32) -> Inbound<'static> {
+        Inbound::PrivateUpdateVitalCurrent(ac_proto::PrivateUpdateVitalCurrent {
+            sequence,
+            vital: 2,
+            current,
+        })
+    }
+
+    fn at_session(seconds: u64) -> Clocks {
+        Clocks {
+            session: Duration::from_secs(seconds),
+            ..CLOCKS
+        }
+    }
+
+    #[test]
+    fn the_players_vital_updates_reach_the_client_log_taken_or_refused() {
+        let (mut state, mut outbox) = in_portal_space(false, 1);
+        describe_health(&mut state, 0);
+        state.drain_host_events();
+        state.apply(&health_current(18, 147), &mut outbox, true, CLOCKS);
+        state.apply(&health_current(17, 140), &mut outbox, true, CLOCKS);
+        assert_eq!(
+            diagnostics(&mut state),
+            [
+                "vital: health 147 (id 2) seq 18: taken; health now 147",
+                "vital: health 140 (id 2) seq 17: refused, sequence 17 vs held 18; \
+                 health now 147",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_vital_update_for_a_player_without_an_item_record_is_logged_as_not_in_items() {
+        let (mut state, mut outbox) = state();
+        state.world.set_player(TRAVELLER);
+        state.apply(&health_current(5, 147), &mut outbox, true, CLOCKS);
+        assert_eq!(
+            diagnostics(&mut state),
+            ["vital: health 147 (id 2) seq 5: refused, not in items; health now unknown"]
+        );
+    }
+
+    #[test]
+    fn a_death_teleport_left_at_zero_health_warns_once_on_the_session_clock() {
+        let (mut state, mut outbox) = in_portal_space(false, 1);
+        describe_health(&mut state, 147);
+        state.apply(&health_current(10, 0), &mut outbox, true, at_session(20));
+        arrive_at(&mut state, &mut outbox, 1, DESTINATION);
+        assert!(
+            diagnostics(&mut state)
+                .contains(&"login complete sent: teleport 1 arrived at 0x7D640020".to_owned())
+        );
+        // The arrival came at 30 s on the session clock.
+        state.tick(&mut outbox, true, at_session(59));
+        assert!(diagnostics(&mut state).is_empty(), "not yet 30 s");
+        state.tick(&mut outbox, true, at_session(60));
+        assert_eq!(
+            diagnostics(&mut state),
+            ["still dead 30 s after the death teleport 1 to 0x7D640020 \
+                 (last health update: s=20.000, 0, taken)"]
+        );
+        state.tick(&mut outbox, true, at_session(120));
+        assert!(diagnostics(&mut state).is_empty(), "once");
+    }
+
+    #[test]
+    fn a_death_teleport_whose_health_came_back_says_nothing() {
+        let (mut state, mut outbox) = in_portal_space(false, 1);
+        describe_health(&mut state, 147);
+        state.apply(&health_current(10, 0), &mut outbox, true, at_session(20));
+        arrive_at(&mut state, &mut outbox, 1, DESTINATION);
+        state.apply(&health_current(11, 110), &mut outbox, true, at_session(33));
+        state.drain_host_events();
+        state.tick(&mut outbox, true, at_session(60));
+        assert!(diagnostics(&mut state).is_empty());
+    }
+
+    #[test]
+    fn a_login_complete_a_teleport_released_is_logged_when_it_goes() {
+        let (mut state, mut outbox) = entering(false);
+        let at = crate::world::tests::position(LOGIN_CELL, 1.0);
+        state.apply(
+            &crate::world::tests::create(ENTERING, crate::world::tests::stamps(1, 1), Some(at)),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        let start = Inbound::PlayerTeleport(ac_proto::PlayerTeleport {
+            teleport_sequence: 1,
+        });
+        state.apply(&start, &mut outbox, true, CLOCKS);
+        state.apply(
+            &teleported(ENTERING, 1, DESTINATION),
+            &mut outbox,
+            true,
+            CLOCKS,
+        );
+        assert_eq!(
+            diagnostics(&mut state),
+            [
+                "login complete: teleport 1 arrived at 0x7D640020 before the login's own \
+                 went; that one is released and ends the teleport"
+            ]
+        );
+        state.held_login_complete_sent();
+        assert_eq!(
+            diagnostics(&mut state),
+            ["login complete sent: the login's own, released by teleport 1 at 0x7D640020"]
+        );
+        state.held_login_complete_sent();
+        assert!(diagnostics(&mut state).is_empty(), "once");
     }
 
     /// A window that does not draw the world (no dats) does not hold the
