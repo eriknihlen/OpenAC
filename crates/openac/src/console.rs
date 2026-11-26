@@ -1535,6 +1535,7 @@ pub fn event_lines(event: &HostEvent, session: Option<&str>) -> Vec<String> {
             vec![notice(&crate::portal_failure::summary(failure), session)]
         }
         HostEvent::PlayerNotFound(lost) => player_not_found_lines(lost, session),
+        HostEvent::Diagnostic(text) => vec![notice(text, session)],
         _ => Vec::new(),
     }
 }

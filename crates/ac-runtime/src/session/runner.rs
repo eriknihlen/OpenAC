@@ -239,6 +239,11 @@ pub enum HostEvent {
     /// through: the positions sent and received for the player just
     /// before.
     PlayerNotFound(Box<super::PlayerNotFound>),
+    /// A line for the client log about what the session did with the
+    /// player's own vitals and portal space (a vital update taken or
+    /// refused, login complete going out after a teleport, a character
+    /// still at 0 health after dying). Nothing a player sees.
+    Diagnostic(String),
     /// The session ended; nothing follows.
     Ended(SessionSummary),
 }
@@ -1579,7 +1584,7 @@ impl Drive<'_> {
             !self.state.movement.has_content() || self.state.movement.controller().is_some();
         if self.state.take_login_release() {
             if window || entered {
-                self.flow.send_held_login_complete();
+                self.state.send_held_login_complete(&mut self.flow);
             }
             // Released to the no-window path before the character entered:
             // it goes when the entry is done (below, in a later pass).
@@ -1600,7 +1605,7 @@ impl Drive<'_> {
             _ => false,
         };
         if !held && (window || entered) {
-            self.flow.send_held_login_complete();
+            self.state.send_held_login_complete(&mut self.flow);
         }
     }
 

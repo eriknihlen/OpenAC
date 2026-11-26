@@ -37,6 +37,8 @@ mod runner;
 pub mod selection;
 #[cfg(feature = "host")]
 mod state;
+#[cfg(feature = "host")]
+mod vital_watch;
 pub mod world_tap;
 
 pub use chargen_table::project_chargen;

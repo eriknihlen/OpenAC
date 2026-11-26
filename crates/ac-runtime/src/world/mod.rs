@@ -92,6 +92,43 @@ pub enum WorldChange {
     PlayerChanged,
 }
 
+/// What the world did with a single-quality update of the player's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QualityOutcome {
+    /// Taken: the value is the player's now.
+    Taken,
+    /// Refused: the world has no player yet to give it to.
+    NoPlayer,
+    /// Refused: the player has no item record.
+    NotInItems,
+    /// Refused: older than the sequence last taken for the property.
+    Older {
+        /// The sequence last taken.
+        held: u8,
+    },
+}
+
+/// A single-quality update of the player's own and what the world did with
+/// it: every vital update, and every refusal of any other kind. The session
+/// writes them to the client log (a character left at 0 health after a
+/// death teleport shows whether the restore was refused).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QualityNote {
+    /// The kind of quality.
+    pub kind: QualityKind,
+    /// The property (for a vital, its update id).
+    pub property: u32,
+    /// The update's sequence.
+    pub sequence: u8,
+    /// The value a vital update carried (its current value).
+    pub value: Option<u32>,
+    /// Taken, or why not.
+    pub outcome: QualityOutcome,
+}
+
+/// How many quality notes are kept for a session that does not take them.
+const QUALITY_NOTE_CAP: usize = 64;
+
 /// The world as one session sees it.
 #[derive(Debug, Default)]
 pub struct World {
@@ -133,6 +170,11 @@ pub struct World {
     /// not take (older than the one held, or for an object it has no record
     /// of).
     refused_update: bool,
+    /// The player's own single-quality update in the message being applied.
+    own_quality: Option<QualityNote>,
+    /// The player's own vital updates and refused updates since the last
+    /// take, oldest first.
+    quality_notes: Vec<QualityNote>,
     /// The object probe (`OPENAC_PROBE_OBJECTS=1`); off by default.
     object_probe: object_probe::ObjectProbe,
     /// The delete being applied is the client forgetting an object out of
@@ -587,6 +629,30 @@ impl World {
     /// [`apply_appraisal`](Self::apply_appraisal).
     pub fn apply(&mut self, message: &Inbound<'_>) {
         self.refused_update = false;
+        self.own_quality = None;
+        self.apply_message(message);
+        if let Some(mut note) = self.own_quality.take() {
+            note.value = match message {
+                Inbound::PrivateUpdateVital(u) => Some(u.current),
+                Inbound::PrivateUpdateVitalCurrent(u) => Some(u.current),
+                _ => None,
+            };
+            if note.kind == QualityKind::Vital || note.outcome != QualityOutcome::Taken {
+                if self.quality_notes.len() == QUALITY_NOTE_CAP {
+                    self.quality_notes.remove(0);
+                }
+                self.quality_notes.push(note);
+            }
+        }
+    }
+
+    /// The player's own vital updates and refused single-quality updates
+    /// since the last call, oldest first.
+    pub fn take_quality_notes(&mut self) -> Vec<QualityNote> {
+        std::mem::take(&mut self.quality_notes)
+    }
+
+    fn apply_message(&mut self, message: &Inbound<'_>) {
         // The private forms are about the player's own object.
         let player = self.player_guid.unwrap_or(0);
         match message {
@@ -781,13 +847,37 @@ impl World {
     /// item record takes none; otherwise the first update of a property is
     /// taken, then only one not older than the last taken.
     fn take_quality(&mut self, guid: u32, kind: QualityKind, property: u32, sequence: u8) -> bool {
-        let taken = self.items.get(guid).is_some()
-            && self
-                .quality_stamps
-                .entry(guid)
-                .or_default()
-                .update(kind, property, sequence);
+        let outcome = if self.items.get(guid).is_none() {
+            QualityOutcome::NotInItems
+        } else {
+            let stamps = self.quality_stamps.entry(guid).or_default();
+            let held = stamps.held(kind, property);
+            if stamps.update(kind, property, sequence) {
+                QualityOutcome::Taken
+            } else {
+                QualityOutcome::Older {
+                    held: held.unwrap_or(sequence),
+                }
+            }
+        };
+        let taken = outcome == QualityOutcome::Taken;
         self.refused_update = !taken;
+        // The player's own: its guid, or a private form (guid 0) before
+        // the world knows who the player is.
+        let outcome = match self.player_guid {
+            Some(player) if player == guid => Some(outcome),
+            None if guid == 0 => Some(QualityOutcome::NoPlayer),
+            _ => None,
+        };
+        if let Some(outcome) = outcome {
+            self.own_quality = Some(QualityNote {
+                kind,
+                property,
+                sequence,
+                value: None,
+                outcome,
+            });
+        }
         taken
     }
 
