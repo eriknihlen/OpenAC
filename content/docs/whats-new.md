@@ -12,6 +12,18 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.19 (2026-11-26)
+
+- Plugins are no longer stopped as stuck when the disk is slow, such as
+  during a backup. Time a plugin spends waiting for the client to read or
+  save its files no longer counts against its 10-second limit, up to
+  50 seconds per call. A file read or save that takes a second or more is
+  written to the client log.
+- New client log lines for characters left at 0 health after a death
+  recall: refused health updates, when the client reports a teleport
+  arrival, and a warning if health is still 0 half a minute after
+  arriving.
+
 ## OpenAC (Rust) 0.2.18 (2026-11-25)
 
 - The plugin engine is updated to wasmtime 48.0.10, keeping our fix for
