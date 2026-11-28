@@ -12,6 +12,12 @@ before 0.2.0 are at
 The entries below 0.2.0 cover both clients, as they were maintained side by
 side until then.
 
+## OpenAC (Rust) 0.2.20 (2026-11-28)
+
+- On some graphics cards, roads and the ground patches around them were
+  drawn as streaky, flickering noise. The ground now picks its textures
+  the same way on every graphics card.
+
 ## OpenAC (Rust) 0.2.19 (2026-11-26)
 
 - Plugins are no longer stopped as stuck when the disk is slow, such as
