@@ -693,3 +693,56 @@ pub fn sky_pipeline(
         cache: None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    /// The member lines of the WGSL struct `VertexOut` in `source`.
+    fn vertex_out_members(source: &str) -> Vec<&str> {
+        let start = source
+            .find("struct VertexOut {")
+            .expect("the shader has VertexOut");
+        let end = source[start..].find("\n};").expect("the struct ends") + start;
+        source[start..end]
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| l.starts_with('@'))
+            .collect()
+    }
+
+    // A texture layer is a whole number the fragment shader indexes with.
+    // Blended across a triangle, a whole number can come back a hair under
+    // itself on some GPUs and round down to the wrong layer, so every value
+    // that carries one is passed unblended.
+    #[test]
+    fn the_terrain_shaders_pass_their_texture_layers_unblended() {
+        let shaders = [
+            ("terrain.wgsl", include_str!("../shaders/terrain.wgsl")),
+            (
+                "terrain_atmospheric.wgsl",
+                include_str!("../shaders/terrain_atmospheric.wgsl"),
+            ),
+        ];
+        let layered = [
+            "base_layer",
+            "overlay0",
+            "overlay1",
+            "overlay2",
+            "road0",
+            "road1",
+        ];
+        for (name, source) in shaders {
+            let members = vertex_out_members(source);
+            for field in layered {
+                let line = members
+                    .iter()
+                    .find(|l| l.contains(&format!(" {field}:")))
+                    .unwrap_or_else(|| panic!("{name} has no VertexOut member {field}"));
+                assert!(
+                    line.contains("@interpolate(flat)"),
+                    "{name}: {field} is blended: {line}"
+                );
+            }
+        }
+    }
+}
