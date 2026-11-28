@@ -78,6 +78,42 @@ fn a_swing_needs_a_hostile_creature_and_a_fighting_mode() {
     });
 }
 
+// A plugin's combat mode change while a teleport is under way is refused
+// with the player's own words and nothing goes to the server; once the
+// teleport has ended the same request is accepted (sent, or parked behind
+// the body's motion, which a plugin also reads as sent).
+#[test]
+fn a_mode_change_during_a_teleport_is_refused_and_sent_after_it() {
+    let mut state = arena();
+    let mut outbox = Outbox::new();
+    let start = ac_proto::Inbound::PlayerTeleport(ac_proto::PlayerTeleport {
+        teleport_sequence: 1,
+    });
+    state.apply(&start, &mut outbox, true, super::tests::CLOCKS);
+    outbox.drain().for_each(drop);
+    let refused = with_binding(&mut state, &mut outbox, |b| {
+        call::<calls::CombatEnterMode>(b, &CombatMode::Melee)
+    });
+    assert_eq!(refused.status, CombatStatus::Refused);
+    assert_eq!(
+        refused.notice.as_deref(),
+        Some("You can't change combat mode while teleporting.")
+    );
+    assert_eq!(
+        outbox.drain().count(),
+        0,
+        "nothing goes out in portal space"
+    );
+
+    let mut state = arena();
+    let mut outbox = Outbox::new();
+    let sent = with_binding(&mut state, &mut outbox, |b| {
+        call::<calls::CombatEnterMode>(b, &CombatMode::Melee)
+    });
+    assert_eq!(sent.status, CombatStatus::ModeChangeSent);
+    assert_eq!(sent.notice, None);
+}
+
 // OpenAC `ARefusedPluginAttackSaysWhy`: each cause has its own words.
 #[test]
 fn a_refused_attack_says_why() {
