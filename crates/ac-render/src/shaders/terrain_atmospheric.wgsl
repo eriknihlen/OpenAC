@@ -65,11 +65,15 @@ struct VertexOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) base_uv: vec2<f32>,
     @location(1) lighting: vec3<f32>,
-    @location(2) overlay0: vec4<f32>,
-    @location(3) overlay1: vec4<f32>,
-    @location(4) overlay2: vec4<f32>,
-    @location(5) road0: vec4<f32>,
-    @location(6) road1: vec4<f32>,
+    // Each overlay and road as its packed (texture layer, alpha layer,
+    // rotation, unused), passed unblended: a whole number blended across
+    // a triangle can come back a hair under itself on some GPUs, and the
+    // layer would then round down to the wrong texture.
+    @location(2) @interpolate(flat) overlay0: vec4<u32>,
+    @location(3) @interpolate(flat) overlay1: vec4<u32>,
+    @location(4) @interpolate(flat) overlay2: vec4<u32>,
+    @location(5) @interpolate(flat) road0: vec4<u32>,
+    @location(6) @interpolate(flat) road1: vec4<u32>,
     @location(7) @interpolate(flat) base_layer: f32,
     @location(8) world: vec3<f32>,
     @location(9) @interpolate(flat) full_detail: u32,
@@ -144,11 +148,11 @@ fn vs_main(in: VertexIn) -> VertexOut {
     var base = f32(in.packed0.x);
     if (base >= 254.0) { base = -1.0; }
     out.base_layer = base;
-    out.overlay0 = unpack_overlay(in.packed0.z, in.packed0.w, rot_ovl0, uv);
-    out.overlay1 = unpack_overlay(in.packed1.x, in.packed1.y, rot_ovl1, uv);
-    out.overlay2 = unpack_overlay(in.packed1.z, in.packed1.w, rot_ovl2, uv);
-    out.road0 = unpack_overlay(in.packed2.x, in.packed2.y, rot_rd0, uv);
-    out.road1 = unpack_overlay(in.packed2.z, in.packed2.w, rot_rd1, uv);
+    out.overlay0 = vec4<u32>(in.packed0.z, in.packed0.w, rot_ovl0, 0u);
+    out.overlay1 = vec4<u32>(in.packed1.x, in.packed1.y, rot_ovl1, 0u);
+    out.overlay2 = vec4<u32>(in.packed1.z, in.packed1.w, rot_ovl2, 0u);
+    out.road0 = vec4<u32>(in.packed2.x, in.packed2.y, rot_rd0, 0u);
+    out.road1 = vec4<u32>(in.packed2.z, in.packed2.w, rot_rd1, 0u);
 
     let world = in.position + in.block_offset;
     out.world = world;
@@ -245,14 +249,21 @@ fn landscape_detailed(lit: vec3<f32>, cell_uv: vec2<f32>, full_detail: u32, fade
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    // The layers arrive exact; the alpha-map coordinates come from the
+    // blended cell position.
+    let o0 = unpack_overlay(in.overlay0.x, in.overlay0.y, in.overlay0.z, in.base_uv);
+    let o1 = unpack_overlay(in.overlay1.x, in.overlay1.y, in.overlay1.z, in.base_uv);
+    let o2 = unpack_overlay(in.overlay2.x, in.overlay2.y, in.overlay2.z, in.base_uv);
+    let r0 = unpack_overlay(in.road0.x, in.road0.y, in.road0.z, in.base_uv);
+    let r1 = unpack_overlay(in.road1.x, in.road1.y, in.road1.z, in.base_uv);
     let base_sample = sample_terrain(in.base_uv, max(in.base_layer, 0.0));
     let base_color = select(vec4<f32>(0.0), base_sample, in.base_layer >= 0.0);
 
-    let overlays_all = combine_overlays(in.base_uv, in.overlay0, in.overlay1, in.overlay2);
-    let overlays = select(vec4<f32>(0.0), overlays_all, in.overlay0.z >= 0.0);
+    let overlays_all = combine_overlays(in.base_uv, o0, o1, o2);
+    let overlays = select(vec4<f32>(0.0), overlays_all, o0.z >= 0.0);
 
-    let roads_all = combine_road(in.base_uv, in.road0, in.road1);
-    let roads = select(vec4<f32>(0.0), roads_all, in.road0.z >= 0.0);
+    let roads_all = combine_road(in.base_uv, r0, r1);
+    let roads = select(vec4<f32>(0.0), roads_all, r0.z >= 0.0);
 
     let base_masked = base_color.rgb * ((1.0 - overlays.a) * (1.0 - roads.a));
     let ovl_masked = overlays.rgb * (overlays.a * (1.0 - roads.a));
